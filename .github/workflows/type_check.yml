@@ -1,0 +1,31 @@
+name: type_check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, unlabeled]
+    branches:
+      - main
+
+jobs:
+  type_check:
+    name: check code
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      # mypy resolves gi.*/rawji.* via ignore_missing_imports (see
+      # pyproject), so the native deps aren't needed here. pytest must be
+      # present for mypy to resolve the test imports.
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e . --no-deps
+        pip install mypy pytest
+
+    - name: Analysing the code with mypy
+      run: python -m mypy src tests

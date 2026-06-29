@@ -1,0 +1,34 @@
+/.idea/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Compiled GResource bundles / generated UI
+src/grawji/ui/*.gresource
+
+# Sample / scratch image data (RAFs, JPEGs)
+*.RAF
+*.raf
+/samples/
