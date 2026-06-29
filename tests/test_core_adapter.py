@@ -22,6 +22,7 @@ class FakeCamera:
     """A stand-in for rawji.FujiCamera that records the call sequence."""
 
     def __init__(self, *, connect_ok=True, fail_on=None, profile=None):
+        """Configure connect success, a method to fail on, and a profile."""
         self.calls = []
         self._connect_ok = connect_ok
         self._fail_on = fail_on  # method name that should raise 0x2002
@@ -30,47 +31,53 @@ class FakeCamera:
         self.last_full_resolution = None
 
     def _maybe_fail(self, name):
+        """Raise a 0x2002-style error if this method is the failure point."""
         if self._fail_on == name:
             raise RuntimeError("PTP GetDevicePropValue failed: 0x2002")
 
     def connect(self):
+        """Record the call and report the configured connect result."""
         self.calls.append("connect")
         return self._connect_ok
 
     def send_raf(self, filepath):
+        """Record the RAF upload and maybe fail."""
         self.calls.append(("send_raf", filepath))
         self._maybe_fail("send_raf")
 
     def get_profile(self):
+        """Record the profile read, maybe fail, and return the profile."""
         self.calls.append("get_profile")
         self._maybe_fail("get_profile")
         return self._profile
 
     def set_profile(self, profile):
+        """Record the profile that was written."""
         self.calls.append("set_profile")
         self.set_profiles.append(profile)
 
     def trigger_conversion(self, full_resolution=True):
+        """Record the trigger and the requested resolution."""
         self.calls.append(("trigger_conversion", full_resolution))
         self.last_full_resolution = full_resolution
 
     def wait_for_result(self, timeout=30):
+        """Record the wait and return placeholder JPEG bytes."""
         self.calls.append(("wait_for_result", timeout))
         return b"JPEG"
 
     def disconnect(self):
+        """Record the disconnect."""
         self.calls.append("disconnect")
 
 
 def session_for(camera):
-    """A CameraSession whose factory always returns ``camera``."""
+    """Build a CameraSession whose factory always returns ``camera``."""
     return CameraSession(camera_factory=lambda: camera)
 
 
-# --- rmw_patch -------------------------------------------------------------
-
-
 def test_rmw_patch_sets_film_sim_byte():
+    """rmw_patch writes the film-sim byte and leaves the rest intact."""
     base = bytes(OFFSET_FILM_SIM + 10)
     patched = rmw_patch(base, film_sim_byte=VELVIA_BYTE)
     assert patched[OFFSET_FILM_SIM] == VELVIA_BYTE
@@ -79,36 +86,39 @@ def test_rmw_patch_sets_film_sim_byte():
 
 
 def test_rmw_patch_does_not_mutate_input():
+    """rmw_patch returns a new buffer and never mutates the input."""
     base = bytes(OFFSET_FILM_SIM + 10)
     rmw_patch(base, film_sim_byte=ACROS_BYTE)
     assert base[OFFSET_FILM_SIM] == 0x00
 
 
 def test_rmw_patch_rejects_short_profile():
+    """rmw_patch rejects a profile too short to hold the offset."""
     with pytest.raises(ValueError, match="too short"):
         rmw_patch(bytes(10), film_sim_byte=VELVIA_BYTE)
 
 
-# --- film_simulation_byte / apply_recipe -----------------------------------
-
-
 def test_film_simulation_byte_known():
+    """Known film-simulation names map to their profile bytes."""
     assert film_simulation_byte("Velvia") == VELVIA_BYTE
     assert film_simulation_byte("Acros") == ACROS_BYTE
 
 
 def test_film_simulation_byte_unknown():
+    """An unknown film-simulation name raises ValueError."""
     with pytest.raises(ValueError, match="film simulation"):
         film_simulation_byte("Nope")
 
 
 def test_apply_recipe_patches_film_sim():
+    """apply_recipe patches the recipe's film simulation into the profile."""
     base = bytes(600)
     patched = apply_recipe(base, Recipe(film_simulation="Velvia"))
     assert patched[OFFSET_FILM_SIM] == VELVIA_BYTE
 
 
 def test_apply_recipe_rejects_size_quality_until_wired():
+    """Setting image_size/quality is rejected until those are wired up."""
     base = bytes(600)
     with pytest.raises(NotImplementedError, match="not wired up"):
         apply_recipe(base, Recipe(image_size="L"))
@@ -116,10 +126,8 @@ def test_apply_recipe_rejects_size_quality_until_wired():
         apply_recipe(base, Recipe(quality="FINE"))
 
 
-# --- CameraSession ---------------------------------------------------------
-
-
 def test_open_call_order():
+    """open() connects, sends the RAF, then reads the profile, in order."""
     cam = FakeCamera()
     session = session_for(cam)
     session.open("/tmp/shot.RAF")
@@ -133,6 +141,7 @@ def test_open_call_order():
 
 
 def test_render_does_not_resend_raf():
+    """render() applies the recipe without re-uploading the RAF."""
     cam = FakeCamera()
     session = session_for(cam)
     session.open("/tmp/shot.RAF")
@@ -149,6 +158,7 @@ def test_render_does_not_resend_raf():
 
 
 def test_render_passes_full_resolution_flag():
+    """render() forwards the full_resolution flag to the camera."""
     cam = FakeCamera()
     session = session_for(cam)
     session.open("/tmp/shot.RAF")
@@ -157,12 +167,14 @@ def test_render_passes_full_resolution_flag():
 
 
 def test_render_before_open_raises():
+    """Rendering before opening a RAF raises SessionStateError."""
     session = session_for(FakeCamera())
     with pytest.raises(SessionStateError):
         session.render(Recipe(), full_resolution=False)
 
 
 def test_connect_failure_raises_camera_error():
+    """A failed connect raises CameraError and leaves the session closed."""
     session = session_for(FakeCamera(connect_ok=False))
     with pytest.raises(CameraError):
         session.open("/tmp/shot.RAF")
@@ -170,6 +182,7 @@ def test_connect_failure_raises_camera_error():
 
 
 def test_foreign_raf_raises_and_cleans_up():
+    """A 0x2002 error becomes ForeignRafError and the camera disconnects."""
     cam = FakeCamera(fail_on="get_profile")
     session = session_for(cam)
     with pytest.raises(ForeignRafError):
@@ -179,6 +192,7 @@ def test_foreign_raf_raises_and_cleans_up():
 
 
 def test_close_is_idempotent_and_disconnects():
+    """close() disconnects once and is safe to call again."""
     cam = FakeCamera()
     session = session_for(cam)
     session.open("/tmp/shot.RAF")
@@ -189,6 +203,7 @@ def test_close_is_idempotent_and_disconnects():
 
 
 def test_context_manager_closes():
+    """Leaving the context manager closes the session."""
     cam = FakeCamera()
     with session_for(cam) as session:
         session.open("/tmp/shot.RAF")

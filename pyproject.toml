@@ -33,6 +33,7 @@ grawji = "grawji.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/grawji"]
+exclude = ["**/*.cmb", "**/*.cmb.bak"]
 
 [tool.ruff]
 line-length = 79
@@ -125,9 +126,16 @@ module = ["gi.*", "rawji.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["grawji.app", "grawji.window", "grawji.__main__"]
+module = [
+  "grawji.app",
+  "grawji.window",
+  "grawji.filmstrip",
+  "grawji.__main__",
+]
 disallow_subclassing_any = false
 warn_return_any = false
+# @Gtk.Template / @Gtk.Template.Callback are untyped (gi) decorators.
+disable_error_code = ["untyped-decorator", "misc"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
@@ -153,6 +161,7 @@ omit = [
   "**/__main__.py",
   "src/grawji/app.py",
   "src/grawji/window.py",
+  "src/grawji/filmstrip.py",
   "src/grawji/ui/**",
 ]
 

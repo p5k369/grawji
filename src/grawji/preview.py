@@ -1,13 +1,4 @@
-"""Preview pipeline - run camera ops off the GTK main thread.
-
-Camera operations block for ~1s. Running them on the GTK main thread would
-freeze the UI, so :class:`CameraWorker` runs them on a single background
-thread and delivers results via a ``dispatch`` callable - the GTK layer
-passes ``GLib.idle_add`` so the callbacks run back on the main loop.
-
-This module stays free of GTK/GLib - ``dispatch`` is injected - so it is
-unit-testable without a display.
-"""
+"""Preview pipeline - run camera ops off the GTK main thread."""
 
 from __future__ import annotations
 
@@ -125,6 +116,7 @@ class CameraWorker:
         *,
         coalesce: bool,
     ) -> None:
+        """Queue a job, coalescing a trailing render when asked."""
         with self._cond:
             # A new render replaces a trailing render that has not yet
             # started - the latest recipe is the only one worth rendering.
@@ -135,6 +127,7 @@ class CameraWorker:
             self._cond.notify()
 
     def _loop(self) -> None:
+        """Process queued jobs on the worker thread until stopped."""
         while True:
             with self._cond:
                 while not self._queue and self._running:
@@ -145,6 +138,7 @@ class CameraWorker:
             self._run(job)
 
     def _run(self, job: _Job) -> None:
+        """Run one job and dispatch its result or error."""
         task, on_done, on_error, _ = job
         try:
             result = task()
