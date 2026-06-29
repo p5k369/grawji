@@ -26,6 +26,9 @@ dev = [
   "pytest-cov",
   "pytest-github-actions-annotate-failures",
   "pre-commit",
+  # IDE type stubs for PyGObject (Gtk/Adw/GExiv2/...). Improves editor code
+  # insight; not used by mypy here (the system gi shadows the stub package).
+  "pygobject-stubs",
 ]
 
 [project.scripts]

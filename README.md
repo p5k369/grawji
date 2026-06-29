@@ -39,7 +39,7 @@ render-many** workflow:
   `rmw_patch(base, recipe) → set_profile → trigger_conversion → wait_for_result`
 - **Quit**: `disconnect`
 
-> Order matters: `send_raf` *before* `get_profile`; profile-set *before*
+> Order matters: `send_raf` *before* `get_profile`, profile-set *before*
 > trigger. `send_raf` runs only on open, never per slider move.
 
 Camera calls block for seconds, so they run on a worker thread with results
@@ -49,7 +49,7 @@ time, and slider previews are debounced.
 
 ## Development
 
-PyGObject and GTK4 are **not** pip-installable cleanly — they come from your
+PyGObject and GTK4 are **not** pip-installable cleanly, they come from your
 distribution. Install them (plus the USB stack rawji uses) as system
 packages, then build a venv that can *see* them with `--system-site-packages`:
 
@@ -72,7 +72,7 @@ python -m grawji
 Connect the camera over USB, open a folder of RAFs, pick one from the
 filmstrip, dial in a recipe and watch the preview update, then **Export**.
 
-> The RAF must come from the **connected camera body** — Fuji cameras only
+> The RAF must come from the **connected camera body**. Fuji cameras only
 > convert their own files, so a foreign RAF fails with PTP `0x2002`. Cameras
 > are identified by USB product id; grawji targets the ids rawji already
 > knows, and others can be added in your rawji checkout.
@@ -90,8 +90,8 @@ System packages by distribution (names vary, USB stack pulled in via rawji):
 ### Packaging
 
 `pyproject.toml` `[project]` metadata (PEP 621) is the single source of
-truth, built with **hatchling** (PEP 517). No lockfile / `requirements.txt`
-— distros read the metadata and substitute their own dependency versions.
+truth, built with **hatchling** (PEP 517). No lockfile / `requirements.txt`.
+Distros read the metadata and substitute their own dependency versions.
 Runtime deps (`PyGObject`, `rawji`) are declared abstractly so each distro's
 packaging (Debian `pybuild`, Fedora `%pyproject` macros, Arch PKGBUILD,
 Gentoo ebuild, …) maps them to its own system packages.
@@ -106,7 +106,7 @@ Gentoo ebuild, …) maps them to its own system packages.
 grawji stands entirely on [rawji](https://github.com/pinpox/rawji) by
 **[pinpox](https://github.com/pinpox)**, who did the hard work of talking to
 the camera's conversion engine over USB and exposing it as a clean Python
-library. grawji is just a GTK4 face on top of that. Thank you — and if you
+library. grawji is just a GTK4 face on top of that. Thank you. And if you
 find grawji useful, please go star rawji.
 
 ## License
