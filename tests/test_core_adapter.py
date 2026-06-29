@@ -1,6 +1,9 @@
 """Tests for the rawji adapter (RMW helpers + CameraSession)."""
 
+import struct
+
 import pytest
+from rawji.fuji_profile import encode_tone_value
 
 from grawji.core import (
     OFFSET_FILM_SIM,
@@ -10,12 +13,25 @@ from grawji.core import (
     SessionStateError,
     apply_recipe,
     film_simulation_byte,
+    recipe_from_profile,
     rmw_patch,
 )
 from grawji.recipe import Recipe
 
 VELVIA_BYTE = 2
 ACROS_BYTE = 12
+
+# Profile offsets (PROFILE_PARAMS_OFFSET 513 + index*4) per rawji's layout.
+OFF_DYNAMIC_RANGE = 533
+OFF_WB_SHOOTCOND = 553
+OFF_WHITE_BALANCE = 557
+OFF_HIGHLIGHTS = 573
+OFF_COLOR = 581
+
+
+def _u32(profile, offset):
+    """Read the little-endian uint32 parameter at ``offset``."""
+    return struct.unpack("<I", profile[offset : offset + 4])[0]
 
 
 class FakeCamera:
@@ -106,7 +122,7 @@ def test_film_simulation_byte_known():
 
 def test_film_simulation_byte_unknown():
     """An unknown film-simulation name raises ValueError."""
-    with pytest.raises(ValueError, match="film simulation"):
+    with pytest.raises(ValueError, match=r"film simulation"):
         film_simulation_byte("Nope")
 
 
@@ -117,13 +133,76 @@ def test_apply_recipe_patches_film_sim():
     assert patched[OFFSET_FILM_SIM] == VELVIA_BYTE
 
 
-def test_apply_recipe_rejects_size_quality_until_wired():
-    """Setting image_size/quality is rejected until those are wired up."""
+def test_apply_recipe_patches_enums():
+    """White balance and dynamic range use rawji's enum profile values."""
     base = bytes(600)
-    with pytest.raises(NotImplementedError, match="not wired up"):
-        apply_recipe(base, Recipe(image_size="L"))
-    with pytest.raises(NotImplementedError, match="not wired up"):
-        apply_recipe(base, Recipe(quality="FINE"))
+    patched = apply_recipe(
+        base, Recipe(white_balance="Daylight", dynamic_range="DR400")
+    )
+    assert _u32(patched, OFF_WHITE_BALANCE) == 4  # WhiteBalance.Daylight
+    assert _u32(patched, OFF_WB_SHOOTCOND) == 2  # gating: use manual WB
+    assert _u32(patched, OFF_DYNAMIC_RANGE) == 3  # DynamicRange.DR400
+
+
+def test_apply_recipe_asshot_leaves_white_balance_untouched():
+    """AsShot does not write the WB fields (keeps the RAF's own WB)."""
+    base = bytearray(600)
+    struct.pack_into("<I", base, OFF_WB_SHOOTCOND, 1)  # native as-shot
+    struct.pack_into("<I", base, OFF_WHITE_BALANCE, 7)  # arbitrary marker
+    patched = apply_recipe(bytes(base), Recipe(white_balance="AsShot"))
+    assert _u32(patched, OFF_WB_SHOOTCOND) == 1
+    assert _u32(patched, OFF_WHITE_BALANCE) == 7
+
+
+def test_apply_recipe_encodes_tone_values():
+    """Tone params are scaled by encode_tone_value; negatives wrap to u32."""
+    base = bytes(600)
+    patched = apply_recipe(base, Recipe(highlights=2, color=-4))
+    assert _u32(patched, OFF_HIGHLIGHTS) == encode_tone_value(2)
+    expected_color = (1 << 32) + encode_tone_value(-4)
+    assert _u32(patched, OFF_COLOR) == expected_color
+
+
+def test_apply_recipe_validates_range():
+    """An out-of-range tone value is rejected by rawji.validate_params."""
+    with pytest.raises(ValueError, match="Highlights out of range"):
+        apply_recipe(bytes(600), Recipe(highlights=10))
+
+
+def test_apply_recipe_rejects_unknown_names():
+    """Unknown white-balance / dynamic-range names raise ValueError."""
+    with pytest.raises(ValueError, match=r"white balance"):
+        apply_recipe(bytes(600), Recipe(white_balance="Nope"))
+    with pytest.raises(ValueError, match=r"dynamic range"):
+        apply_recipe(bytes(600), Recipe(dynamic_range="DR999"))
+
+
+def test_apply_recipe_rejects_short_profile():
+    """A profile too short for a parameter offset is rejected."""
+    with pytest.raises(ValueError, match="too short"):
+        apply_recipe(bytes(100), Recipe(film_simulation="Velvia"))
+
+
+def test_recipe_round_trips_through_profile():
+    """recipe_from_profile is the exact inverse of apply_recipe."""
+    recipe = Recipe(
+        film_simulation="Velvia",
+        white_balance="Daylight",
+        dynamic_range="DR400",
+        highlights=2,
+        shadows=-1,
+        color=3,
+        sharpness=-2,
+    )
+    profile = apply_recipe(bytes(600), recipe)
+    assert recipe_from_profile(profile) == recipe
+
+
+def test_recipe_from_profile_falls_back_on_unknown_enum():
+    """An enum value not in rawji's enum falls back to the default."""
+    base = bytearray(apply_recipe(bytes(600), Recipe()))
+    struct.pack_into("<I", base, OFF_WHITE_BALANCE, 0xABCD)  # not a WB value
+    assert recipe_from_profile(bytes(base)).white_balance == "AsShot"
 
 
 def test_open_call_order():

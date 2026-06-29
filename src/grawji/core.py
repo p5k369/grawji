@@ -16,20 +16,35 @@ Order matters: ``send_raf`` *before* ``get_profile``; profile-set
 from __future__ import annotations
 
 import contextlib
+import struct
 import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import rawji
+from rawji.fuji_profile import (
+    INDEX_TO_PARAM,
+    PROFILE_PARAMS_OFFSET,
+    TONE_PARAMS,
+    decode_tone_value,
+    encode_tone_value,
+)
 
 from grawji.recipe import Recipe
 
-# Verified profile byte offsets (X100F / X-T3). Do not add unverified
-# offsets here without a passing mini-test - see the project notes.
 OFFSET_FILM_SIM = 541
-OFFSET_IMAGE_SIZE = 521
-OFFSET_QUALITY = 525
+
+# rawji parameter name -> byte offset in the native profile, derived from
+# rawji's layout (PROFILE_PARAMS_OFFSET + index * 4).
+_index_items = (
+    INDEX_TO_PARAM.items()
+    if isinstance(INDEX_TO_PARAM, dict)
+    else enumerate(INDEX_TO_PARAM)
+)
+_PARAM_OFFSETS = {
+    name: PROFILE_PARAMS_OFFSET + index * 4 for index, name in _index_items
+}
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
@@ -80,12 +95,32 @@ def rmw_patch(base: bytes, film_sim_byte: int) -> bytes:
     return bytes(out)
 
 
-def film_simulation_byte(name: str) -> int:
-    """Return the profile byte for a film-simulation name.
+def _enum_value(enum_cls: Any, name: str, kind: str) -> int:
+    """Return the integer profile value for an enum member name.
+
+    Uses exact member lookup (``enum_cls[name]``) rather than rawji's
+    ``from_name``, which mangles camelCase names like ``"AsShot"``.
 
     Args:
-        name: Film-simulation name, e.g. ``"Velvia"`` (resolved by
-            rawji's ``FilmSimulation.from_name``).
+        enum_cls: A rawji IntEnum (FilmSimulation / WhiteBalance / ...).
+        name: The exact enum member name (as in ``e.name``).
+        kind: Human-readable kind, for error messages.
+
+    Raises:
+        ValueError: If ``name`` is not a member of ``enum_cls``.
+    """
+    try:
+        return int(enum_cls[name])
+    except KeyError as e:
+        msg = f"unknown {kind}: {name}"
+        raise ValueError(msg) from e
+
+
+def film_simulation_byte(name: str) -> int:
+    """Return the profile byte for a film-simulation member name.
+
+    Args:
+        name: Film-simulation member name, e.g. ``"Velvia"``.
 
     Returns:
         The byte value written at :data:`OFFSET_FILM_SIM`.
@@ -93,36 +128,130 @@ def film_simulation_byte(name: str) -> int:
     Raises:
         ValueError: If the name is not a known film simulation.
     """
-    return int(rawji.FilmSimulation.from_name(name))
+    return _enum_value(rawji.FilmSimulation, name, "film simulation")
+
+
+def recipe_changes(recipe: Recipe) -> dict[str, int]:
+    """Map a recipe to rawji profile parameter values (validated).
+
+    Args:
+        recipe: The recipe to translate.
+
+    Returns:
+        A dict of rawji parameter name -> integer value. Tone values are
+        the raw user values here; encoding happens in :func:`apply_recipe`.
+
+    Raises:
+        ValueError: If a name is unknown or a tone value is out of range.
+    """
+    film_sim = _enum_value(
+        rawji.FilmSimulation, recipe.film_simulation, "film simulation"
+    )
+    rawji.validate_params(
+        film_sim=film_sim,
+        highlights=recipe.highlights,
+        shadows=recipe.shadows,
+        color=recipe.color,
+        sharpness=recipe.sharpness,
+    )
+    changes = {
+        "FilmSimulation": film_sim,
+        "DynamicRange": _enum_value(
+            rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
+        ),
+        "HighlightTone": recipe.highlights,
+        "ShadowTone": recipe.shadows,
+        "Color": recipe.color,
+        "Sharpness": recipe.sharpness,
+    }
+    # "AsShot" leaves the RAF's own white balance untouched.
+    if recipe.white_balance != "AsShot":
+        changes["WBShootCond"] = 2
+        changes["WhiteBalance"] = _enum_value(
+            rawji.WhiteBalance, recipe.white_balance, "white balance"
+        )
+    return changes
 
 
 def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
     """Apply a recipe to a native camera profile (read-modify-write).
 
-    Patches only verified bytes, leaving the RAF's own recipe intact.
+    Patches only the recipe's parameters in place using rawji's profile
+    layout, leaving the RAF's own values for everything else intact.
 
     Args:
         base: Profile bytes read from the camera.
         recipe: The recipe to apply.
 
     Returns:
-        A new profile with the recipe's film simulation patched in.
+        A new profile with the recipe's parameters patched in.
 
     Raises:
-        NotImplementedError: If the recipe sets ``image_size`` or
-            ``quality`` - the offsets (521/525) are known but the byte
-            encoding is not yet verified, so patching them is not wired
-            up.
-        ValueError: If the film-simulation name is unknown or the
-            profile is too short.
+        ValueError: If a name is unknown, a value is out of range, or the
+            profile is too short to hold a parameter's offset.
     """
-    if recipe.image_size is not None or recipe.quality is not None:
-        msg = (
-            "image_size/quality patching is not wired up yet "
-            "(offsets 521/525 known, byte encoding unverified)"
-        )
-        raise NotImplementedError(msg)
-    return rmw_patch(base, film_simulation_byte(recipe.film_simulation))
+    out = bytearray(base)
+    for name, value in recipe_changes(recipe).items():
+        offset = _PARAM_OFFSETS[name]
+        if offset + 4 > len(out):
+            msg = f"profile too short ({len(base)} bytes) for {name}"
+            raise ValueError(msg)
+        encoded = encode_tone_value(value) if name in TONE_PARAMS else value
+        if encoded < 0:
+            encoded = (1 << 32) + encoded
+        struct.pack_into("<I", out, offset, encoded)
+    return bytes(out)
+
+
+def _enum_name(enum_cls: Any, value: int, fallback: str) -> str:
+    """Return the member name for an enum value, or ``fallback``."""
+    try:
+        return str(enum_cls(value).name)
+    except ValueError:
+        return fallback
+
+
+def recipe_from_profile(base: bytes) -> Recipe:
+    """Decode a recipe from a native camera profile (inverse of apply).
+
+    Reads the recipe parameters back out of the profile the camera
+    reported, so the UI can start from the image's own in-camera settings.
+    Values that don't fit (unknown enum value, too-short profile) fall
+    back to the :class:`Recipe` defaults.
+
+    Args:
+        base: Profile bytes read from the camera.
+
+    Returns:
+        The recipe encoded in the profile.
+    """
+    defaults = Recipe()
+
+    def signed(name: str, fallback: int = 0) -> int:
+        offset = _PARAM_OFFSETS[name]
+        if offset + 4 > len(base):
+            return fallback
+        return int(struct.unpack("<i", base[offset : offset + 4])[0])
+
+    return Recipe(
+        film_simulation=_enum_name(
+            rawji.FilmSimulation,
+            signed("FilmSimulation", 1),
+            defaults.film_simulation,
+        ),
+        white_balance=_enum_name(
+            rawji.WhiteBalance, signed("WhiteBalance"), defaults.white_balance
+        ),
+        dynamic_range=_enum_name(
+            rawji.DynamicRange,
+            signed("DynamicRange", 1),
+            defaults.dynamic_range,
+        ),
+        highlights=decode_tone_value(signed("HighlightTone")),
+        shadows=decode_tone_value(signed("ShadowTone")),
+        color=decode_tone_value(signed("Color")),
+        sharpness=decode_tone_value(signed("Sharpness")),
+    )
 
 
 class CameraSession:
@@ -165,6 +294,11 @@ class CameraSession:
     def raf_path(self) -> Path | None:
         """Path of the currently open RAF, if any."""
         return self._raf_path
+
+    @property
+    def profile(self) -> bytes | None:
+        """The native profile read from the camera on open, if any."""
+        return self._base_profile
 
     def open(self, raf_path: str | Path) -> None:
         """Connect and load a RAF (slow; call once per image).

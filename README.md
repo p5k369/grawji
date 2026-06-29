@@ -8,6 +8,26 @@ The name is **g**(tk) + **rawji**. rawji is command-line only, grawji makes
 *interactive* work on the look practical: set a recipe, see a live preview,
 export — instead of typing CLI flags.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="grawji main window: original + EXIF on the
+  left, live preview in the centre, recipe controls on the right, filmstrip
+  along the bottom" width="640">
+</p>
+
+## Features
+
+- **Live preview** through the camera's own conversion engine — what you see
+  is what the camera would write.
+- **Full recipe control**: film simulation, white balance, dynamic range,
+  highlights, shadows, color and sharpness.
+- **Start from the image's own settings** (toggleable) or keep a sticky recipe
+  and apply it across shots.
+- **Presets**: save, apply, import and export named recipes.
+- **Filmstrip** browser with EXIF info for the selected RAF.
+- **Export** single images or batch-export a whole folder at full resolution.
+- Keyboard shortcuts, pan/zoom with a darktable-style background, and a
+  remembered window size and last folder.
+
 ## Architecture
 
 rawji is imported as a library. grawji is a GTK4 UI plus a thin adapter
@@ -26,22 +46,6 @@ Camera calls block for seconds, so they run on a worker thread with results
 marshalled back via `GLib.idle_add`. Only one camera op is in flight at a
 time, and slider previews are debounced.
 
-## Layout
-
-```
-src/grawji/
-  __main__.py   # python -m grawji
-  app.py        # Gtk.Application
-  window.py     # main window
-  core.py       # thin adapter around rawji (RMW, offsets)
-  recipe.py     # pure recipe data model (testable)
-  preview.py    # preview vs. full-res render pipeline
-  ui/           # GTK .ui templates
-tests/          # pure-module tests (recipe, adapter)
-```
-
-The value is in the pure modules; GTK widgets are view glue and are not
-unit-tested.
 
 ## Development
 
@@ -58,6 +62,20 @@ pre-commit install
 
 Without `--system-site-packages` the venv can't `import gi` and the app
 won't start.
+
+### Running
+
+```sh
+python -m grawji
+```
+
+Connect the camera over USB, open a folder of RAFs, pick one from the
+filmstrip, dial in a recipe and watch the preview update, then **Export**.
+
+> The RAF must come from the **connected camera body** — Fuji cameras only
+> convert their own files, so a foreign RAF fails with PTP `0x2002`. Cameras
+> are identified by USB product id; grawji targets the ids rawji already
+> knows, and others can be added in your rawji checkout.
 
 System packages by distribution (names vary, USB stack pulled in via rawji):
 
@@ -78,10 +96,6 @@ Runtime deps (`PyGObject`, `rawji`) are declared abstractly so each distro's
 packaging (Debian `pybuild`, Fedora `%pyproject` macros, Arch PKGBUILD,
 Gentoo ebuild, …) maps them to its own system packages.
 
-Tooling: **ruff**
-(line-length 79, py311, google docstrings), **black** (`-l 79`), **mypy**
-strict, **pytest**, all wired through **pre-commit** (with
-`no-commit-to-branch` on `main`).
 
 > USB: most distributions already grant non-root access to the camera via
 > `uaccess`/`plugdev`. If yours doesn't, add a udev rule for the Fuji vendor
