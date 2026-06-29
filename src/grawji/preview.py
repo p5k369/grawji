@@ -23,11 +23,11 @@ def _call_now(callback: Callable[[], None]) -> None:
 
 
 class CameraWorker:
-    """Runs :class:`~grawji.core.CameraSession` ops on a worker thread.
+    """Runs ~grawji.core.CameraSession ops on a worker thread.
 
-    Submit ``open`` / ``render`` from the GTK main thread; the work runs
-    on a background thread and the ``on_done`` / ``on_error`` callbacks
-    are handed back through ``dispatch``. A render queued behind another
+    Submit open / render from the GTK main thread; the work runs
+    on a background thread and the on_done / on_error callbacks
+    are handed back through dispatch. A render queued behind another
     not-yet-started render replaces it (coalescing), so rapid requests do
     not pile up; opens always run.
 
@@ -45,7 +45,7 @@ class CameraWorker:
         Args:
             session: The camera session to drive.
             dispatch: Schedules a callback on the UI thread. Defaults to
-                running it inline; the GTK layer passes ``GLib.idle_add``.
+                running it inline; the GTK layer passes GLib.idle_add.
         """
         self._session = session
         self._dispatch = dispatch
@@ -160,7 +160,7 @@ class CameraWorker:
         except Exception as exc:  # delivered to on_error, not swallowed
             if on_error is not None:
                 # Bind to a local that outlives the except scope (Python
-                # deletes `exc` at block end) so the deferred lambda is safe.
+                # deletes exc at block end) so the deferred lambda is safe.
                 on_err, error = on_error, exc
                 self._dispatch(lambda: on_err(error))
             return

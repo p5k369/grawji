@@ -29,7 +29,7 @@ def decode_presets(data: object) -> dict[str, Recipe]:
 
 
 def load_presets(path: Path) -> dict[str, Recipe]:
-    """Load presets from ``path``, returning ``{}`` if unreadable."""
+    """Load presets from path, returning {} if unreadable."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -38,7 +38,7 @@ def load_presets(path: Path) -> dict[str, Recipe]:
 
 
 def save_presets(presets: dict[str, Recipe], path: Path) -> None:
-    """Write ``presets`` to ``path`` as JSON, creating parent dirs."""
+    """Write presets to path as JSON, creating parent dirs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = {name: recipe.to_dict() for name, recipe in presets.items()}
     path.write_text(json.dumps(encoded, indent=2), encoding="utf-8")

@@ -8,7 +8,7 @@ _Formatter = Callable[[str], str]
 
 
 def _ratio(raw: str) -> float | None:
-    """Parse an EXIF rational ``"a/b"`` (or plain number) into a float."""
+    """Parse an EXIF rational "a/b" (or plain number) into a float."""
     try:
         if "/" in raw:
             num, den = raw.split("/", 1)
@@ -20,13 +20,13 @@ def _ratio(raw: str) -> float | None:
 
 
 def _aperture(raw: str) -> str:
-    """Format an f-number rational, e.g. ``"280/100"`` -> ``"f/2.8"``."""
+    """Format an f-number rational, e.g. "280/100" -> "f/2.8"."""
     value = _ratio(raw)
     return f"f/{value:g}" if value is not None else raw
 
 
 def _shutter(raw: str) -> str:
-    """Format a shutter speed, e.g. ``"10/3400"`` -> ``"1/340 s"``."""
+    """Format a shutter speed, e.g. "10/3400" -> "1/340 s"."""
     value = _ratio(raw)
     if value is None or value <= 0:
         return raw
@@ -36,13 +36,13 @@ def _shutter(raw: str) -> str:
 
 
 def _focal(raw: str) -> str:
-    """Format a focal length, e.g. ``"3500/100"`` -> ``"35 mm"``."""
+    """Format a focal length, e.g. "3500/100" -> "35 mm"."""
     value = _ratio(raw)
     return f"{value:g} mm" if value is not None else raw
 
 
 def _iso(raw: str) -> str:
-    """Prefix an ISO value, e.g. ``"320"`` -> ``"ISO 320"``."""
+    """Prefix an ISO value, e.g. "320" -> "ISO 320"."""
     return f"ISO {raw}"
 
 
@@ -66,7 +66,7 @@ def format_exif(raw: dict[str, str]) -> list[tuple[str, str]]:
             empty tags are skipped.
 
     Returns:
-        A list of ``(label, value)`` pairs in display order.
+        A list of (label, value) pairs in display order.
     """
     rows: list[tuple[str, str]] = []
     for label, tag, formatter in EXIF_FIELDS:

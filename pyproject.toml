@@ -77,6 +77,7 @@ ignore = ["D212", "RUF012", "PLR2004", "SIM300", "B008", "SIM222", "PGH003", "E7
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]  # undocumented-public-package
+"scripts/**" = ["D103", "T201"]  # operational hardware utilities
 "tests/**" = [
   "D100",   # undocumented-public-module
   "D101",   # undocumented-public-class
@@ -122,7 +123,7 @@ check_untyped_defs = true
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-module = ["gi.*", "rawji.*", "usb.*"]
+module = ["gi.*", "rawji.*", "usb.*", "pytest"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -130,6 +131,7 @@ module = [
   "grawji.app",
   "grawji.window",
   "grawji.filmstrip",
+  "grawji.widgets",
   "grawji.__main__",
 ]
 disallow_subclassing_any = false

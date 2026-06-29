@@ -56,7 +56,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self.set_min_content_height(thumb_height + 16)
 
     def scan(self, folder: str) -> None:
-        """Populate the strip with the RAF files in ``folder``."""
+        """Populate the strip with the RAF files in folder."""
         self._scan_id += 1
         scan_id = self._scan_id
         self._clear()
@@ -106,7 +106,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._buttons = []
 
     def _set_current(self, index: int) -> None:
-        """Mark ``index`` as selected and update the highlight."""
+        """Mark index as selected and update the highlight."""
         for pos, button in enumerate(self._buttons):
             if pos == index:
                 button.add_css_class("thumb-selected")
@@ -117,7 +117,7 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._scroll_into_view(self._buttons[index])
 
     def _scroll_into_view(self, button: Gtk.Button) -> None:
-        """Scroll the strip horizontally so ``button`` is visible."""
+        """Scroll the strip horizontally so button is visible."""
         adj = self.get_hadjustment()
         ok, rect = button.compute_bounds(self._box)
         if not ok:
@@ -137,7 +137,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._on_select(path)
 
     def select_relative(self, delta: int) -> None:
-        """Select the image ``delta`` positions away (for keyboard nav)."""
+        """Select the image delta positions away (for keyboard nav)."""
         if not self._paths:
             return
         if self._current < 0:
