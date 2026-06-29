@@ -122,6 +122,21 @@ def test_render_error_routed_to_on_error():
     assert sess.rendered == []
 
 
+def test_submit_runs_arbitrary_task():
+    """submit() runs a non-coalesced task and delivers its result."""
+    sess = FakeSession()
+    done = threading.Event()
+    results = []
+
+    worker = CameraWorker(sess)
+    worker.start()
+    worker.submit(lambda: "batch-done", on_done=notify(done, results))
+    assert done.wait(timeout=5)
+    worker.stop()
+
+    assert results == ["batch-done"]
+
+
 def test_context_manager_starts_and_closes():
     """The context manager starts the worker and closes on exit."""
     sess = FakeSession()

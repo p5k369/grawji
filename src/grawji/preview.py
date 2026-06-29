@@ -97,6 +97,21 @@ class CameraWorker:
             coalesce=True,
         )
 
+    def submit(
+        self,
+        task: Callable[[], Any],
+        *,
+        on_done: OnDone | None = None,
+        on_error: OnError | None = None,
+    ) -> None:
+        """Queue an arbitrary camera task (not coalesced).
+
+        For long sequential jobs (e.g. batch export) that drive the
+        session directly. Runs on the worker thread, serialised with all
+        other camera operations.
+        """
+        self._submit(task, on_done, on_error, coalesce=False)
+
     def stop(self, *, close_session: bool = True) -> None:
         """Stop the worker thread and (by default) close the session."""
         with self._cond:

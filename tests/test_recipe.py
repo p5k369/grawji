@@ -4,16 +4,28 @@ from grawji.recipe import Recipe
 
 
 def test_defaults():
-    """A fresh recipe defaults to Provia and inherits size/quality."""
+    """A fresh recipe defaults to neutral Provia / AsShot / DR100."""
     recipe = Recipe()
     assert recipe.film_simulation == "Provia"
-    assert recipe.image_size is None
-    assert recipe.quality is None
+    assert recipe.white_balance == "AsShot"
+    assert recipe.dynamic_range == "DR100"
+    assert recipe.highlights == 0
+    assert recipe.shadows == 0
+    assert recipe.color == 0
+    assert recipe.sharpness == 0
 
 
 def test_roundtrip_dict():
     """to_dict/from_dict round-trips a fully-populated recipe."""
-    recipe = Recipe(film_simulation="Velvia", image_size="L", quality="FINE")
+    recipe = Recipe(
+        film_simulation="Velvia",
+        white_balance="Daylight",
+        dynamic_range="DR400",
+        highlights=2,
+        shadows=-1,
+        color=3,
+        sharpness=-2,
+    )
     assert Recipe.from_dict(recipe.to_dict()) == recipe
 
 

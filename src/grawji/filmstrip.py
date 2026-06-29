@@ -42,6 +42,9 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._dispatch = dispatch
         self._thumb_height = thumb_height
         self._scan_id = 0
+        self._paths: list[str] = []
+        self._buttons: list[Gtk.Button] = []
+        self._current = -1
 
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         self._box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -62,6 +65,9 @@ class FilmStrip(Gtk.ScrolledWindow):
         paths = sorted(
             {p for pat in ("*.RAF", "*.raf") for p in base.glob(pat)}
         )
+        self._paths = [str(p) for p in paths]
+        self._buttons = []
+        self._current = -1
         pictures = []
         for path in paths:
             picture = Gtk.Picture()
@@ -70,9 +76,11 @@ class FilmStrip(Gtk.ScrolledWindow):
             )
             button = Gtk.Button(child=picture)
             button.add_css_class("flat")
+            button.add_css_class("thumb")
             button.set_tooltip_text(path.name)
             button.connect("clicked", partial(self._on_clicked, str(path)))
             self._box.append(button)
+            self._buttons.append(button)
             pictures.append((str(path), picture))
 
         if pictures:
@@ -83,6 +91,11 @@ class FilmStrip(Gtk.ScrolledWindow):
                 daemon=True,
             ).start()
 
+    @property
+    def paths(self) -> list[str]:
+        """The RAF paths currently shown, in display order."""
+        return list(self._paths)
+
     def _clear(self) -> None:
         """Remove all thumbnails currently in the strip."""
         child = self._box.get_first_child()
@@ -90,10 +103,50 @@ class FilmStrip(Gtk.ScrolledWindow):
             nxt = child.get_next_sibling()
             self._box.remove(child)
             child = nxt
+        self._buttons = []
+
+    def _set_current(self, index: int) -> None:
+        """Mark ``index`` as selected and update the highlight."""
+        for pos, button in enumerate(self._buttons):
+            if pos == index:
+                button.add_css_class("thumb-selected")
+            else:
+                button.remove_css_class("thumb-selected")
+        self._current = index
+        if 0 <= index < len(self._buttons):
+            self._scroll_into_view(self._buttons[index])
+
+    def _scroll_into_view(self, button: Gtk.Button) -> None:
+        """Scroll the strip horizontally so ``button`` is visible."""
+        adj = self.get_hadjustment()
+        ok, rect = button.compute_bounds(self._box)
+        if not ok:
+            return
+        left, right = rect.origin.x, rect.origin.x + rect.size.width
+        page = adj.get_page_size()
+        value = adj.get_value()
+        if left < value:
+            adj.set_value(left)
+        elif right > value + page:
+            adj.set_value(right - page)
 
     def _on_clicked(self, path: str, _button: Gtk.Button) -> None:
         """Notify the listener that a thumbnail was clicked."""
+        if path in self._paths:
+            self._set_current(self._paths.index(path))
         self._on_select(path)
+
+    def select_relative(self, delta: int) -> None:
+        """Select the image ``delta`` positions away (for keyboard nav)."""
+        if not self._paths:
+            return
+        if self._current < 0:
+            index = 0
+        else:
+            index = max(0, min(self._current + delta, len(self._paths) - 1))
+        if index != self._current:
+            self._set_current(index)
+            self._on_select(self._paths[index])
 
     def _load_thumbnails(
         self, pictures: list[tuple[str, Any]], scan_id: int
