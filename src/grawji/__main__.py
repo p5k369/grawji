@@ -11,7 +11,7 @@ def main(argv: list[str] | None = None) -> int:
     """Launch the grawji GTK application.
 
     Args:
-        argv: Command-line arguments. Defaults to ``sys.argv``.
+        argv: Command-line arguments. Defaults to sys.argv.
 
     Returns:
         The process exit code.

@@ -15,7 +15,7 @@ from grawji.window import MainWindow  # noqa: E402
 class GrawjiApp(Adw.Application):
     """The grawji application.
 
-    Built on ``Adw.Application`` so it follows the system light/dark
+    Built on Adw.Application so it follows the system light/dark
     colour scheme and accent colour via libadwaita's style manager.
     """
 

@@ -3,6 +3,7 @@
 import struct
 
 import pytest
+from rawji.fuji_enums import ev_to_int
 from rawji.fuji_profile import encode_tone_value
 
 from grawji.core import (
@@ -22,9 +23,14 @@ VELVIA_BYTE = 2
 ACROS_BYTE = 12
 
 # Profile offsets (PROFILE_PARAMS_OFFSET 513 + index*4) per rawji's layout.
+OFF_EXPOSURE = 529
 OFF_DYNAMIC_RANGE = 533
+OFF_GRAIN = 545
 OFF_WB_SHOOTCOND = 553
 OFF_WHITE_BALANCE = 557
+OFF_WB_SHIFT_R = 561
+OFF_WB_SHIFT_B = 565
+OFF_WB_COLOR_TEMP = 569
 OFF_HIGHLIGHTS = 573
 OFF_COLOR = 581
 
@@ -177,6 +183,43 @@ def test_apply_recipe_rejects_unknown_names():
         apply_recipe(bytes(600), Recipe(dynamic_range="DR999"))
 
 
+def test_apply_recipe_patches_exposure_and_grain():
+    """Exposure uses EV encoding; grain uses its enum value."""
+    base = bytes(600)
+    patched = apply_recipe(base, Recipe(exposure=1.0, grain="Strong"))
+    assert _u32(patched, OFF_EXPOSURE) == ev_to_int(1.0)  # +1 EV -> 1000
+    assert _u32(patched, OFF_GRAIN) == 3  # GrainEffect.Strong
+
+
+def test_apply_recipe_negative_exposure_wraps():
+    """Negative exposure wraps to unsigned like the tone params."""
+    base = bytes(600)
+    patched = apply_recipe(base, Recipe(exposure=-1.0))
+    assert _u32(patched, OFF_EXPOSURE) == (1 << 32) + ev_to_int(-1.0)
+
+
+def test_apply_recipe_patches_wb_shift():
+    """WB shift R/B are written raw, with negatives wrapped to u32."""
+    base = bytes(600)
+    patched = apply_recipe(base, Recipe(wb_shift_r=9, wb_shift_b=-9))
+    assert _u32(patched, OFF_WB_SHIFT_R) == 9
+    assert _u32(patched, OFF_WB_SHIFT_B) == (1 << 32) - 9
+
+
+def test_color_temp_only_written_in_temperature_mode():
+    """Colour temp is written only when white balance is Temperature."""
+    base = bytes(600)
+    in_temp = apply_recipe(
+        base, Recipe(white_balance="Temperature", color_temp=8000)
+    )
+    assert _u32(in_temp, OFF_WB_COLOR_TEMP) == 8000
+
+    other = apply_recipe(
+        base, Recipe(white_balance="Daylight", color_temp=8000)
+    )
+    assert _u32(other, OFF_WB_COLOR_TEMP) == 0  # untouched base byte
+
+
 def test_apply_recipe_rejects_short_profile():
     """A profile too short for a parameter offset is rejected."""
     with pytest.raises(ValueError, match="too short"):
@@ -187,12 +230,17 @@ def test_recipe_round_trips_through_profile():
     """recipe_from_profile is the exact inverse of apply_recipe."""
     recipe = Recipe(
         film_simulation="Velvia",
-        white_balance="Daylight",
+        white_balance="Temperature",
         dynamic_range="DR400",
+        grain="Strong",
+        exposure=1.0,
         highlights=2,
         shadows=-1,
         color=3,
         sharpness=-2,
+        wb_shift_r=4,
+        wb_shift_b=-5,
+        color_temp=7000,
     )
     profile = apply_recipe(bytes(600), recipe)
     assert recipe_from_profile(profile) == recipe

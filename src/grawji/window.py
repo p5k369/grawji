@@ -24,6 +24,7 @@ from gi.repository import (  # noqa: E402
     GLib,
     Gtk,
 )
+from rawji.fuji_enums import GrainEffect  # noqa: E402
 
 from grawji import exif, raf  # noqa: E402
 from grawji.core import (  # noqa: E402
@@ -44,10 +45,12 @@ from grawji.settings import (  # noqa: E402
     save_settings,
     settings_path,
 )
+from grawji.widgets import SliderRow, WBShiftGrid  # noqa: E402
 
 _FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
 _DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
+_GRAINS = [e.name for e in GrainEffect]
 
 # Manual rotation (degrees clockwise) -> GdkPixbuf rotation.
 _ROTATIONS = {
@@ -115,13 +118,6 @@ class MainWindow(Adw.ApplicationWindow):
     original_picture = Gtk.Template.Child()
     status = Gtk.Template.Child()
     preset_row = Gtk.Template.Child()
-    film_row = Gtk.Template.Child()
-    wb_row = Gtk.Template.Child()
-    dr_row = Gtk.Template.Child()
-    highlights_row = Gtk.Template.Child()
-    shadows_row = Gtk.Template.Child()
-    color_row = Gtk.Template.Child()
-    sharpness_row = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
     exif_group = Gtk.Template.Child()
     filmstrip_slot = Gtk.Template.Child()
@@ -168,17 +164,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._apply_background(self._settings.canvas_background)
 
-        self.film_row.set_model(Gtk.StringList.new(_FILM_SIMULATIONS))
-        self.wb_row.set_model(Gtk.StringList.new(_WHITE_BALANCES))
-        self.dr_row.set_model(Gtk.StringList.new(_DYNAMIC_RANGES))
-
-        self._combo_rows = (self.film_row, self.wb_row, self.dr_row)
-        self._spin_rows = (
-            self.highlights_row,
-            self.shadows_row,
-            self.color_row,
-            self.sharpness_row,
-        )
+        self._build_recipe_controls()
         self._connect_signals()
 
         self._filmstrip = FilmStrip(on_select=self._on_raf_selected)
@@ -309,6 +295,80 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings.show_info_panel = show
         save_settings(self._settings, settings_path())
 
+    def _build_recipe_controls(self) -> None:
+        """Build every recipe control in the Fuji IQ-menu order."""
+
+        def ifmt(value: float) -> str:
+            n = round(value)
+            return f"{n:+d}" if n else "0"
+
+        def evfmt(value: float) -> str:
+            return f"{value:+.1f} EV" if abs(value) > 1e-9 else "0 EV"
+
+        def combo(title: str, names: list[str]) -> Adw.ComboRow:
+            row = Adw.ComboRow(title=title)
+            row.set_model(Gtk.StringList.new(names))
+            return row
+
+        self.film_row = combo("Film simulation", _FILM_SIMULATIONS)
+        self.grain_row = combo("Grain", _GRAINS)
+        self.wb_row = combo("White balance", _WHITE_BALANCES)
+        self.dr_row = combo("Dynamic range", _DYNAMIC_RANGES)
+        self._combo_rows = (
+            self.film_row,
+            self.grain_row,
+            self.wb_row,
+            self.dr_row,
+        )
+
+        self._temp_row = SliderRow(
+            "Color temp",
+            lower=2500,
+            upper=10000,
+            step=50,
+            fmt=lambda v: f"{round(v)}K",
+        )
+        self._wb_grid = WBShiftGrid()
+        grid_row = Adw.ActionRow(title="WB shift")
+        grid_row.add_suffix(self._wb_grid)
+
+        self._exposure_row = SliderRow(
+            "Exposure", lower=-5.0, upper=5.0, step=1 / 3, fmt=evfmt
+        )
+        self._highlights_row = SliderRow(
+            "Highlights", lower=-4, upper=4, fmt=ifmt
+        )
+        self._shadows_row = SliderRow("Shadows", lower=-2, upper=4, fmt=ifmt)
+        self._color_row = SliderRow("Color", lower=-4, upper=4, fmt=ifmt)
+        self._sharpness_row = SliderRow(
+            "Sharpness", lower=-4, upper=4, fmt=ifmt
+        )
+        self._slider_rows = (
+            self._exposure_row,
+            self._highlights_row,
+            self._shadows_row,
+            self._color_row,
+            self._sharpness_row,
+            self._temp_row,
+        )
+
+        # Fuji IQ-menu order: film, grain, WB (+ temp + shift), dynamic
+        # range, then exposure leading the tonal block.
+        for row in (
+            self.film_row,
+            self.grain_row,
+            self.wb_row,
+            self._temp_row,
+            grid_row,
+            self.dr_row,
+            self._exposure_row,
+            self._highlights_row,
+            self._shadows_row,
+            self._color_row,
+            self._sharpness_row,
+        ):
+            self.recipe_group.add(row)
+
     def _connect_signals(self) -> None:
         """Connect widget signals to handlers (done in code, not the .ui)."""
         self.open_button.connect("clicked", self._on_open_folder_clicked)
@@ -318,8 +378,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.preset_row.connect("notify::selected", self._on_preset_selected)
         for row in self._combo_rows:
             row.connect("notify::selected", self._on_recipe_changed)
-        for row in self._spin_rows:
-            row.connect("notify::value", self._on_recipe_changed)
+        for slider in self._slider_rows:
+            slider.connect_changed(self._on_recipe_changed)
+        self._wb_grid.connect_changed(self._on_wb_shift_changed)
+        self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
@@ -332,14 +394,20 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _current_recipe(self) -> Recipe:
         """Read the current selector values into a Recipe."""
+        red, blue = self._wb_grid.get_values()
         return Recipe(
             film_simulation=_FILM_SIMULATIONS[self.film_row.get_selected()],
             white_balance=_WHITE_BALANCES[self.wb_row.get_selected()],
             dynamic_range=_DYNAMIC_RANGES[self.dr_row.get_selected()],
-            highlights=int(self.highlights_row.get_value()),
-            shadows=int(self.shadows_row.get_value()),
-            color=int(self.color_row.get_value()),
-            sharpness=int(self.sharpness_row.get_value()),
+            grain=_GRAINS[self.grain_row.get_selected()],
+            exposure=self._exposure_row.get_value(),
+            highlights=int(self._highlights_row.get_value()),
+            shadows=int(self._shadows_row.get_value()),
+            color=int(self._color_row.get_value()),
+            sharpness=int(self._sharpness_row.get_value()),
+            wb_shift_r=red,
+            wb_shift_b=blue,
+            color_temp=int(self._temp_row.get_value()),
         )
 
     def _on_open_folder_clicked(self, _button: Any) -> None:
@@ -416,12 +484,17 @@ class MainWindow(Adw.ApplicationWindow):
             self.dr_row.set_selected(
                 _DYNAMIC_RANGES.index(recipe.dynamic_range)
             )
-            self.highlights_row.set_value(recipe.highlights)
-            self.shadows_row.set_value(recipe.shadows)
-            self.color_row.set_value(recipe.color)
-            self.sharpness_row.set_value(recipe.sharpness)
+            self.grain_row.set_selected(_GRAINS.index(recipe.grain))
+            self._exposure_row.set_value(recipe.exposure)
+            self._highlights_row.set_value(recipe.highlights)
+            self._shadows_row.set_value(recipe.shadows)
+            self._color_row.set_value(recipe.color)
+            self._sharpness_row.set_value(recipe.sharpness)
+            self._temp_row.set_value(recipe.color_temp)
+            self._wb_grid.set_values(recipe.wb_shift_r, recipe.wb_shift_b)
         finally:
             self._suppress_recipe_signals = False
+        self._update_temp_sensitivity()
 
     def _set_active_recipe(self, recipe: Recipe, label: str) -> None:
         """Load a recipe and mark it active (for the preset indicator)."""
@@ -444,7 +517,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._suppress_preset_signal = False
 
     def _sync_preset_combo(self, label: str) -> None:
-        """Point the apply-combo at ``label`` (or "—" if not a preset)."""
+        """Point the apply-combo at label (or "—" if not a preset)."""
         index = (
             self._preset_names.index(label) + 1
             if label in self._preset_names
@@ -488,6 +561,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_active_recipe(Recipe(), "Default")
         if self._session.is_open:
             self._render_preview()
+
+    def _on_wb_shift_changed(self, _red: int, _blue: int) -> None:
+        """Handle a white-balance shift grid edit."""
+        self._on_recipe_changed()
+
+    def _on_wb_mode_changed(self, *_args: object) -> None:
+        """Enable the colour-temp slider only in Temperature mode."""
+        self._update_temp_sensitivity()
+
+    def _update_temp_sensitivity(self) -> None:
+        """Grey out the colour-temp slider unless WB is Temperature."""
+        wb = _WHITE_BALANCES[self.wb_row.get_selected()]
+        self._temp_row.set_sensitive(wb == "Temperature")
 
     def _on_recipe_changed(self, *_args: object) -> None:
         """Re-render and update the preset indicator on a change."""
@@ -618,6 +704,7 @@ class MainWindow(Adw.ApplicationWindow):
         if pw <= 0 or ph <= 0:
             return
         if self._zoom == 1.0:
+            self.picture.set_can_shrink(True)
             self.picture.set_halign(Gtk.Align.FILL)
             self.picture.set_valign(Gtk.Align.FILL)
             self.picture.set_paintable(
@@ -632,6 +719,7 @@ class MainWindow(Adw.ApplicationWindow):
             max(1, int(ph * fit * self._zoom)),
             GdkPixbuf.InterpType.BILINEAR,
         )
+        self.picture.set_can_shrink(False)
         self.picture.set_halign(Gtk.Align.CENTER)
         self.picture.set_valign(Gtk.Align.CENTER)
         self.picture.set_paintable(Gdk.Texture.new_for_pixbuf(scaled))
@@ -698,8 +786,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Controls stay live while the camera works - the worker coalesces
         # rapid changes - so the UI never locks up mid-render.
         enabled = self._session.is_open
-        for row in (*self._combo_rows, *self._spin_rows):
+        for row in (*self._combo_rows, *self._slider_rows, self._wb_grid):
             row.set_sensitive(enabled)
+        if enabled:
+            self._update_temp_sensitivity()
         self.export_button.set_sensitive(enabled)
         self.status.set_label(status)
 
@@ -817,7 +907,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     @staticmethod
     def _preset_item(name: str, action: str) -> Any:
-        """Build a menu item invoking ``action`` with the preset name."""
+        """Build a menu item invoking action with the preset name."""
         item = Gio.MenuItem.new(name, None)
         item.set_action_and_target_value(action, GLib.Variant("s", name))
         return item

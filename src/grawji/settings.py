@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def config_dir() -> Path:
-    """Return grawji's config directory (honours ``XDG_CONFIG_HOME``)."""
+    """Return grawji's config directory (honours XDG_CONFIG_HOME)."""
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "grawji"
 
@@ -24,8 +24,8 @@ class Settings:
     """User-configurable application settings.
 
     Attributes:
-        load_recipe_from_image: When ``True``, selecting an image loads
-            its own in-camera recipe into the controls. When ``False``,
+        load_recipe_from_image: When True, selecting an image loads
+            its own in-camera recipe into the controls. When False,
             the current recipe is kept and applied to the new image.
         show_info_panel: Whether the left "Original + info" panel is shown.
         canvas_background: Preview background CSS class ("" = themed).
@@ -54,7 +54,7 @@ class Settings:
 
 
 def load_settings(path: Path) -> Settings:
-    """Load settings from ``path``, returning defaults if unreadable."""
+    """Load settings from path, returning defaults if unreadable."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -65,6 +65,6 @@ def load_settings(path: Path) -> Settings:
 
 
 def save_settings(settings: Settings, path: Path) -> None:
-    """Write ``settings`` to ``path`` as JSON, creating parent dirs."""
+    """Write settings to path as JSON, creating parent dirs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings.to_dict(), indent=2), encoding="utf-8")

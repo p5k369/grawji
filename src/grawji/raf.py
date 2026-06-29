@@ -18,7 +18,7 @@ def embedded_jpeg(path: str | Path) -> bytes:
     """Return the JPEG preview embedded in a RAF file.
 
     Args:
-        path: Path to the ``.RAF`` file.
+        path: Path to the .RAF file.
 
     Returns:
         The embedded JPEG bytes.

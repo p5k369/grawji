@@ -8,8 +8,8 @@ read-modify-write (RMW) profile strategy:
                             -> trigger_conversion -> wait_for_result
     quit:                   disconnect
 
-Order matters: ``send_raf`` *before* ``get_profile``; profile-set
-*before* trigger. ``send_raf`` runs only on open, never per slider move.
+Order matters: send_raf *before* get_profile; profile-set
+*before* trigger. send_raf runs only on open, never per slider move.
 
 """
 
@@ -23,6 +23,13 @@ from pathlib import Path
 from typing import Any, cast
 
 import rawji
+from rawji.fuji_enums import (
+    GrainEffect,
+    ev_to_int,
+    int_to_ev,
+    validate_color_temp,
+    validate_wb_shift,
+)
 from rawji.fuji_profile import (
     INDEX_TO_PARAM,
     PROFILE_PARAMS_OFFSET,
@@ -58,7 +65,7 @@ class ForeignRafError(CameraError):
     """The RAF was shot by a different body (PTP error 0x2002).
 
     Fuji cameras only convert their own RAFs; sending a foreign file
-    makes ``get_profile`` fail with ``0x2002``.
+    makes get_profile fail with 0x2002.
     """
 
 
@@ -74,15 +81,15 @@ def rmw_patch(base: bytes, film_sim_byte: int) -> bytes:
     can be unit-tested without a camera.
 
     Args:
-        base: The profile bytes read from the camera via ``get_profile``.
+        base: The profile bytes read from the camera via get_profile.
         film_sim_byte: The film-simulation byte to write at
-            :data:`OFFSET_FILM_SIM`.
+            OFFSET_FILM_SIM.
 
     Returns:
-        A new ``bytes`` object with the patched profile.
+        A new bytes object with the patched profile.
 
     Raises:
-        ValueError: If ``base`` is too short to hold the offset.
+        ValueError: If base is too short to hold the offset.
     """
     if len(base) <= OFFSET_FILM_SIM:
         msg = (
@@ -98,16 +105,16 @@ def rmw_patch(base: bytes, film_sim_byte: int) -> bytes:
 def _enum_value(enum_cls: Any, name: str, kind: str) -> int:
     """Return the integer profile value for an enum member name.
 
-    Uses exact member lookup (``enum_cls[name]``) rather than rawji's
-    ``from_name``, which mangles camelCase names like ``"AsShot"``.
+    Uses exact member lookup (enum_cls[name]) rather than rawji's
+    from_name, which mangles camelCase names like "AsShot".
 
     Args:
         enum_cls: A rawji IntEnum (FilmSimulation / WhiteBalance / ...).
-        name: The exact enum member name (as in ``e.name``).
+        name: The exact enum member name (as in e.name).
         kind: Human-readable kind, for error messages.
 
     Raises:
-        ValueError: If ``name`` is not a member of ``enum_cls``.
+        ValueError: If name is not a member of enum_cls.
     """
     try:
         return int(enum_cls[name])
@@ -120,10 +127,10 @@ def film_simulation_byte(name: str) -> int:
     """Return the profile byte for a film-simulation member name.
 
     Args:
-        name: Film-simulation member name, e.g. ``"Velvia"``.
+        name: Film-simulation member name, e.g. "Velvia".
 
     Returns:
-        The byte value written at :data:`OFFSET_FILM_SIM`.
+        The byte value written at OFFSET_FILM_SIM.
 
     Raises:
         ValueError: If the name is not a known film simulation.
@@ -139,7 +146,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
 
     Returns:
         A dict of rawji parameter name -> integer value. Tone values are
-        the raw user values here; encoding happens in :func:`apply_recipe`.
+        the raw user values here; encoding happens in apply_recipe().
 
     Raises:
         ValueError: If a name is unknown or a tone value is out of range.
@@ -156,13 +163,17 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
     )
     changes = {
         "FilmSimulation": film_sim,
+        "ExposureBias": ev_to_int(recipe.exposure),
         "DynamicRange": _enum_value(
             rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
         ),
+        "GrainEffect": _enum_value(GrainEffect, recipe.grain, "grain effect"),
         "HighlightTone": recipe.highlights,
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
         "Sharpness": recipe.sharpness,
+        "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
+        "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
     }
     # "AsShot" leaves the RAF's own white balance untouched.
     if recipe.white_balance != "AsShot":
@@ -170,6 +181,9 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
         changes["WhiteBalance"] = _enum_value(
             rawji.WhiteBalance, recipe.white_balance, "white balance"
         )
+        # Colour temperature only takes effect in Temperature mode.
+        if recipe.white_balance == "Temperature":
+            changes["WBColorTemp"] = validate_color_temp(recipe.color_temp)
     return changes
 
 
@@ -204,7 +218,7 @@ def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
 
 
 def _enum_name(enum_cls: Any, value: int, fallback: str) -> str:
-    """Return the member name for an enum value, or ``fallback``."""
+    """Return the member name for an enum value, or fallback."""
     try:
         return str(enum_cls(value).name)
     except ValueError:
@@ -217,7 +231,7 @@ def recipe_from_profile(base: bytes) -> Recipe:
     Reads the recipe parameters back out of the profile the camera
     reported, so the UI can start from the image's own in-camera settings.
     Values that don't fit (unknown enum value, too-short profile) fall
-    back to the :class:`Recipe` defaults.
+    back to the Recipe defaults.
 
     Args:
         base: Profile bytes read from the camera.
@@ -233,6 +247,7 @@ def recipe_from_profile(base: bytes) -> Recipe:
             return fallback
         return int(struct.unpack("<i", base[offset : offset + 4])[0])
 
+    color_temp = signed("WBColorTemp", defaults.color_temp)
     return Recipe(
         film_simulation=_enum_name(
             rawji.FilmSimulation,
@@ -247,15 +262,22 @@ def recipe_from_profile(base: bytes) -> Recipe:
             signed("DynamicRange", 1),
             defaults.dynamic_range,
         ),
+        grain=_enum_name(
+            GrainEffect, signed("GrainEffect", 1), defaults.grain
+        ),
+        exposure=int_to_ev(signed("ExposureBias")),
         highlights=decode_tone_value(signed("HighlightTone")),
         shadows=decode_tone_value(signed("ShadowTone")),
         color=decode_tone_value(signed("Color")),
         sharpness=decode_tone_value(signed("Sharpness")),
+        wb_shift_r=signed("WBShiftR"),
+        wb_shift_b=signed("WBShiftB"),
+        color_temp=color_temp if color_temp > 0 else defaults.color_temp,
     )
 
 
 class CameraSession:
-    """A "load once, render many" session around ``rawji.FujiCamera``.
+    """A "load once, render many" session around rawji.FujiCamera.
 
     Opening a RAF is slow (seconds, a multi-MB USB upload) and is done
     once; the session then stays open so recipes can be applied and
@@ -273,8 +295,8 @@ class CameraSession:
 
         Args:
             camera_factory: Callable returning a fresh camera object.
-                Defaults to ``rawji.FujiCamera``. Injectable for tests.
-            timeout: ``wait_for_result`` timeout in seconds.
+                Defaults to rawji.FujiCamera. Injectable for tests.
+            timeout: wait_for_result timeout in seconds.
         """
         self._camera_factory: Callable[[], Any] = (
             camera_factory or rawji.FujiCamera
@@ -303,13 +325,13 @@ class CameraSession:
     def open(self, raf_path: str | Path) -> None:
         """Connect and load a RAF (slow; call once per image).
 
-        Order matters: ``send_raf`` must precede ``get_profile`` so the
+        Order matters: send_raf must precede get_profile so the
         camera reports a valid profile. Any previously open session is
         closed first.
 
         Args:
             raf_path: Path to the RAF file. Must be from the connected
-                body, or the camera fails with ``0x2002``.
+                body, or the camera fails with 0x2002.
 
         Raises:
             CameraError: If the camera cannot be connected.
@@ -327,8 +349,7 @@ class CameraSession:
                 self._safe_disconnect(camera)
                 if "0x2002" in str(e):
                     raise ForeignRafError(
-                        "RAF was shot by a different camera body "
-                        "(PTP 0x2002)"
+                        "RAF was shot by a different camera body (PTP 0x2002)"
                     ) from e
                 raise
             self._camera = camera
@@ -343,8 +364,8 @@ class CameraSession:
 
         Args:
             recipe: The recipe to apply.
-            full_resolution: ``False`` for a fast preview (ignores
-                profile size), ``True`` for a full-resolution export.
+            full_resolution: False for a fast preview (ignores
+                profile size), True for a full-resolution export.
 
         Returns:
             The rendered JPEG bytes.
