@@ -1,0 +1,58 @@
+exclude: ".*venv/.*|src/grawji/ui/.*|__init__.py"
+default_install_hook_types: [pre-commit, pre-push]
+ci:
+  # pre-commit.ci runs the fast hooks on every PR. The local mypy/pytest
+  # hooks need the project environment (system tools / installed deps), so
+  # they are skipped here and run in the type_check / Tests workflows.
+  autofix_prs: false
+  skip: [ 'mypy', 'pytest' ]
+repos:
+  - repo: https://github.com/psf/black
+    rev: 26.5.1
+    hooks:
+      - id: black
+        args: [ --safe, --quiet, -l 79, --target-version, py311 ]
+        language_version: python3
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: debug-statements
+      - id: check-builtin-literals
+      - id: check-docstring-first
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: fix-byte-order-marker
+      - id: no-commit-to-branch
+        args: [ --branch, main ]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff-check
+        name: ruff
+        args: [ --fix, --exit-non-zero-on-fix ]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        # `python -m` so it runs under the active venv interpreter
+        # (which can see pytest etc.), not a stray system mypy.
+        entry: python -m mypy src tests
+        language: system
+        types: [ python ]
+        pass_filenames: false
+        require_serial: true
+
+      - id: pytest
+        name: pytest
+        entry: python -m pytest
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]

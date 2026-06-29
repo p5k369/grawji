@@ -1,0 +1,169 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grawji"
+version = "0.0.1"
+description = "GTK4 frontend for rawji - interactive Fuji RAF conversion via the camera engine."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Patrick Zwerschke" }]
+dependencies = [
+  "PyGObject",
+  # rawji is not on PyPI - install the fork editable alongside grawji:
+  #   pip install -e ../rawji
+  "rawji",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff",
+  "black",
+  "mypy",
+  "pytest",
+  "pytest-cov",
+  "pytest-github-actions-annotate-failures",
+  "pre-commit",
+]
+
+[project.scripts]
+grawji = "grawji.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grawji"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["ui"]
+
+[tool.ruff.lint]
+fixable = ["ALL"]
+unfixable = []
+
+select = [
+  "E",   # pycodestyle
+  "F",   # pyflakes
+  "A",   # flake8-builtins
+  "B",   # flake8-bugbear
+  "S",   # flake8-bandit (security)
+  "C4",  # flake8-comprehensions
+  "Q",   # flake8-quotes
+  "RET", # flake8-return
+  "SIM", # flake8-simplify
+  "PTH", # flake8-use-pathlib
+  "UP",  # pyupgrade
+  "D",   # pydocstyle
+  "I",   # isort
+  "N",   # pep8-naming
+  "W",   # warning
+  "PL",  # Pylint
+  "PGH", # pygrep-hooks
+  "FLY", # flynt
+  "PERF",# Perflint
+  "RUF", # Ruff-specific rules
+]
+
+# multi-line-summary-first-line, mutable-class-default,
+# magic-value-comparison, yoda-conditions, function-call-in-default-argument,
+# expr-or-true, blanket-type-ignore, bare-except,
+# unnecessary-iterable-allocation-for-first-element, multiple-with-statements,
+# S101/S110/S112 (assert + try-except-pass/continue are intentional).
+ignore = ["D212", "RUF012", "PLR2004", "SIM300", "B008", "SIM222", "PGH003", "E722", "RUF015", "SIM117", "S101", "S110", "S112"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104"]  # undocumented-public-package
+"tests/**" = [
+  "D100",   # undocumented-public-module
+  "D101",   # undocumented-public-class
+  "D102",   # undocumented-public-method
+  "D103",   # undocumented-public-function
+  "D104",
+  "D107",
+  "PLR2004",
+  "S",      # security lint not meaningful in test code
+  "ARG",    # unused-function-argument (fixtures)
+  "ANN",    # missing-type-annotation
+  "E501",   # line-too-long (long string literals are common)
+  "F401",   # unused imports (sometimes for side effects)
+  "PLC0415",  # local imports are common in test setups
+]
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pylint]
+max-branches = 14
+max-args = 6
+
+[tool.ruff.lint.isort]
+known-first-party = ["grawji", "tests"]
+
+[tool.mypy]
+strict = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_decorated = false
+disallow_any_explicit = false
+disallow_untyped_defs = true
+check_untyped_defs = true
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = ["gi.*", "rawji.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["grawji.app", "grawji.window", "grawji.__main__"]
+disallow_subclassing_any = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+warn_return_any = false
+disable_error_code = [
+  "arg-type",
+  "attr-defined",
+  "assignment",
+  "union-attr",
+  "var-annotated",
+  "no-untyped-def",
+]
+
+[tool.coverage.run]
+source = ["grawji"]
+branch = true
+omit = [
+  "**/__init__.py",
+  "**/__main__.py",
+  "src/grawji/app.py",
+  "src/grawji/window.py",
+  "src/grawji/ui/**",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == \"__main__\":",
+  "\\.\\.\\.",
+]
