@@ -28,6 +28,10 @@ dist/
 # Compiled GResource bundles / generated UI
 src/grawji/ui/*.gresource
 
+# Cambalache design project
+*.cmb
+*.cmb.bak
+
 # Sample / scratch image data (RAFs, JPEGs)
 *.RAF
 *.raf

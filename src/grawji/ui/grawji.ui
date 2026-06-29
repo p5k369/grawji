@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="MainWindow" parent="AdwApplicationWindow">
+    <property name="title">grawji</property>
+    <property name="default-width">1280</property>
+    <property name="default-height">860</property>
+    <property name="content">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <child type="start">
+              <object class="GtkButton">
+                <property name="label">Open Folder…</property>
+                <signal name="clicked" handler="_on_open_folder_clicked"/>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton" id="rotate_left">
+                <property name="icon-name">object-rotate-left-symbolic</property>
+                <property name="tooltip-text">Rotate left</property>
+                <property name="sensitive">false</property>
+                <signal name="clicked" handler="_on_rotate_left"/>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton" id="rotate_right">
+                <property name="icon-name">object-rotate-right-symbolic</property>
+                <property name="tooltip-text">Rotate right</property>
+                <property name="sensitive">false</property>
+                <signal name="clicked" handler="_on_rotate_right"/>
+              </object>
+            </child>
+            <child type="end">
+              <object class="GtkButton" id="export_button">
+                <property name="label">Export…</property>
+                <property name="sensitive">false</property>
+                <signal name="clicked" handler="_on_export_clicked"/>
+              </object>
+            </child>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkPaned">
+                <property name="vexpand">true</property>
+                <property name="resize-start-child">true</property>
+                <property name="resize-end-child">false</property>
+                <property name="shrink-end-child">false</property>
+                <property name="start-child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <child>
+                      <object class="GtkOverlay">
+                        <property name="vexpand">true</property>
+                        <child>
+                          <object class="GtkPicture" id="picture"/>
+                        </child>
+                        <child type="overlay">
+                          <object class="GtkSpinner" id="spinner">
+                            <property name="halign">center</property>
+                            <property name="valign">center</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="status">
+                        <property name="label">Open a folder to begin.</property>
+                        <property name="xalign">0</property>
+                        <property name="margin-start">4</property>
+                        <property name="margin-end">4</property>
+                        <property name="margin-top">4</property>
+                        <property name="margin-bottom">4</property>
+                        <style>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+                <property name="end-child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <property name="width-request">280</property>
+                    <property name="margin-start">10</property>
+                    <property name="margin-end">10</property>
+                    <property name="margin-top">10</property>
+                    <property name="margin-bottom">10</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Recipe</property>
+                        <property name="xalign">0</property>
+                        <style>
+                          <class name="title-4"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Film Simulation</property>
+                        <property name="xalign">0</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkDropDown" id="film_dropdown">
+                        <property name="sensitive">false</property>
+                        <signal name="notify::selected"
+                                handler="_on_film_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">More controls coming soon…</property>
+                        <property name="xalign">0</property>
+                        <property name="margin-top">12</property>
+                        <style>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkSeparator"/>
+            </child>
+            <child>
+              <object class="GtkBox" id="filmstrip_slot">
+                <property name="orientation">vertical</property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </template>
+</interface>

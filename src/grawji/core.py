@@ -232,6 +232,7 @@ class CameraSession:
             self._close_locked()
 
     def _close_locked(self) -> None:
+        """Disconnect and reset session state (caller holds the lock)."""
         if self._camera is not None:
             self._safe_disconnect(self._camera)
         self._camera = None
@@ -240,6 +241,7 @@ class CameraSession:
 
     @staticmethod
     def _safe_disconnect(camera: Any) -> None:
+        """Disconnect a camera, ignoring any teardown errors."""
         with contextlib.suppress(Exception):
             camera.disconnect()
 
