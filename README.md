@@ -4,7 +4,7 @@ GTK4 frontend for [rawji](https://github.com/pinpox/rawji) — develop Fujifilm
 RAFs natively on Linux through the **real camera engine** (authentic film
 simulations, identical to X RAW STUDIO).
 
-The name is **g**(tk) + **rawji**. rawji is command-line only; grawji makes
+The name is **g**(tk) + **rawji**. rawji is command-line only, grawji makes
 *interactive* work on the look practical: set a recipe, see a live preview,
 export — instead of typing CLI flags.
 
@@ -23,7 +23,7 @@ render-many** workflow:
 > trigger. `send_raf` runs only on open, never per slider move.
 
 Camera calls block for seconds, so they run on a worker thread with results
-marshalled back via `GLib.idle_add`; only one camera op is in flight at a
+marshalled back via `GLib.idle_add`. Only one camera op is in flight at a
 time, and slider previews are debounced.
 
 ## Layout
