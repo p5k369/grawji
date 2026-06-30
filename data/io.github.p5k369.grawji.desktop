@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=grawji
+GenericName=Fujifilm RAF Converter
+Comment=Develop Fujifilm RAFs through the camera's own engine
+Type=Application
+Exec=grawji
+Icon=io.github.p5k369.grawji
+Categories=Graphics;Photography;GTK;
+Keywords=Fujifilm;RAF;RAW;film simulation;rawji;
+Terminal=false
+StartupNotify=true

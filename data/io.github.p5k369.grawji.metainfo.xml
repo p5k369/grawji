@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.p5k369.grawji</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>grawji</name>
+  <summary>Develop Fujifilm RAFs through the real camera engine</summary>
+  <description>
+    <p>
+      grawji is a GTK4 frontend for rawji. It develops Fujifilm RAF files on
+      Linux using the camera's own conversion engine over USB, so the result
+      is identical to Fujifilm X RAW Studio: authentic film simulations and
+      recipes, rendered by the body itself.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Live preview through the camera's own conversion engine</li>
+      <li>Full recipe control: film simulation, white balance, dynamic
+        range, tone, colour, sharpness, grain and noise reduction</li>
+      <li>Save, apply and import/export recipes in X RAW Studio's FP
+        format</li>
+      <li>Single and full-folder batch export at full resolution</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.p5k369.grawji.desktop</launchable>
+  <url type="homepage">https://github.com/p5k369/grawji</url>
+  <url type="bugtracker">https://github.com/p5k369/grawji/issues</url>
+  <developer id="io.github.p5k369">
+    <name>Patrick Zwerschke</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-06-30"/>
+  </releases>
+</component>

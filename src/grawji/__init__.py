@@ -5,4 +5,9 @@ thin adapter and presents an interactive UI for tuning a recipe with a
 live preview, then exporting at full resolution.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("grawji")
+except PackageNotFoundError:  # not installed (e.g. running from a raw tree)
+    __version__ = "0.0.0"
