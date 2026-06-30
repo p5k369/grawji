@@ -126,8 +126,17 @@ check_untyped_defs = true
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-module = ["gi.*", "rawji.*", "usb.*", "pytest"]
+module = ["rawji.*", "usb.*", "pytest"]
 ignore_missing_imports = true
+
+# pygobject-stubs is installed for editor type hints, but grawji treats the
+# GTK layer as untyped. Skip the gi stubs in mypy so it does not type-check
+# the dynamic GObject API (kwargs ctors, nullable returns, etc.).
+[[tool.mypy.overrides]]
+module = ["gi", "gi.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
 module = [

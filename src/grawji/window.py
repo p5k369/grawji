@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
-from importlib import resources
+from importlib import metadata, resources
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,11 @@ from gi.repository import (  # noqa: E402
     GLib,
     Gtk,
 )
-from rawji.fuji_enums import GrainEffect  # noqa: E402
+from rawji.fuji_enums import (  # noqa: E402
+    FUJIFILM_CAMERA_PIDS,
+    FUJIFILM_USB_VENDOR_ID,
+    GrainEffect,
+)
 
 from grawji import exif, raf  # noqa: E402
 from grawji.core import (  # noqa: E402
@@ -51,6 +55,55 @@ _FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
 _DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
 _GRAINS = [e.name for e in GrainEffect]
+_COLOR_SPACES = ["sRGB", "AdobeRGB"]
+
+# The Kelvin values the camera offers for Temperature white balance. The
+# engine honors only these exact presets (any other value falls back to the
+# coolest), so the slider snaps to them. This is Fuji's WB-K table, shared
+# across bodies.
+# todo: should be integrated in rawji.
+_WB_KELVIN_PRESETS = [
+    2500,
+    2550,
+    2650,
+    2700,
+    2800,
+    2850,
+    2950,
+    3000,
+    3100,
+    3200,
+    3300,
+    3400,
+    3600,
+    3700,
+    3800,
+    4000,
+    4200,
+    4300,
+    4500,
+    4800,
+    5000,
+    5300,
+    5600,
+    5900,
+    6300,
+    6700,
+    7100,
+    7700,
+    8300,
+    9100,
+    10000,
+]
+
+
+def _nearest_kelvin_index(kelvin: int) -> int:
+    """Return the preset index whose Kelvin is closest to ``kelvin``."""
+    return min(
+        range(len(_WB_KELVIN_PRESETS)),
+        key=lambda i: abs(_WB_KELVIN_PRESETS[i] - kelvin),
+    )
+
 
 # Manual rotation (degrees clockwise) -> GdkPixbuf rotation.
 _ROTATIONS = {
@@ -59,9 +112,11 @@ _ROTATIONS = {
     270: GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE,
 }
 
-# USB product id -> camera model, for the connection indicator.
-_FUJI_VENDOR_ID = 0x04CB
-_PID_MODELS = {
+# Which product ids count as a camera, and the vendor id, come from rawji
+# (FUJIFILM_CAMERA_PIDS / FUJIFILM_USB_VENDOR_ID) so the supported-body list
+# lives in one place: add a camera in rawji and grawji follows automatically.
+# todo: This map is cosmetic only, could be very well integrated in rawji.
+_PID_NAMES = {
     0x02D1: "X100F",
     0x02DD: "X-T3",
     0x02E3: "X-T30",
@@ -98,6 +153,14 @@ _UI = (
 def _export_basename(raf_path: Path | str) -> str:
     """Build an export filename from the RAF stem."""
     return f"{Path(raf_path).stem}.jpg"
+
+
+def _app_version() -> str:
+    """Return grawji's installed version, or a fallback if not packaged."""
+    try:
+        return metadata.version("grawji")
+    except metadata.PackageNotFoundError:
+        return "0.0.1"
 
 
 @Gtk.Template(string=_UI)
@@ -146,6 +209,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._active_label = "Default"
         self._pan_h = 0.0
         self._pan_v = 0.0
+        self._render_pending_id = 0
 
         self._settings = load_settings(settings_path())
         self._presets = load_presets(presets_path())
@@ -262,6 +326,7 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda *_a: self._on_shortcuts(),
                 ["<Ctrl>question"],
             ),
+            ("about", None, lambda *_a: self._on_about(), ()),
             (
                 "delete-preset",
                 "s",
@@ -314,29 +379,40 @@ class MainWindow(Adw.ApplicationWindow):
         self.grain_row = combo("Grain", _GRAINS)
         self.wb_row = combo("White balance", _WHITE_BALANCES)
         self.dr_row = combo("Dynamic range", _DYNAMIC_RANGES)
+        self.color_space_row = combo("Color space", _COLOR_SPACES)
         self._combo_rows = (
             self.film_row,
             self.grain_row,
             self.wb_row,
             self.dr_row,
+            self.color_space_row,
         )
 
         self._temp_row = SliderRow(
             "Color temp",
-            lower=2500,
-            upper=10000,
-            step=50,
-            fmt=lambda v: f"{round(v)}K",
+            lower=0,
+            upper=len(_WB_KELVIN_PRESETS) - 1,
+            step=1,
+            fmt=lambda i: f"{_WB_KELVIN_PRESETS[round(i)]}K",
         )
         self._wb_grid = WBShiftGrid()
+        self._wb_shift_label = Gtk.Label(halign=Gtk.Align.CENTER)
+        self._wb_shift_label.add_css_class("dim-label")
+        wb_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        wb_box.set_valign(Gtk.Align.CENTER)
+        wb_box.set_margin_top(8)
+        wb_box.set_margin_bottom(8)
+        wb_box.append(self._wb_grid)
+        wb_box.append(self._wb_shift_label)
         grid_row = Adw.ActionRow(title="WB shift")
-        grid_row.add_suffix(self._wb_grid)
+        grid_row.add_suffix(wb_box)
+        self._update_wb_shift_label()
 
         self._exposure_row = SliderRow(
-            "Exposure", lower=-5.0, upper=5.0, step=1 / 3, fmt=evfmt
+            "Exposure", lower=-2.0, upper=3.0, step=1 / 3, fmt=evfmt
         )
         self._highlights_row = SliderRow(
-            "Highlights", lower=-4, upper=4, fmt=ifmt
+            "Highlights", lower=-2, upper=4, fmt=ifmt
         )
         self._shadows_row = SliderRow("Shadows", lower=-2, upper=4, fmt=ifmt)
         self._color_row = SliderRow("Color", lower=-4, upper=4, fmt=ifmt)
@@ -351,6 +427,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._sharpness_row,
             self._temp_row,
         )
+        value_chars = max(row.value_chars for row in self._slider_rows)
+        for row in self._slider_rows:
+            row.set_value_chars(value_chars)
 
         # Fuji IQ-menu order: film, grain, WB (+ temp + shift), dynamic
         # range, then exposure leading the tonal block.
@@ -366,6 +445,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._shadows_row,
             self._color_row,
             self._sharpness_row,
+            self.color_space_row,
         ):
             self.recipe_group.add(row)
 
@@ -407,7 +487,8 @@ class MainWindow(Adw.ApplicationWindow):
             sharpness=int(self._sharpness_row.get_value()),
             wb_shift_r=red,
             wb_shift_b=blue,
-            color_temp=int(self._temp_row.get_value()),
+            color_temp=_WB_KELVIN_PRESETS[int(self._temp_row.get_value())],
+            color_space=_COLOR_SPACES[self.color_space_row.get_selected()],
         )
 
     def _on_open_folder_clicked(self, _button: Any) -> None:
@@ -490,8 +571,12 @@ class MainWindow(Adw.ApplicationWindow):
             self._shadows_row.set_value(recipe.shadows)
             self._color_row.set_value(recipe.color)
             self._sharpness_row.set_value(recipe.sharpness)
-            self._temp_row.set_value(recipe.color_temp)
+            self._temp_row.set_value(_nearest_kelvin_index(recipe.color_temp))
             self._wb_grid.set_values(recipe.wb_shift_r, recipe.wb_shift_b)
+            self._update_wb_shift_label()
+            self.color_space_row.set_selected(
+                _COLOR_SPACES.index(recipe.color_space)
+            )
         finally:
             self._suppress_recipe_signals = False
         self._update_temp_sensitivity()
@@ -564,7 +649,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_wb_shift_changed(self, _red: int, _blue: int) -> None:
         """Handle a white-balance shift grid edit."""
+        self._update_wb_shift_label()
         self._on_recipe_changed()
+
+    def _update_wb_shift_label(self) -> None:
+        """Show the grid marker's red/blue position next to the grid."""
+        red, blue = self._wb_grid.get_values()
+        self._wb_shift_label.set_text(f"R {red:+d}  B {blue:+d}")
 
     def _on_wb_mode_changed(self, *_args: object) -> None:
         """Enable the colour-temp slider only in Temperature mode."""
@@ -583,7 +674,25 @@ class MainWindow(Adw.ApplicationWindow):
         # A manual edit no longer matches a saved preset.
         self._sync_preset_combo("")
         if self._session.is_open:
+            self._schedule_render()
+
+    def _schedule_render(self) -> None:
+        """Debounce preview renders so a slider drag fires only one.
+
+        Without this, every intermediate slider value queues a camera
+        render; the preview then lags behind the control and shows a
+        stale result. Coalesce to a single render once edits settle.
+        """
+        if self._render_pending_id:
+            GLib.source_remove(self._render_pending_id)
+        self._render_pending_id = GLib.timeout_add(150, self._render_now)
+
+    def _render_now(self) -> bool:
+        """Fire the debounced preview render."""
+        self._render_pending_id = 0
+        if self._session.is_open:
             self._render_preview()
+        return GLib.SOURCE_REMOVE
 
     def _render_preview(self) -> None:
         """Queue a fast (non-full-resolution) preview render."""
@@ -661,7 +770,21 @@ class MainWindow(Adw.ApplicationWindow):
         except (GLib.Error, OSError) as exc:
             self._set_busy(busy=False, status=f"Export failed: {exc}")
             return
+        # GdkPixbuf re-encoding drops all metadata, so copy the camera's
+        # EXIF back onto the file (orientation is now baked into the pixels).
+        self._copy_exif(jpeg, path)
         self._set_busy(busy=False, status=f"Exported to {path}")
+
+    @staticmethod
+    def _copy_exif(source_jpeg: bytes, dest_path: str) -> None:
+        """Transplant the camera JPEG's metadata onto the exported file."""
+        try:
+            metadata = GExiv2.Metadata()
+            metadata.open_buf(source_jpeg)
+            metadata.set_orientation(GExiv2.Orientation.NORMAL)
+            metadata.save_file(dest_path)
+        except GLib.Error:
+            pass
 
     def _pixbuf_from_jpeg(self, jpeg: bytes) -> Any:
         """Decode JPEG bytes, applying EXIF orientation and rotation."""
@@ -818,14 +941,18 @@ class MainWindow(Adw.ApplicationWindow):
 
     @staticmethod
     def _detect_camera() -> str | None:
-        """Return the connected Fuji camera's model name, or None."""
+        """Return the connected Fuji camera's name, or None.
+
+        A body counts as a camera only if rawji lists its product id, so
+        the supported-hardware set stays defined in rawji alone.
+        """
         try:
-            device = usb.core.find(idVendor=_FUJI_VENDOR_ID)
+            device = usb.core.find(idVendor=FUJIFILM_USB_VENDOR_ID)
         except (usb.core.USBError, ValueError, OSError):
             return None
-        if device is None:
+        if device is None or device.idProduct not in FUJIFILM_CAMERA_PIDS:
             return None
-        return _PID_MODELS.get(
+        return _PID_NAMES.get(
             device.idProduct, f"Fuji 0x{device.idProduct:04X}"
         )
 
@@ -860,6 +987,10 @@ class MainWindow(Adw.ApplicationWindow):
         prefs.append("Keyboard Shortcuts", "win.shortcuts")
         prefs.append("Preferences", "win.preferences")
         menu.append_section(None, prefs)
+
+        about = Gio.Menu()
+        about.append("About grawji", "win.about")
+        menu.append_section(None, about)
 
         self.menu_button.set_menu_model(menu)
 
@@ -904,6 +1035,24 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_title("Keyboard Shortcuts")
         dialog.add(page)
         dialog.present(self)
+
+    def _on_about(self) -> None:
+        """Show the About dialog."""
+        about = Adw.AboutDialog(
+            application_name="grawji",
+            application_icon="camera-photo-symbolic",
+            developer_name="Patrick Zwerschke",
+            version=_app_version(),
+            website="https://github.com/p5k369/grawji",
+            issue_url="https://github.com/p5k369/grawji/issues",
+            license_type=Gtk.License.GPL_3_0,
+            copyright="© 2026 Patrick Zwerschke",
+        )
+        about.add_credit_section(
+            "Credits",
+            ["rawji by pinpox https://github.com/pinpox/rawji"],
+        )
+        about.present(self)
 
     @staticmethod
     def _preset_item(name: str, action: str) -> Any:

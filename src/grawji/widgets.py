@@ -44,42 +44,37 @@ class SliderRow(Adw.ActionRow):
         super().__init__(title=title)
         self._step = step
         self._fmt: Formatter = fmt or (lambda v: f"{round(v):+d}")
-        self._snapping = False
 
         self._adj = Gtk.Adjustment(
             lower=lower, upper=upper, step_increment=step, page_increment=step
         )
         self._scale = Gtk.Scale(
             adjustment=self._adj,
-            hexpand=True,
+            hexpand=False,
             draw_value=False,
             valign=Gtk.Align.CENTER,
         )
-        self._scale.set_size_request(150, -1)
+        self._scale.set_size_request(147, -1)
         self._label = Gtk.Label(xalign=1.0)
         self._label.add_css_class("dim-label")
-        self._label.set_width_chars(7)
+        self._value_chars = max(len(self._fmt(lower)), len(self._fmt(upper)))
+        self._label.set_width_chars(self._value_chars)
 
-        self.add_suffix(self._scale)
-        self.add_suffix(self._label)
+        suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        suffix.set_valign(Gtk.Align.CENTER)
+        suffix.append(self._scale)
+        suffix.append(self._label)
+        self.add_suffix(suffix)
         self._adj.connect("value-changed", self._on_value_changed)
         self._update_label()
 
     def _on_value_changed(self, _adj: Gtk.Adjustment) -> None:
-        """Snap the value to the step grid and refresh the label."""
-        if self._snapping:
-            return
-        raw = self._adj.get_value()
-        snapped = round(raw / self._step) * self._step
-        if abs(snapped - raw) > 1e-9:
-            self._snapping = True
-            self._adj.set_value(snapped)
-            self._snapping = False
+        """Refresh the label with the snapped value."""
         self._update_label()
 
     def _update_label(self) -> None:
-        """Refresh the trailing value label."""
-        self._label.set_text(self._fmt(self._adj.get_value()))
+        """Refresh the trailing value label with the snapped value."""
+        self._label.set_text(self._fmt(self.get_value()))
 
     def get_value(self) -> float:
         """Return the current (snapped) slider value."""
@@ -92,6 +87,15 @@ class SliderRow(Adw.ActionRow):
     def connect_changed(self, callback: Callable[..., None]) -> None:
         """Call callback whenever the value changes."""
         self._adj.connect("value-changed", callback)
+
+    @property
+    def value_chars(self) -> int:
+        """Character width its own value text needs."""
+        return self._value_chars
+
+    def set_value_chars(self, chars: int) -> None:
+        """Override the value column width so rows can share one width."""
+        self._label.set_width_chars(chars)
 
 
 class WBShiftGrid(Gtk.DrawingArea):
@@ -111,8 +115,8 @@ class WBShiftGrid(Gtk.DrawingArea):
         self._r = 0
         self._b = 0
         self._on_changed: Callable[[int, int], None] | None = None
-        self.set_content_width(176)
-        self.set_content_height(176)
+        self.set_content_width(164)
+        self.set_content_height(164)
         self.set_draw_func(self._draw)
 
         click = Gtk.GestureClick()
@@ -136,12 +140,21 @@ class WBShiftGrid(Gtk.DrawingArea):
         """Register a callback invoked with (red, blue) on user input."""
         self._on_changed = callback
 
-    def _geometry(self) -> tuple[float, float, float]:
-        """Return (origin, size, step) of the square plot area."""
-        margin = 18.0
-        size = min(self.get_width(), self.get_height()) - 2 * margin
+    def _geometry(self) -> tuple[float, float, float, float]:
+        """Return (origin_x, origin_y, size, step) of the square plot area.
+
+        The square is anchored near the top (only a small bottom margin) so
+        a readout placed directly beneath the widget sits close to it.
+        """
+        margin = 12.0
+        bottom = 3.0
+        size = min(
+            self.get_width() - 2 * margin,
+            self.get_height() - margin - bottom,
+        )
         size = max(size, 1.0)
-        return margin, size, size / (2 * self._RANGE)
+        ox = (self.get_width() - size) / 2
+        return ox, margin, size, size / (2 * self._RANGE)
 
     def _on_pressed(
         self, _g: Gtk.GestureClick, _n: int, x: float, y: float
@@ -157,11 +170,11 @@ class WBShiftGrid(Gtk.DrawingArea):
 
     def _set_from_pixel(self, x: float, y: float) -> None:
         """Convert a pixel position to a snapped (R, B) and notify."""
-        origin, size, _ = self._geometry()
-        frac_x = (x - origin) / size  # 0 to 1 left->right
-        frac_y = (y - origin) / size  # 0 to 1 top->bottom
-        red = round((frac_x * 2 - 1) * self._RANGE)  # right = +R
-        blue = round((1 - frac_y * 2) * self._RANGE)  # up = +B
+        ox, oy, size, _ = self._geometry()
+        frac_x = (x - ox) / size
+        frac_y = (y - oy) / size
+        red = round((frac_x * 2 - 1) * self._RANGE)
+        blue = round((1 - frac_y * 2) * self._RANGE)
         red = max(-self._RANGE, min(self._RANGE, red))
         blue = max(-self._RANGE, min(self._RANGE, blue))
         if (red, blue) != (self._r, self._b):
@@ -174,40 +187,38 @@ class WBShiftGrid(Gtk.DrawingArea):
         self, _area: Gtk.DrawingArea, cx: Any, _width: int, _height: int
     ) -> None:
         """Draw the grid, axes and current marker (cx is a cairo ctx)."""
-        origin, size, step = self._geometry()
+        ox, oy, size, step = self._geometry()
         color = self.get_color()
 
-        # Grid lines.
         cx.set_line_width(1.0)
         cx.set_source_rgba(color.red, color.green, color.blue, 0.15)
         for i in range(2 * self._RANGE + 1):
-            pos = origin + i * step
-            cx.move_to(origin, pos)
-            cx.line_to(origin + size, pos)
-            cx.move_to(pos, origin)
-            cx.line_to(pos, origin + size)
+            pos = i * step
+            cx.move_to(ox, oy + pos)
+            cx.line_to(ox + size, oy + pos)
+            cx.move_to(ox + pos, oy)
+            cx.line_to(ox + pos, oy + size)
         cx.stroke()
 
-        # Centre axes, a little stronger.
-        mid = origin + size / 2
+        mid_x = ox + size / 2
+        mid_y = oy + size / 2
         cx.set_source_rgba(color.red, color.green, color.blue, 0.4)
         cx.set_line_width(1.5)
-        cx.move_to(origin, mid)
-        cx.line_to(origin + size, mid)
-        cx.move_to(mid, origin)
-        cx.line_to(mid, origin + size)
+        cx.move_to(ox, mid_y)
+        cx.line_to(ox + size, mid_y)
+        cx.move_to(mid_x, oy)
+        cx.line_to(mid_x, oy + size)
         cx.stroke()
 
-        # Marker (R horizontal, B vertical).
-        px = origin + (self._r / self._RANGE / 2 + 0.5) * size
-        py = origin + (0.5 - self._b / self._RANGE / 2) * size
+        px = ox + (self._r / self._RANGE / 2 + 0.5) * size
+        py = oy + (0.5 - self._b / self._RANGE / 2) * size
         cx.set_source_rgba(color.red, color.green, color.blue, 0.95)
         cx.arc(px, py, 5.0, 0, 6.2832)
         cx.fill()
 
-        # Axis labels (B top, R right).
         cx.set_source_rgba(color.red, color.green, color.blue, 0.7)
-        cx.move_to(mid + 3, origin - 5)
+        b_ext = cx.text_extents("B")
+        cx.move_to(mid_x - b_ext.width / 2, oy - 4)
         cx.show_text("B")
-        cx.move_to(origin + size + 4, mid + 4)
+        cx.move_to(ox + size + 4, mid_y + 4)
         cx.show_text("R")
