@@ -32,6 +32,12 @@ src/grawji/ui/*.gresource
 *.cmb
 *.cmb.bak
 
+# Flatpak build artifacts
+.flatpak-builder/
+build-flatpak/
+build-flatpak-repo/
+*.flatpak
+
 # Sample / scratch image data (RAFs, JPEGs)
 *.RAF
 *.raf

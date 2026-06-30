@@ -52,8 +52,58 @@ time, and slider previews are debounced.
 
 ## Install
 
+Two ways to get grawji: the **[Flatpak](#flatpak-just-use-it)** (bundled, one
+command, for everyone) or **[from source](#from-source-native)**.
+
+Whichever you pick, the camera must be in the right USB mode first:
+
+> **Set Up** > **Connection Setting** > **USB Mode** >
+> **USB RAW CONV./BACKUP RESTORE**
+
+### Flatpak (just use it)
+
+The Flatpak bundles GTK4, libadwaita, the EXIF and USB stacks, rawji and
+grawji. The only thing it pulls from the network is the shared GNOME runtime.
+
+<details>
+<summary><b>Step-by-step</b></summary>
+
+**1. Make sure Flatpak and Flathub are set up**
+
+```sh
+flatpak remote-add --if-not-exists --user \
+  flathub https://flathub.org/repo/flathub.flatpakrepo
+```
+
+**2. Install grawji.** Download `grawji.flatpak` from the
+[Releases](https://github.com/p5k369/grawji/releases) page, then:
+
+```sh
+flatpak install --user grawji.flatpak
+```
+
+The first install also downloads the GNOME runtime (a few hundred MB, shared
+with other Flatpak apps and only fetched once).
+
+**3. Run it:**
+
+```sh
+flatpak run io.github.p5k369.grawji
+```
+
+
+</details>
+
+> Flathub submission is planned; once it lands, this becomes a single
+> `flatpak install flathub io.github.p5k369.grawji`.
+
+### From source (native)
+
 GTK4 and PyGObject come from your distribution, not pip. So: install the
 system packages, then `make install`.
+
+<details>
+<summary><b>Step-by-step</b></summary>
 
 **1. System packages.** GTK4, libadwaita, PyGObject, the GExiv2 EXIF reader,
 and the USB stack rawji uses. Package names vary by distro:
@@ -76,20 +126,13 @@ cd grawji
 make install
 ```
 
-**3. Set the camera's USB mode.** Before connecting, put the camera into RAW
-conversion mode, or it enumerates as a card reader and rawji cannot talk to
-it. On the camera:
-
-> **Set Up** > **Connection Setting** > **USB Mode** >
-> **USB RAW CONV./BACKUP RESTORE**
-
-Then connect it over USB. This is the same mode Fujifilm X RAW STUDIO uses.
-
-**4. Run:**
+**3. Run:**
 
 ```sh
 make run        # or: .venv/bin/python -m grawji
 ```
+
+</details>
 
 Open a folder of RAFs, pick one from the filmstrip, dial in a recipe, watch
 the preview update, then **Export**.
@@ -99,9 +142,9 @@ the preview update, then **Export**.
 > supported bodies are whatever rawji lists. To add yours, register its USB
 > product id in your rawji checkout and grawji picks it up automatically.
 
-> USB access: most distributions already grant non-root access to the camera
-> via `uaccess` or `plugdev`. If yours does not, add a udev rule for the Fuji
-> vendor id `0x04cb`. Check first before adding one.
+> USB access (native installs): most distributions already grant non-root
+> access to the camera via `uaccess` or `plugdev`. If yours does not, add a
+> udev rule for the Fuji vendor id `0x04cb`. Check first before adding one.
 
 ## Development
 
@@ -116,6 +159,12 @@ make dev RAWJI="-e ../rawji"
 `make lint` runs ruff + `mypy src tests`, `make format` formats, `make test`
 runs pytest (line length 79). `pygobject-stubs` (a dev dependency) gives the
 editor type hints for GTK and libadwaita.
+
+To build the Flatpak (needs `flatpak-builder` and the GNOME 50 runtime/SDK),
+`make flatpak` builds and installs it. `make flatpak-bundle` writes a
+single-file `grawji.flatpak`. The manifest is `flatpak/io.github.p5k369.grawji.yaml`.
+For a Flathub submission its pip dependencies must be pinned with
+flatpak-pip-generator and the `--share=network` build args dropped.
 
 ## Credits
 

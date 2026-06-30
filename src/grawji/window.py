@@ -25,7 +25,6 @@ from gi.repository import (  # noqa: E402
     Gtk,
 )
 from rawji.fuji_enums import (  # noqa: E402
-    FUJIFILM_CAMERA_PIDS,
     FUJIFILM_USB_VENDOR_ID,
     GrainEffect,
 )
@@ -118,9 +117,9 @@ _ROTATIONS = {
     270: GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE,
 }
 
-# Which product ids count as a camera, and the vendor id, come from rawji
-# (FUJIFILM_CAMERA_PIDS / FUJIFILM_USB_VENDOR_ID) so the supported-body list
-# lives in one place: add a camera in rawji and grawji follows automatically.
+# Friendly names for known Fuji product ids. Detection accepts any device on
+# the Fuji vendor id (matching rawji's find_camera); this map only supplies a
+# nice label, falling back to the raw id for bodies not listed here.
 # todo: This map is cosmetic only, could be very well integrated in rawji.
 _PID_NAMES = {
     0x02D1: "X100F",
@@ -962,20 +961,21 @@ class MainWindow(Adw.ApplicationWindow):
 
     @staticmethod
     def _detect_camera() -> str | None:
-        """Return the connected Fuji camera's name, or None.
+        """Return the connected camera's label, or None if none is found.
 
-        A body counts as a camera only if rawji lists its product id, so
-        the supported-hardware set stays defined in rawji alone.
+        Mirrors rawji's find_camera, which connects to any Fujifilm-vendor
+        device, not only the product ids it lists. So any Fuji body is
+        reported here too: named from _PID_NAMES when its id is known, or
+        the generic "Camera" otherwise (e.g. an X70, or a body newer than
+        this list), since grawji works with it regardless.
         """
         try:
             device = usb.core.find(idVendor=FUJIFILM_USB_VENDOR_ID)
         except (usb.core.USBError, ValueError, OSError):
             return None
-        if device is None or device.idProduct not in FUJIFILM_CAMERA_PIDS:
+        if device is None:
             return None
-        return _PID_NAMES.get(
-            device.idProduct, f"Fuji 0x{device.idProduct:04X}"
-        )
+        return _PID_NAMES.get(device.idProduct, "Camera")
 
     def _rebuild_menu(self) -> None:
         """(Re)build the header menu model, including the recipe lists."""

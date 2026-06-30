@@ -4,14 +4,17 @@
 #   make install   one-command venv + rawji (from git) + grawji
 #   make run       launch the app
 #   make dev       same as install plus dev tools and pre-commit hooks
+#   make flatpak   build and install the Flatpak (needs flatpak-builder)
 
 PYTHON ?= python3
 VENV := .venv
 PIP := $(VENV)/bin/pip
 PY := $(VENV)/bin/python
 RAWJI ?= rawji@git+https://github.com/pinpox/rawji
+APP_ID := io.github.p5k369.grawji
+MANIFEST := flatpak/$(APP_ID).yaml
 
-.PHONY: install dev run test lint format clean
+.PHONY: install dev run test lint format clean flatpak flatpak-bundle
 
 $(VENV):
 	$(PYTHON) -m venv --system-site-packages $(VENV)
@@ -42,5 +45,15 @@ lint:
 format:
 	$(VENV)/bin/ruff format src tests
 
+flatpak:
+	flatpak-builder --user --install --force-clean build-flatpak $(MANIFEST)
+	@echo "Done. Run: flatpak run $(APP_ID)"
+
+flatpak-bundle:
+	flatpak-builder --user --force-clean --repo=build-flatpak-repo \
+		build-flatpak $(MANIFEST)
+	flatpak build-bundle build-flatpak-repo grawji.flatpak $(APP_ID)
+	@echo "Wrote grawji.flatpak"
+
 clean:
-	rm -rf $(VENV)
+	rm -rf $(VENV) build-flatpak build-flatpak-repo .flatpak-builder

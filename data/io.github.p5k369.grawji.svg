@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Placeholder icon: a film-frame aperture. Replace with real artwork. -->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3a3a"/>
+      <stop offset="1" stop-color="#1b1b1b"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)"/>
+  <circle cx="64" cy="64" r="34" fill="none" stroke="#e6e6e6" stroke-width="6"/>
+  <circle cx="64" cy="64" r="13" fill="#e6e6e6"/>
+  <g fill="#e6e6e6">
+    <rect x="61" y="18" width="6" height="14" rx="2"/>
+    <rect x="61" y="96" width="6" height="14" rx="2"/>
+    <rect x="18" y="61" width="14" height="6" rx="2"/>
+    <rect x="96" y="61" width="14" height="6" rx="2"/>
+  </g>
+</svg>
