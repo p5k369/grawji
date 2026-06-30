@@ -205,8 +205,8 @@
                                 <child>
                                   <object class="GtkButton">
                                     <property name="icon-name">bookmark-new-symbolic</property>
-                                    <property name="tooltip-text">Save current as preset</property>
-                                    <property name="action-name">win.save-preset</property>
+                                    <property name="tooltip-text">Save current as recipe</property>
+                                    <property name="action-name">win.save-recipe</property>
                                     <style>
                                       <class name="flat"/>
                                     </style>
@@ -225,15 +225,14 @@
                               </object>
                             </property>
                             <child>
-                              <object class="AdwComboRow" id="preset_row">
-                                <property name="title">Preset</property>
+                              <object class="AdwComboRow" id="recipe_row">
+                                <property name="title">Recipe</property>
                               </object>
                             </child>
                           </object>
                         </child>
                         <child>
                           <object class="AdwPreferencesGroup" id="recipe_group">
-                            <property name="title">Recipe</property>
                           </object>
                         </child>
                       </object>

@@ -34,6 +34,7 @@ from grawji import exif, raf  # noqa: E402
 from grawji.capabilities import (  # noqa: E402
     Capabilities,
     capabilities_for,
+    read_iopcode,
 )
 from grawji.core import (  # noqa: E402
     CameraSession,
@@ -41,13 +42,14 @@ from grawji.core import (  # noqa: E402
     recipe_from_profile,
 )
 from grawji.filmstrip import FilmStrip  # noqa: E402
-from grawji.presets import (  # noqa: E402
-    load_presets,
-    presets_path,
-    save_presets,
-)
+from grawji.fp_xml import parse_fp, serialize_fp  # noqa: E402
 from grawji.preview import CameraWorker  # noqa: E402
 from grawji.recipe import Recipe  # noqa: E402
+from grawji.recipes import (  # noqa: E402
+    load_recipes,
+    recipes_path,
+    save_recipes,
+)
 from grawji.settings import (  # noqa: E402
     load_settings,
     save_settings,
@@ -102,7 +104,7 @@ _WB_KELVIN_PRESETS = [
 
 
 def _nearest_kelvin_index(kelvin: int) -> int:
-    """Return the preset index whose Kelvin is closest to ``kelvin``."""
+    """Return the Kelvin preset index closest to the given value."""
     return min(
         range(len(_WB_KELVIN_PRESETS)),
         key=lambda i: abs(_WB_KELVIN_PRESETS[i] - kelvin),
@@ -184,7 +186,7 @@ class MainWindow(Adw.ApplicationWindow):
     spinner = Gtk.Template.Child()
     original_picture = Gtk.Template.Child()
     status = Gtk.Template.Child()
-    preset_row = Gtk.Template.Child()
+    recipe_row = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
     exif_group = Gtk.Template.Child()
     filmstrip_slot = Gtk.Template.Child()
@@ -207,8 +209,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._current_folder: str | None = None
         self._exif_rows: list[Any] = []
         self._suppress_recipe_signals = False
-        self._suppress_preset_signal = False
-        self._preset_names: list[str] = []
+        self._suppress_combo_signal = False
+        self._recipe_names: list[str] = []
         self._applied_recipe = Recipe()
         self._active_label = "Default"
         self._pan_h = 0.0
@@ -216,7 +218,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_pending_id = 0
 
         self._settings = load_settings(settings_path())
-        self._presets = load_presets(presets_path())
+        self._recipes = load_recipes(recipes_path())
         if self._settings.window_width and self._settings.window_height:
             self.set_default_size(
                 self._settings.window_width, self._settings.window_height
@@ -240,7 +242,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._install_actions()
         self._rebuild_menu()
-        self._rebuild_presets()
+        self._rebuild_recipes()
         self._update_recipe_status()
         self._refresh_camera_status()
         GLib.timeout_add_seconds(
@@ -261,9 +263,9 @@ class MainWindow(Adw.ApplicationWindow):
                 ["<Ctrl>e"],
             ),
             (
-                "save-preset",
+                "save-recipe",
                 None,
-                lambda *_a: self._on_save_preset(),
+                lambda *_a: self._on_save_recipe(),
                 ["<Ctrl>s"],
             ),
             ("reset", None, lambda *_a: self._reset_recipe(), ["<Ctrl>r"]),
@@ -275,15 +277,15 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             ("batch-export", None, lambda *_a: self._on_batch_export(), ()),
             (
-                "import-presets",
+                "import-recipe",
                 None,
-                lambda *_a: self._on_import_presets(),
+                lambda *_a: self._on_import_fp(),
                 (),
             ),
             (
-                "export-presets",
+                "export-recipe",
                 None,
-                lambda *_a: self._on_export_presets(),
+                lambda *_a: self._on_export_fp(),
                 (),
             ),
             (
@@ -332,9 +334,9 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             ("about", None, lambda *_a: self._on_about(), ()),
             (
-                "delete-preset",
+                "delete-recipe",
                 "s",
-                lambda _a, p: self._delete_preset(p.get_string()),
+                lambda _a, p: self._delete_recipe(p.get_string()),
                 (),
             ),
         )
@@ -457,6 +459,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.color_space_row,
         ):
             self.recipe_group.add(row)
+        self._update_temp_visibility()
 
     def _connect_signals(self) -> None:
         """Connect widget signals to handlers (done in code, not the .ui)."""
@@ -464,7 +467,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.rotate_left.connect("clicked", self._on_rotate_left)
         self.rotate_right.connect("clicked", self._on_rotate_right)
         self.export_button.connect("clicked", self._on_export_clicked)
-        self.preset_row.connect("notify::selected", self._on_preset_selected)
+        self.recipe_row.connect("notify::selected", self._on_recipe_selected)
         for row in self._combo_rows:
             row.connect("notify::selected", self._on_recipe_changed)
         for slider in self._slider_rows:
@@ -597,48 +600,48 @@ class MainWindow(Adw.ApplicationWindow):
             )
         finally:
             self._suppress_recipe_signals = False
-        self._update_temp_sensitivity()
+        self._update_temp_visibility()
 
     def _set_active_recipe(self, recipe: Recipe, label: str) -> None:
-        """Load a recipe and mark it active (for the preset indicator)."""
+        """Load a recipe and mark it active (for the recipe indicator)."""
         self._applied_recipe = recipe
         self._active_label = label
         self._load_recipe(recipe)
         self._update_recipe_status()
-        self._sync_preset_combo(label)
+        self._sync_recipe_combo(label)
 
-    def _rebuild_presets(self) -> None:
-        """Refresh the preset apply-combo from the saved presets."""
-        self._preset_names = sorted(self._presets)
-        self._suppress_preset_signal = True
+    def _rebuild_recipes(self) -> None:
+        """Refresh the recipe apply-combo from the saved recipes."""
+        self._recipe_names = sorted(self._recipes)
+        self._suppress_combo_signal = True
         try:
-            self.preset_row.set_model(
-                Gtk.StringList.new(["—", *self._preset_names])
+            self.recipe_row.set_model(
+                Gtk.StringList.new(["—", *self._recipe_names])
             )
-            self.preset_row.set_selected(0)
+            self.recipe_row.set_selected(0)
         finally:
-            self._suppress_preset_signal = False
+            self._suppress_combo_signal = False
 
-    def _sync_preset_combo(self, label: str) -> None:
-        """Point the apply-combo at label (or "—" if not a preset)."""
+    def _sync_recipe_combo(self, label: str) -> None:
+        """Point the apply-combo at label (or "—" if not a recipe)."""
         index = (
-            self._preset_names.index(label) + 1
-            if label in self._preset_names
+            self._recipe_names.index(label) + 1
+            if label in self._recipe_names
             else 0
         )
-        self._suppress_preset_signal = True
+        self._suppress_combo_signal = True
         try:
-            self.preset_row.set_selected(index)
+            self.recipe_row.set_selected(index)
         finally:
-            self._suppress_preset_signal = False
+            self._suppress_combo_signal = False
 
-    def _on_preset_selected(self, *_args: object) -> None:
-        """Apply the preset chosen in the apply-combo."""
-        if self._suppress_preset_signal:
+    def _on_recipe_selected(self, *_args: object) -> None:
+        """Apply the recipe chosen in the apply-combo."""
+        if self._suppress_combo_signal:
             return
-        index = self.preset_row.get_selected()
+        index = self.recipe_row.get_selected()
         if index > 0:
-            self._apply_preset(self._preset_names[index - 1])
+            self._apply_recipe(self._recipe_names[index - 1])
 
     def _on_pan_begin(self, _gesture: Any, _x: float, _y: float) -> None:
         """Remember the scroll position at the start of a pan drag."""
@@ -651,7 +654,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_scroll.get_vadjustment().set_value(self._pan_v - dy)
 
     def _update_recipe_status(self) -> None:
-        """Show the active preset/source and whether it has been modified."""
+        """Show the active recipe/source and whether it has been modified."""
         if self._current_recipe() == self._applied_recipe:
             self.recipe_group.set_description(self._active_label)
         else:
@@ -677,20 +680,20 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_wb_mode_changed(self, *_args: object) -> None:
         """Enable the colour-temp slider only in Temperature mode."""
-        self._update_temp_sensitivity()
+        self._update_temp_visibility()
 
-    def _update_temp_sensitivity(self) -> None:
-        """Grey out the colour-temp slider unless WB is Temperature."""
+    def _update_temp_visibility(self) -> None:
+        """Show the colour-temp slider only when WB is Temperature."""
         wb = _WHITE_BALANCES[self.wb_row.get_selected()]
-        self._temp_row.set_sensitive(wb == "Temperature")
+        self._temp_row.set_visible(wb == "Temperature")
 
     def _on_recipe_changed(self, *_args: object) -> None:
-        """Re-render and update the preset indicator on a change."""
+        """Re-render and update the recipe indicator on a change."""
         if self._suppress_recipe_signals:
             return
         self._update_recipe_status()
-        # A manual edit no longer matches a saved preset.
-        self._sync_preset_combo("")
+        # A manual edit no longer matches a saved recipe.
+        self._sync_recipe_combo("")
         if self._session.is_open:
             self._schedule_render()
 
@@ -930,7 +933,7 @@ class MainWindow(Adw.ApplicationWindow):
         for row in (*self._combo_rows, *self._slider_rows, self._wb_grid):
             row.set_sensitive(enabled)
         if enabled:
-            self._update_temp_sensitivity()
+            self._update_temp_visibility()
         self.export_button.set_sensitive(enabled)
         self.status.set_label(status)
 
@@ -975,7 +978,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _rebuild_menu(self) -> None:
-        """(Re)build the header menu model, including the preset lists."""
+        """(Re)build the header menu model, including the recipe lists."""
         menu = Gio.Menu()
 
         view = Gio.Menu()
@@ -986,19 +989,19 @@ class MainWindow(Adw.ApplicationWindow):
         actions.append("Batch Export…", "win.batch-export")
         menu.append_section(None, actions)
 
-        if self._presets:
+        if self._recipes:
             delete_menu = Gio.Menu()
-            for name in sorted(self._presets):
+            for name in sorted(self._recipes):
                 delete_menu.append_item(
-                    self._preset_item(name, "win.delete-preset")
+                    self._recipe_item(name, "win.delete-recipe")
                 )
-            presets = Gio.Menu()
-            presets.append_submenu("Delete Preset", delete_menu)
-            menu.append_section(None, presets)
+            recipes = Gio.Menu()
+            recipes.append_submenu("Delete Recipe", delete_menu)
+            menu.append_section(None, recipes)
 
         files = Gio.Menu()
-        files.append("Import Presets…", "win.import-presets")
-        files.append("Export Presets…", "win.export-presets")
+        files.append("Import Recipe…", "win.import-recipe")
+        files.append("Export Recipe…", "win.export-recipe")
         menu.append_section(None, files)
 
         prefs = Gio.Menu()
@@ -1021,7 +1024,7 @@ class MainWindow(Adw.ApplicationWindow):
                 ("Export JPEG", "<Ctrl>E"),
             ],
             "Recipe": [
-                ("Save preset", "<Ctrl>S"),
+                ("Save recipe", "<Ctrl>S"),
                 ("Reset to default", "<Ctrl>R"),
             ],
             "Navigation": [
@@ -1075,20 +1078,20 @@ class MainWindow(Adw.ApplicationWindow):
         about.present(self)
 
     @staticmethod
-    def _preset_item(name: str, action: str) -> Any:
-        """Build a menu item invoking action with the preset name."""
+    def _recipe_item(name: str, action: str) -> Any:
+        """Build a menu item invoking action with the recipe name."""
         item = Gio.MenuItem.new(name, None)
         item.set_action_and_target_value(action, GLib.Variant("s", name))
         return item
 
-    def _delete_preset(self, name: str) -> None:
-        """Remove a saved preset and persist the change."""
-        if name in self._presets:
-            del self._presets[name]
-            save_presets(self._presets, presets_path())
+    def _delete_recipe(self, name: str) -> None:
+        """Remove a saved recipe and persist the change."""
+        if name in self._recipes:
+            del self._recipes[name]
+            save_recipes(self._recipes, recipes_path())
             self._rebuild_menu()
-            self._rebuild_presets()
-            self.status.set_label(f"Deleted preset “{name}”.")
+            self._rebuild_recipes()
+            self.status.set_label(f"Deleted recipe “{name}”.")
 
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
@@ -1111,12 +1114,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings.load_recipe_from_image = row.get_active()
         save_settings(self._settings, settings_path())
 
-    def _on_save_preset(self) -> None:
-        """Ask for a name and save the current recipe as a preset."""
+    def _on_save_recipe(self) -> None:
+        """Ask for a name and save the current controls as a recipe."""
+        self._prompt_save_recipe(self._current_recipe())
+
+    def _prompt_save_recipe(
+        self, recipe: Recipe, default_name: str = "", *, activate: bool = False
+    ) -> None:
+        """Ask for a name, then store recipe under it and make it active.
+
+        Args:
+            recipe: The recipe to store.
+            default_name: The name pre-filled in the entry.
+            activate: Re-render the preview after saving (used for imports,
+                where the saved recipe is new to the controls).
+        """
         dialog = Adw.AlertDialog(
-            heading="Save preset", body="Name this preset:"
+            heading="Save recipe", body="Name this recipe:"
         )
-        entry = Gtk.Entry()
+        entry = Gtk.Entry(text=default_name)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("save", "Save")
@@ -1124,42 +1140,61 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_response_appearance(
             "save", Adw.ResponseAppearance.SUGGESTED
         )
-        dialog.connect("response", self._on_save_preset_response, entry)
+        dialog.connect(
+            "response", self._on_save_recipe_response, entry, recipe, activate
+        )
         dialog.present(self)
 
-    def _on_save_preset_response(
-        self, _dialog: Any, response: str, entry: Any
+    def _on_save_recipe_response(
+        self,
+        _dialog: Any,
+        response: str,
+        entry: Any,
+        recipe: Recipe,
+        activate: bool,
     ) -> None:
-        """Store the named preset when the save dialog is confirmed."""
+        """Store the named recipe when the save dialog is confirmed."""
         if response != "save":
             return
         name = entry.get_text().strip()
         if not name:
             return
-        self._presets[name] = self._current_recipe()
-        save_presets(self._presets, presets_path())
+        self._recipes[name] = recipe
+        save_recipes(self._recipes, recipes_path())
         self._rebuild_menu()
-        self._rebuild_presets()
-        self.status.set_label(f"Saved preset “{name}”.")
+        self._rebuild_recipes()
+        self._set_active_recipe(recipe, name)
+        if activate and self._session.is_open:
+            self._render_preview()
+        verb = "Imported" if activate else "Saved"
+        self.status.set_label(f"{verb} recipe “{name}”.")
 
-    def _apply_preset(self, name: str) -> None:
-        """Apply a saved preset to the controls and re-render."""
-        recipe = self._presets.get(name)
+    def _apply_recipe(self, name: str) -> None:
+        """Apply a saved recipe to the controls and re-render."""
+        recipe = self._recipes.get(name)
         if recipe is None:
             return
         self._load_recipe(recipe)
         if self._session.is_open:
             self._render_preview()
-        self.status.set_label(f"Applied preset “{name}”.")
+        self.status.set_label(f"Applied recipe “{name}”.")
 
-    def _on_import_presets(self) -> None:
-        """Pick a JSON file and merge its presets into the store."""
+    def _on_import_fp(self) -> None:
+        """Pick an X RAW Studio FP file and import its recipe."""
         dialog = Gtk.FileDialog()
-        dialog.set_title("Import presets")
-        dialog.open(self, None, self._on_import_response)
+        dialog.set_title("Import recipe")
+        fp_filter = Gtk.FileFilter()
+        fp_filter.set_name("X RAW Studio recipes (FP1/FP2/FP3)")
+        for pattern in ("*.FP1", "*.FP2", "*.FP3", "*.fp1", "*.fp2", "*.fp3"):
+            fp_filter.add_pattern(pattern)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(fp_filter)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(fp_filter)
+        dialog.open(self, None, self._on_import_fp_response)
 
-    def _on_import_response(self, dialog: Any, result: Any) -> None:
-        """Merge presets from the chosen file."""
+    def _on_import_fp_response(self, dialog: Any, result: Any) -> None:
+        """Parse the chosen FP file, then save it as a named recipe."""
         try:
             gfile = dialog.open_finish(result)
         except GLib.Error:
@@ -1167,30 +1202,45 @@ class MainWindow(Adw.ApplicationWindow):
         path = gfile.get_path()
         if path is None:
             return
-        imported = load_presets(Path(path))
-        self._presets.update(imported)
-        save_presets(self._presets, presets_path())
-        self._rebuild_menu()
-        self._rebuild_presets()
-        self.status.set_label(f"Imported {len(imported)} preset(s).")
+        try:
+            recipe = parse_fp(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            self.status.set_label(f"Could not import recipe: {exc}")
+            return
+        self._prompt_save_recipe(recipe, Path(path).stem, activate=True)
 
-    def _on_export_presets(self) -> None:
-        """Pick a path and write all presets to it."""
+    def _on_export_fp(self) -> None:
+        """Pick a path and write the current recipe as an FP file."""
         dialog = Gtk.FileDialog()
-        dialog.set_title("Export presets")
-        dialog.set_initial_name("grawji-presets.json")
-        dialog.save(self, None, self._on_export_presets_response)
+        dialog.set_title("Export recipe")
+        stem = self._active_label or _export_basename(
+            self._raf_path or "grawji-recipe"
+        )
+        dialog.set_initial_name(f"{stem}.FP1")
+        dialog.save(self, None, self._on_export_fp_response)
 
-    def _on_export_presets_response(self, dialog: Any, result: Any) -> None:
-        """Write all presets to the chosen file."""
+    def _on_export_fp_response(self, dialog: Any, result: Any) -> None:
+        """Write the current recipe as an FP file to the chosen path."""
         try:
             gfile = dialog.save_finish(result)
         except GLib.Error:
             return
         path = gfile.get_path()
-        if path is not None:
-            save_presets(self._presets, Path(path))
-            self.status.set_label("Exported presets.")
+        if path is None:
+            return
+        profile = self._session.profile
+        iopcode = read_iopcode(profile) if profile is not None else None
+        text = serialize_fp(
+            self._current_recipe(),
+            iopcode=iopcode,
+            label=self._active_label,
+        )
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            self.status.set_label(f"Could not export recipe: {exc}")
+            return
+        self.status.set_label(f"Exported recipe to {path}.")
 
     def _on_batch_export(self) -> None:
         """Pick a folder and export every RAF with the current recipe."""
