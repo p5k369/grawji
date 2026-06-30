@@ -32,6 +32,7 @@ OFF_WB_SHIFT_B = 565
 OFF_WB_COLOR_TEMP = 569
 OFF_HIGHLIGHTS = 573
 OFF_COLOR = 581
+OFF_NOISE_REDUCTION = 589
 OFF_COLOR_SPACE = 597
 
 
@@ -220,6 +221,29 @@ def test_color_temp_only_written_in_temperature_mode():
     assert _u32(other, OFF_WB_COLOR_TEMP) == 0  # untouched base byte
 
 
+def test_apply_recipe_encodes_noise_reduction():
+    """Noise reduction uses its own code table, not the tone encoding."""
+    base = bytes(608)
+    assert (
+        _u32(
+            apply_recipe(base, Recipe(noise_reduction=0)), OFF_NOISE_REDUCTION
+        )
+        == 0x2000
+    )
+    assert (
+        _u32(
+            apply_recipe(base, Recipe(noise_reduction=4)), OFF_NOISE_REDUCTION
+        )
+        == 0x5000
+    )
+    assert (
+        _u32(
+            apply_recipe(base, Recipe(noise_reduction=-4)), OFF_NOISE_REDUCTION
+        )
+        == 0x8000
+    )
+
+
 def test_apply_recipe_patches_color_space():
     """Colour space maps sRGB to 1 and Adobe RGB to 2 in the profile."""
     base = bytes(608)
@@ -251,6 +275,7 @@ def test_recipe_round_trips_through_profile():
         wb_shift_b=-5,
         color_temp=7000,
         color_space="AdobeRGB",
+        noise_reduction=-2,
     )
     profile = apply_recipe(bytes(608), recipe)
     assert recipe_from_profile(profile) == recipe

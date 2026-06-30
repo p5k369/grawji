@@ -419,12 +419,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._sharpness_row = SliderRow(
             "Sharpness", lower=-4, upper=4, fmt=ifmt
         )
+        self._nr_row = SliderRow(
+            "Noise reduction", lower=-4, upper=4, fmt=ifmt
+        )
         self._slider_rows = (
             self._exposure_row,
             self._highlights_row,
             self._shadows_row,
             self._color_row,
             self._sharpness_row,
+            self._nr_row,
             self._temp_row,
         )
         value_chars = max(row.value_chars for row in self._slider_rows)
@@ -445,6 +449,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._shadows_row,
             self._color_row,
             self._sharpness_row,
+            self._nr_row,
             self.color_space_row,
         ):
             self.recipe_group.add(row)
@@ -485,6 +490,7 @@ class MainWindow(Adw.ApplicationWindow):
             shadows=int(self._shadows_row.get_value()),
             color=int(self._color_row.get_value()),
             sharpness=int(self._sharpness_row.get_value()),
+            noise_reduction=int(self._nr_row.get_value()),
             wb_shift_r=red,
             wb_shift_b=blue,
             color_temp=_WB_KELVIN_PRESETS[int(self._temp_row.get_value())],
@@ -571,6 +577,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._shadows_row.set_value(recipe.shadows)
             self._color_row.set_value(recipe.color)
             self._sharpness_row.set_value(recipe.sharpness)
+            self._nr_row.set_value(recipe.noise_reduction)
             self._temp_row.set_value(_nearest_kelvin_index(recipe.color_temp))
             self._wb_grid.set_values(recipe.wb_shift_r, recipe.wb_shift_b)
             self._update_wb_shift_label()
