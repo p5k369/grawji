@@ -33,6 +33,7 @@ class Settings:
             startup); empty means none.
         window_width: Last window width in pixels (0 = use the default).
         window_height: Last window height in pixels (0 = use the default).
+        jpeg_quality: JPEG quality for exports, 1 to 100.
     """
 
     load_recipe_from_image: bool = True
@@ -41,6 +42,7 @@ class Settings:
     last_folder: str = ""
     window_width: int = 0
     window_height: int = 0
+    jpeg_quality: int = 95
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

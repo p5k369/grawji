@@ -10,7 +10,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, Gtk
+from rawji.fuji_enums import FP_WB_SHIFT_MAX
 
 Formatter = Callable[[float], str]
 
@@ -113,7 +114,7 @@ class WBShiftGrid(Gtk.DrawingArea):
     place the marker; values snap to integers.
     """
 
-    _RANGE = 9
+    _RANGE = FP_WB_SHIFT_MAX
 
     def __init__(self) -> None:
         """Create the grid widget."""

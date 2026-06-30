@@ -29,9 +29,14 @@ class FakeSession:
         self.gate = None  # optional Event to block inside render()
         self.render_started = threading.Event()
         self.fail_render = False
+        self.open_gate = None  # optional Event to block inside open()
+        self.open_started = threading.Event()
 
     def open(self, raf_path):
-        """Record the opened RAF path."""
+        """Signal start, optionally block on the gate, then record."""
+        self.open_started.set()
+        if self.open_gate is not None:
+            self.open_gate.wait(timeout=5)
         self.opened.append(raf_path)
 
     def render(self, recipe, *, full_resolution):
@@ -98,6 +103,55 @@ def test_render_coalesces_pending_render():
 
     assert sess.rendered == [("Provia", False), ("Acros", True)]
     assert finished == [b"JPEG:Acros"]
+
+
+def test_open_coalesces_pending_open():
+    """An open queued behind a not-yet-started open replaces it."""
+    sess = FakeSession()
+    sess.open_gate = threading.Event()
+    done = threading.Event()
+
+    worker = CameraWorker(sess)
+    worker.start()
+
+    worker.open("/a.RAF")  # starts, blocks on the gate
+    assert sess.open_started.wait(timeout=5)
+
+    worker.open("/b.RAF")  # queued
+    worker.open("/c.RAF", on_done=notify(done))  # replaces /b.RAF
+
+    sess.open_gate.set()
+    assert done.wait(timeout=5)
+    worker.stop()
+
+    assert sess.opened == ["/a.RAF", "/c.RAF"]  # /b.RAF coalesced away
+
+
+def test_render_does_not_coalesce_a_pending_open():
+    """A render never replaces a queued open of a different kind."""
+    sess = FakeSession()
+    sess.open_gate = threading.Event()
+    done = threading.Event()
+
+    worker = CameraWorker(sess)
+    worker.start()
+
+    worker.open("/a.RAF")  # starts, blocks on the gate
+    assert sess.open_started.wait(timeout=5)
+
+    worker.open("/b.RAF")  # queued open
+    worker.render(
+        Recipe(film_simulation="Velvia"),
+        full_resolution=False,
+        on_done=notify(done),
+    )  # must NOT replace the queued open
+
+    sess.open_gate.set()
+    assert done.wait(timeout=5)
+    worker.stop()
+
+    assert sess.opened == ["/a.RAF", "/b.RAF"]  # open survived
+    assert sess.rendered == [("Velvia", False)]
 
 
 def test_render_error_routed_to_on_error():

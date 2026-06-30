@@ -14,7 +14,9 @@ Dispatch = Callable[[Callable[[], None]], Any]
 OnDone = Callable[[Any], None]
 OnError = Callable[[Exception], None]
 
-_Job = tuple["Callable[[], Any]", "OnDone | None", "OnError | None", bool]
+_Job = tuple[
+    "Callable[[], Any]", "OnDone | None", "OnError | None", "str | None"
+]
 
 
 def _call_now(callback: Callable[[], None]) -> None:
@@ -27,9 +29,10 @@ class CameraWorker:
 
     Submit open / render from the GTK main thread; the work runs
     on a background thread and the on_done / on_error callbacks
-    are handed back through dispatch. A render queued behind another
-    not-yet-started render replaces it (coalescing), so rapid requests do
-    not pile up; opens always run.
+    are handed back through dispatch. A job queued behind another
+    not-yet-started job of the same kind replaces it (coalescing), so
+    rapid requests do not pile up: scrubbing the filmstrip only opens the
+    last image, and only the latest recipe is rendered.
 
     Start the worker (or use it as a context manager) before submitting.
     """
@@ -71,12 +74,16 @@ class CameraWorker:
         on_done: OnDone | None = None,
         on_error: OnError | None = None,
     ) -> None:
-        """Queue opening a RAF (connect + upload + read profile)."""
+        """Queue opening a RAF (connect + upload + read profile).
+
+        Coalesces with a not-yet-started open, so scrubbing the filmstrip
+        only opens the last selection rather than every one passed over.
+        """
         self._submit(
             lambda: self._session.open(raf_path),
             on_done,
             on_error,
-            coalesce=False,
+            coalesce_key="open",
         )
 
     def render(
@@ -94,7 +101,7 @@ class CameraWorker:
             ),
             on_done,
             on_error,
-            coalesce=True,
+            coalesce_key="render",
         )
 
     def submit(
@@ -110,7 +117,7 @@ class CameraWorker:
         session directly. Runs on the worker thread, serialised with all
         other camera operations.
         """
-        self._submit(task, on_done, on_error, coalesce=False)
+        self._submit(task, on_done, on_error, coalesce_key=None)
 
     def stop(self, *, close_session: bool = True) -> None:
         """Stop the worker thread and (by default) close the session."""
@@ -129,16 +136,18 @@ class CameraWorker:
         on_done: OnDone | None,
         on_error: OnError | None,
         *,
-        coalesce: bool,
+        coalesce_key: str | None,
     ) -> None:
-        """Queue a job, coalescing a trailing render when asked."""
+        """Queue a job, replacing a trailing job of the same kind."""
         with self._cond:
-            # A new render replaces a trailing render that has not yet
-            # started - the latest recipe is the only one worth rendering.
-            if coalesce and self._queue and self._queue[-1][3]:
-                self._queue[-1] = (task, on_done, on_error, coalesce)
+            if (
+                coalesce_key is not None
+                and self._queue
+                and self._queue[-1][3] == coalesce_key
+            ):
+                self._queue[-1] = (task, on_done, on_error, coalesce_key)
             else:
-                self._queue.append((task, on_done, on_error, coalesce))
+                self._queue.append((task, on_done, on_error, coalesce_key))
             self._cond.notify()
 
     def _loop(self) -> None:

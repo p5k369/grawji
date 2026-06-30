@@ -21,7 +21,9 @@ from typing import Any, cast
 
 import rawji
 from rawji.fuji_enums import (
+    ColorSpace,
     GrainEffect,
+    ev_to_int,
     int_to_ev,
     validate_color_temp,
     validate_wb_shift,
@@ -30,13 +32,13 @@ from rawji.fuji_profile import (
     INDEX_TO_PARAM,
     PROFILE_PARAMS_OFFSET,
     TONE_PARAMS,
+    decode_noise_reduction,
     decode_tone_value,
+    encode_noise_reduction,
     encode_tone_value,
 )
 
 from grawji.recipe import Recipe
-
-OFFSET_FILM_SIM = 541
 
 # rawji parameter name -> byte offset in the native profile, derived from
 # rawji's layout (PROFILE_PARAMS_OFFSET + index * 4).
@@ -49,30 +51,12 @@ _PARAM_OFFSETS = {
     name: PROFILE_PARAMS_OFFSET + index * 4 for index, name in _index_items
 }
 
-# Export colour space. rawji has no enum for this, and the values were read
-# off the camera: 1 sets the sRGB EXIF tag, 2 the Adobe RGB (Uncalibrated) one.
-# todo: Needs to be added to rawji.
-_COLOR_SPACE_VALUES = {"sRGB": 1, "AdobeRGB": 2}
-_COLOR_SPACE_NAMES = {v: k for k, v in _COLOR_SPACE_VALUES.items()}
+# The film-simulation byte sits at its own parameter offset in rawji's layout.
+OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 
-# todo: Needs to be added to rawji.
-_NR_CODES = {
-    4: 0x5000,
-    3: 0x6000,
-    2: 0x0,
-    1: 0x1000,
-    0: 0x2000,
-    -1: 0x3000,
-    -2: 0x4000,
-    -3: 0x7000,
-    -4: 0x8000,
-}
-_NR_LEVELS = {code: level for level, code in _NR_CODES.items()}
-
-# Tone params that DO use the value*10 encoding (rawji wrongly includes
-# NoiseReduction, which has the distinct table above).
-# todo: Needs to be updated in rawji.
-_TONE_PARAMS = frozenset(TONE_PARAMS) - {"NoiseReduction"}
+# Params that use the value*10 tone encoding. rawji's TONE_PARAMS already
+# excludes NoiseReduction.
+_TONE_PARAMS = frozenset(TONE_PARAMS)
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
@@ -144,24 +128,6 @@ def _enum_value(enum_cls: Any, name: str, kind: str) -> int:
         raise ValueError(msg) from e
 
 
-def _color_space_value(name: str) -> int:
-    """Return the profile value for a colour-space name (sRGB / AdobeRGB)."""
-    try:
-        return _COLOR_SPACE_VALUES[name]
-    except KeyError as e:
-        msg = f"unknown colour space: {name}"
-        raise ValueError(msg) from e
-
-
-def _noise_reduction_code(level: int) -> int:
-    """Return the d185 code for a noise-reduction level (-4 to +4)."""
-    try:
-        return _NR_CODES[level]
-    except KeyError as e:
-        msg = f"noise reduction out of range: {level}"
-        raise ValueError(msg) from e
-
-
 def film_simulation_byte(name: str) -> int:
     """Return the profile byte for a film-simulation member name.
 
@@ -202,7 +168,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
     )
     changes = {
         "FilmSimulation": film_sim,
-        "ExposureBias": round(recipe.exposure * 1000),
+        "ExposureBias": ev_to_int(recipe.exposure),
         "DynamicRange": _enum_value(
             rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
         ),
@@ -211,8 +177,10 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
         "Sharpness": recipe.sharpness,
-        "NoiseReduction": _noise_reduction_code(recipe.noise_reduction),
-        "ColorSpace": _color_space_value(recipe.color_space),
+        "NoiseReduction": encode_noise_reduction(recipe.noise_reduction),
+        "ColorSpace": _enum_value(
+            ColorSpace, recipe.color_space, "colour space"
+        ),
         "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
         "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
     }
@@ -311,12 +279,14 @@ def recipe_from_profile(base: bytes) -> Recipe:
         shadows=decode_tone_value(signed("ShadowTone")),
         color=decode_tone_value(signed("Color")),
         sharpness=decode_tone_value(signed("Sharpness")),
-        noise_reduction=_NR_LEVELS.get(signed("NoiseReduction", 0x2000), 0),
+        noise_reduction=decode_noise_reduction(
+            signed("NoiseReduction", 0x2000)
+        ),
         wb_shift_r=signed("WBShiftR"),
         wb_shift_b=signed("WBShiftB"),
         color_temp=color_temp if color_temp > 0 else defaults.color_temp,
-        color_space=_COLOR_SPACE_NAMES.get(
-            signed("ColorSpace", 1), defaults.color_space
+        color_space=_enum_name(
+            ColorSpace, signed("ColorSpace", 1), defaults.color_space
         ),
     )
 

@@ -17,6 +17,9 @@ _JPEG_SOI = b"\xff\xd8"
 def embedded_jpeg(path: str | Path) -> bytes:
     """Return the JPEG preview embedded in a RAF file.
 
+    Reads only the header and the JPEG slice (via seek), not the whole
+    multi-megabyte RAF, so opening an image stays responsive.
+
     Args:
         path: Path to the .RAF file.
 
@@ -26,7 +29,26 @@ def embedded_jpeg(path: str | Path) -> bytes:
     Raises:
         ValueError: If the file is not a RAF or has no embedded JPEG.
     """
-    return embedded_jpeg_from_bytes(Path(path).read_bytes())
+    with Path(path).open("rb") as handle:
+        header = handle.read(_HEADER_MIN)
+        if not header.startswith(RAF_MAGIC):
+            msg = "not a Fujifilm RAF file (bad magic)"
+            raise ValueError(msg)
+        if len(header) < _HEADER_MIN:
+            msg = "RAF header too short"
+            raise ValueError(msg)
+        offset = struct.unpack(
+            ">I", header[_JPEG_OFFSET_POS : _JPEG_OFFSET_POS + 4]
+        )[0]
+        length = struct.unpack(
+            ">I", header[_JPEG_LENGTH_POS : _JPEG_LENGTH_POS + 4]
+        )[0]
+        handle.seek(offset)
+        jpeg = handle.read(length)
+    if len(jpeg) != length or not jpeg.startswith(_JPEG_SOI):
+        msg = "RAF has no valid embedded JPEG"
+        raise ValueError(msg)
+    return jpeg
 
 
 def embedded_jpeg_from_bytes(data: bytes) -> bytes:
