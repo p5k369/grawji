@@ -49,56 +49,43 @@ time, and slider previews are debounced.
 
 ## Install
 
-GTK4 and PyGObject come from your **distribution**, not pip, so the flow is:
-install the system packages, clone rawji and grawji, then build a venv that
-can see the system PyGObject.
+GTK4 and PyGObject come from your distribution, not pip. So: install the
+system packages, then `make install`.
 
 **1. System packages.** GTK4, libadwaita, PyGObject, the GExiv2 EXIF reader,
 and the USB stack rawji uses. Package names vary by distro:
 
 | Distro | Install |
 | --- | --- |
-| Debian / Ubuntu | `apt install git python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gexiv2-0.10 libgtk-4-1 libusb-1.0-0` |
-| Fedora | `dnf install git python3-gobject gtk4 libadwaita gexiv2 libusb1` |
-| Arch | `pacman -S git python-gobject gtk4 libadwaita gexiv2 libusb` |
-| openSUSE | `zypper install git python3-gobject gtk4 libadwaita-1-0 typelib-1_0-GExiv2-0_10 libusb-1_0-0` |
-| Gentoo | `emerge dev-vcs/git dev-python/pygobject gui-libs/gtk:4 gui-libs/libadwaita media-libs/gexiv2 dev-python/pyusb virtual/libusb` |
+| Debian / Ubuntu | `apt install git make python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gexiv2-0.10 libgtk-4-1 libusb-1.0-0` |
+| Fedora | `dnf install git make python3-gobject gtk4 libadwaita gexiv2 libusb1` |
+| Arch | `pacman -S git make python-gobject gtk4 libadwaita gexiv2 libusb` |
+| openSUSE | `zypper install git make python3-gobject gtk4 libadwaita-1-0 typelib-1_0-GExiv2-0_10 libusb-1_0-0` |
+| Gentoo | `emerge dev-vcs/git sys-devel/make dev-python/pygobject gui-libs/gtk:4 gui-libs/libadwaita media-libs/gexiv2 dev-python/pyusb virtual/libusb` |
 
-**2. Get the code.** rawji is not on PyPI, and grawji installs it from the
-sibling folder, so clone them next to each other:
+**2. Install grawji.** Clone it and run `make install`. That builds a venv
+(with `--system-site-packages` so it can import the system GTK), fetches rawji
+from git, and installs grawji:
 
 ```sh
-git clone https://github.com/pinpox/rawji
 git clone https://github.com/p5k369/grawji
 cd grawji
+make install
 ```
 
-**3. Python environment.** Create the venv with `--system-site-packages` so it
-can import the system GTK and PyGObject, then install rawji and grawji into it:
-
-```sh
-python -m venv --system-site-packages .venv
-. .venv/bin/activate
-pip install -e ../rawji          # rawji, from the sibling clone
-pip install -e .                 # grawji itself
-```
-
-Without `--system-site-packages` the venv cannot `import gi` and the app will
-not start.
-
-**4. Set the camera's USB mode.** Before connecting, put the camera into RAW
+**3. Set the camera's USB mode.** Before connecting, put the camera into RAW
 conversion mode, or it enumerates as a card reader and rawji cannot talk to
 it. On the camera:
 
-> **Set Up** (wrench) > **Connection Setting** > **USB Mode** >
+> **Set Up** > **Connection Setting** > **USB Mode** >
 > **USB RAW CONV./BACKUP RESTORE**
 
 Then connect it over USB. This is the same mode Fujifilm X RAW STUDIO uses.
 
-**5. Run:**
+**4. Run:**
 
 ```sh
-python -m grawji
+make run        # or: .venv/bin/python -m grawji
 ```
 
 Open a folder of RAFs, pick one from the filmstrip, dial in a recipe, watch
@@ -115,26 +102,17 @@ the preview update, then **Export**.
 
 ## Development
 
-For contributing, install the dev extras and the pre-commit hooks on top of
-the steps above:
+`make dev` builds the venv with the dev extras and installs the pre-commit
+hooks. To hack on rawji too (e.g. add a camera product id), clone it next to
+grawji and override the dependency with an editable checkout:
 
 ```sh
-pip install -e ".[dev]"
-pre-commit install
+make dev RAWJI="-e ../rawji"
 ```
 
-`ruff check` and `ruff format` lint and format (line length 79), `mypy src
-tests` type-checks, and `pytest` runs the tests. `pygobject-stubs` (a dev
-dependency) gives the editor type hints for GTK and libadwaita.
-
-### Packaging
-
-`pyproject.toml` `[project]` metadata (PEP 621) is the single source of
-truth, built with **hatchling** (PEP 517). No lockfile or `requirements.txt`.
-Distros read the metadata and substitute their own dependency versions.
-Runtime deps (`PyGObject`, `rawji`) are declared abstractly so each distro's
-packaging (Debian `pybuild`, Fedora `%pyproject` macros, Arch PKGBUILD,
-Gentoo ebuild, and so on) maps them to its own system packages.
+`make lint` runs ruff + `mypy src tests`, `make format` formats, `make test`
+runs pytest (line length 79). `pygobject-stubs` (a dev dependency) gives the
+editor type hints for GTK and libadwaita.
 
 ## Credits
 
