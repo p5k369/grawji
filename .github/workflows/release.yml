@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  # Refuse to release unless the tag, pyproject and the AppStream metainfo all
+  # agree on the version, so they can never drift apart in a published build.
+  version-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches pyproject and metainfo
+        run: python scripts/check_version.py --tag "${{ github.ref_name }}"
+
+  flatpak:
+    needs: version-guard
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: grawji.flatpak
+          manifest-path: flatpak/io.github.p5k369.grawji.yaml
+          cache-key: flatpak-builder-${{ github.ref_name }}
+      - name: Create the release and attach the bundle
+        uses: softprops/action-gh-release@v2
+        with:
+          files: grawji.flatpak
+          generate_release_notes: true
