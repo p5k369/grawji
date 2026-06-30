@@ -26,6 +26,7 @@ class Recipe:
         shadows: Shadow tone, -2 to +4.
         color: Colour / saturation, -4 to +4.
         sharpness: Sharpness, -4 to +4.
+        noise_reduction: Noise reduction, -4 to +4.
         wb_shift_r: White-balance red shift, -9 to +9.
         wb_shift_b: White-balance blue shift, -9 to +9.
         color_temp: White-balance colour temperature in kelvin,
@@ -43,6 +44,7 @@ class Recipe:
     shadows: int = 0
     color: int = 0
     sharpness: int = 0
+    noise_reduction: int = 0
     wb_shift_r: int = 0
     wb_shift_b: int = 0
     color_temp: int = 5500

@@ -8,9 +8,6 @@ read-modify-write (RMW) profile strategy:
                             -> trigger_conversion -> wait_for_result
     quit:                   disconnect
 
-Order matters: send_raf *before* get_profile; profile-set
-*before* trigger. send_raf runs only on open, never per slider move.
-
 """
 
 from __future__ import annotations
@@ -57,6 +54,25 @@ _PARAM_OFFSETS = {
 # todo: Needs to be added to rawji.
 _COLOR_SPACE_VALUES = {"sRGB": 1, "AdobeRGB": 2}
 _COLOR_SPACE_NAMES = {v: k for k, v in _COLOR_SPACE_VALUES.items()}
+
+# todo: Needs to be added to rawji.
+_NR_CODES = {
+    4: 0x5000,
+    3: 0x6000,
+    2: 0x0,
+    1: 0x1000,
+    0: 0x2000,
+    -1: 0x3000,
+    -2: 0x4000,
+    -3: 0x7000,
+    -4: 0x8000,
+}
+_NR_LEVELS = {code: level for level, code in _NR_CODES.items()}
+
+# Tone params that DO use the value*10 encoding (rawji wrongly includes
+# NoiseReduction, which has the distinct table above).
+# todo: Needs to be updated in rawji.
+_TONE_PARAMS = frozenset(TONE_PARAMS) - {"NoiseReduction"}
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
@@ -137,6 +153,15 @@ def _color_space_value(name: str) -> int:
         raise ValueError(msg) from e
 
 
+def _noise_reduction_code(level: int) -> int:
+    """Return the d185 code for a noise-reduction level (-4 to +4)."""
+    try:
+        return _NR_CODES[level]
+    except KeyError as e:
+        msg = f"noise reduction out of range: {level}"
+        raise ValueError(msg) from e
+
+
 def film_simulation_byte(name: str) -> int:
     """Return the profile byte for a film-simulation member name.
 
@@ -186,6 +211,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
         "Sharpness": recipe.sharpness,
+        "NoiseReduction": _noise_reduction_code(recipe.noise_reduction),
         "ColorSpace": _color_space_value(recipe.color_space),
         "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
         "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
@@ -225,7 +251,7 @@ def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
         if offset + 4 > len(out):
             msg = f"profile too short ({len(base)} bytes) for {name}"
             raise ValueError(msg)
-        encoded = encode_tone_value(value) if name in TONE_PARAMS else value
+        encoded = encode_tone_value(value) if name in _TONE_PARAMS else value
         if encoded < 0:
             encoded = (1 << 32) + encoded
         struct.pack_into("<I", out, offset, encoded)
@@ -285,6 +311,7 @@ def recipe_from_profile(base: bytes) -> Recipe:
         shadows=decode_tone_value(signed("ShadowTone")),
         color=decode_tone_value(signed("Color")),
         sharpness=decode_tone_value(signed("Sharpness")),
+        noise_reduction=_NR_LEVELS.get(signed("NoiseReduction", 0x2000), 0),
         wb_shift_r=signed("WBShiftR"),
         wb_shift_b=signed("WBShiftB"),
         color_temp=color_temp if color_temp > 0 else defaults.color_temp,
