@@ -3,7 +3,6 @@
 import struct
 
 import pytest
-from rawji.fuji_enums import ev_to_int
 from rawji.fuji_profile import encode_tone_value
 
 from grawji.core import (
@@ -33,6 +32,7 @@ OFF_WB_SHIFT_B = 565
 OFF_WB_COLOR_TEMP = 569
 OFF_HIGHLIGHTS = 573
 OFF_COLOR = 581
+OFF_COLOR_SPACE = 597
 
 
 def _u32(profile, offset):
@@ -48,7 +48,7 @@ class FakeCamera:
         self.calls = []
         self._connect_ok = connect_ok
         self._fail_on = fail_on  # method name that should raise 0x2002
-        self._profile = profile if profile is not None else bytes(600)
+        self._profile = profile if profile is not None else bytes(608)
         self.set_profiles = []
         self.last_full_resolution = None
 
@@ -134,14 +134,14 @@ def test_film_simulation_byte_unknown():
 
 def test_apply_recipe_patches_film_sim():
     """apply_recipe patches the recipe's film simulation into the profile."""
-    base = bytes(600)
+    base = bytes(608)
     patched = apply_recipe(base, Recipe(film_simulation="Velvia"))
     assert patched[OFFSET_FILM_SIM] == VELVIA_BYTE
 
 
 def test_apply_recipe_patches_enums():
     """White balance and dynamic range use rawji's enum profile values."""
-    base = bytes(600)
+    base = bytes(608)
     patched = apply_recipe(
         base, Recipe(white_balance="Daylight", dynamic_range="DR400")
     )
@@ -152,7 +152,7 @@ def test_apply_recipe_patches_enums():
 
 def test_apply_recipe_asshot_leaves_white_balance_untouched():
     """AsShot does not write the WB fields (keeps the RAF's own WB)."""
-    base = bytearray(600)
+    base = bytearray(608)
     struct.pack_into("<I", base, OFF_WB_SHOOTCOND, 1)  # native as-shot
     struct.pack_into("<I", base, OFF_WHITE_BALANCE, 7)  # arbitrary marker
     patched = apply_recipe(bytes(base), Recipe(white_balance="AsShot"))
@@ -162,7 +162,7 @@ def test_apply_recipe_asshot_leaves_white_balance_untouched():
 
 def test_apply_recipe_encodes_tone_values():
     """Tone params are scaled by encode_tone_value; negatives wrap to u32."""
-    base = bytes(600)
+    base = bytes(608)
     patched = apply_recipe(base, Recipe(highlights=2, color=-4))
     assert _u32(patched, OFF_HIGHLIGHTS) == encode_tone_value(2)
     expected_color = (1 << 32) + encode_tone_value(-4)
@@ -172,35 +172,35 @@ def test_apply_recipe_encodes_tone_values():
 def test_apply_recipe_validates_range():
     """An out-of-range tone value is rejected by rawji.validate_params."""
     with pytest.raises(ValueError, match="Highlights out of range"):
-        apply_recipe(bytes(600), Recipe(highlights=10))
+        apply_recipe(bytes(608), Recipe(highlights=10))
 
 
 def test_apply_recipe_rejects_unknown_names():
     """Unknown white-balance / dynamic-range names raise ValueError."""
     with pytest.raises(ValueError, match=r"white balance"):
-        apply_recipe(bytes(600), Recipe(white_balance="Nope"))
+        apply_recipe(bytes(608), Recipe(white_balance="Nope"))
     with pytest.raises(ValueError, match=r"dynamic range"):
-        apply_recipe(bytes(600), Recipe(dynamic_range="DR999"))
+        apply_recipe(bytes(608), Recipe(dynamic_range="DR999"))
 
 
 def test_apply_recipe_patches_exposure_and_grain():
-    """Exposure uses EV encoding; grain uses its enum value."""
-    base = bytes(600)
-    patched = apply_recipe(base, Recipe(exposure=1.0, grain="Strong"))
-    assert _u32(patched, OFF_EXPOSURE) == ev_to_int(1.0)  # +1 EV -> 1000
+    """Exposure encodes as round(EV * 1000); grain uses its enum value."""
+    base = bytes(608)
+    patched = apply_recipe(base, Recipe(exposure=2 / 3, grain="Strong"))
+    assert _u32(patched, OFF_EXPOSURE) == 667  # +2/3 EV, rounded not floored
     assert _u32(patched, OFF_GRAIN) == 3  # GrainEffect.Strong
 
 
 def test_apply_recipe_negative_exposure_wraps():
-    """Negative exposure wraps to unsigned like the tone params."""
-    base = bytes(600)
+    """Negative exposure wraps to unsigned."""
+    base = bytes(608)
     patched = apply_recipe(base, Recipe(exposure=-1.0))
-    assert _u32(patched, OFF_EXPOSURE) == (1 << 32) + ev_to_int(-1.0)
+    assert _u32(patched, OFF_EXPOSURE) == (1 << 32) - 1000
 
 
 def test_apply_recipe_patches_wb_shift():
     """WB shift R/B are written raw, with negatives wrapped to u32."""
-    base = bytes(600)
+    base = bytes(608)
     patched = apply_recipe(base, Recipe(wb_shift_r=9, wb_shift_b=-9))
     assert _u32(patched, OFF_WB_SHIFT_R) == 9
     assert _u32(patched, OFF_WB_SHIFT_B) == (1 << 32) - 9
@@ -208,7 +208,7 @@ def test_apply_recipe_patches_wb_shift():
 
 def test_color_temp_only_written_in_temperature_mode():
     """Colour temp is written only when white balance is Temperature."""
-    base = bytes(600)
+    base = bytes(608)
     in_temp = apply_recipe(
         base, Recipe(white_balance="Temperature", color_temp=8000)
     )
@@ -218,6 +218,15 @@ def test_color_temp_only_written_in_temperature_mode():
         base, Recipe(white_balance="Daylight", color_temp=8000)
     )
     assert _u32(other, OFF_WB_COLOR_TEMP) == 0  # untouched base byte
+
+
+def test_apply_recipe_patches_color_space():
+    """Colour space maps sRGB to 1 and Adobe RGB to 2 in the profile."""
+    base = bytes(608)
+    srgb = apply_recipe(base, Recipe(color_space="sRGB"))
+    adobe = apply_recipe(base, Recipe(color_space="AdobeRGB"))
+    assert _u32(srgb, OFF_COLOR_SPACE) == 1
+    assert _u32(adobe, OFF_COLOR_SPACE) == 2
 
 
 def test_apply_recipe_rejects_short_profile():
@@ -241,14 +250,15 @@ def test_recipe_round_trips_through_profile():
         wb_shift_r=4,
         wb_shift_b=-5,
         color_temp=7000,
+        color_space="AdobeRGB",
     )
-    profile = apply_recipe(bytes(600), recipe)
+    profile = apply_recipe(bytes(608), recipe)
     assert recipe_from_profile(profile) == recipe
 
 
 def test_recipe_from_profile_falls_back_on_unknown_enum():
     """An enum value not in rawji's enum falls back to the default."""
-    base = bytearray(apply_recipe(bytes(600), Recipe()))
+    base = bytearray(apply_recipe(bytes(608), Recipe()))
     struct.pack_into("<I", base, OFF_WHITE_BALANCE, 0xABCD)  # not a WB value
     assert recipe_from_profile(bytes(base)).white_balance == "AsShot"
 

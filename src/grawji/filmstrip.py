@@ -47,7 +47,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._current = -1
 
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        self._box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._box.set_margin_start(4)
         self._box.set_margin_end(4)
         self._box.set_margin_top(4)
@@ -164,13 +164,30 @@ class FilmStrip(Gtk.ScrolledWindow):
             )
 
     def _decode_thumb(self, jpeg: bytes) -> Any:
-        """Decode JPEG bytes into a thumbnail-sized, oriented pixbuf."""
+        """Decode JPEG bytes into an oriented pixbuf exactly thumb_height tall.
+
+        Orientation can rotate the image after the load-time scaling, so the
+        result is rescaled to the row height to keep widths true to aspect.
+        """
         loader = GdkPixbuf.PixbufLoader()
         loader.connect("size-prepared", self._scale_to_thumb)
         loader.write(jpeg)
         loader.close()
         pixbuf = loader.get_pixbuf()
-        return pixbuf.apply_embedded_orientation() or pixbuf
+        pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
+        if pixbuf.get_height() != self._thumb_height:
+            width = max(
+                1,
+                round(
+                    pixbuf.get_width()
+                    * self._thumb_height
+                    / pixbuf.get_height()
+                ),
+            )
+            pixbuf = pixbuf.scale_simple(
+                width, self._thumb_height, GdkPixbuf.InterpType.BILINEAR
+            )
+        return pixbuf
 
     def _scale_to_thumb(self, loader: Any, width: int, height: int) -> None:
         """Scale the image to the thumbnail height, keeping aspect."""
@@ -180,6 +197,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         loader.set_size(max(1, int(width * scale)), self._thumb_height)
 
     def _apply_thumb(self, picture: Any, pixbuf: Any, scan_id: int) -> None:
-        """Set the thumbnail on its picture if the scan is still current."""
+        """Set the thumbnail and size its card to the image's real width."""
         if scan_id == self._scan_id:
+            picture.set_size_request(pixbuf.get_width(), self._thumb_height)
             picture.set_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))

@@ -5,4 +5,4 @@ thin adapter and presents an interactive UI for tuning a recipe with a
 live preview, then exporting at full resolution.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

@@ -6,7 +6,7 @@ simulations, identical to X RAW STUDIO).
 
 The name is **g**(tk) + **rawji**. rawji is command-line only, grawji makes
 *interactive* work on the look practical: set a recipe, see a live preview,
-export — instead of typing CLI flags.
+export.
 
 <p align="center">
   <img src="docs/screenshot.png" alt="grawji main window: original + EXIF on the
@@ -47,61 +47,96 @@ marshalled back via `GLib.idle_add`. Only one camera op is in flight at a
 time, and slider previews are debounced.
 
 
-## Development
+## Install
 
-PyGObject and GTK4 are **not** pip-installable cleanly, they come from your
-distribution. Install them (plus the USB stack rawji uses) as system
-packages, then build a venv that can *see* them with `--system-site-packages`:
+GTK4 and PyGObject come from your **distribution**, not pip, so the flow is:
+install the system packages, clone rawji and grawji, then build a venv that
+can see the system PyGObject.
+
+**1. System packages.** GTK4, libadwaita, PyGObject, the GExiv2 EXIF reader,
+and the USB stack rawji uses. Package names vary by distro:
+
+| Distro | Install |
+| --- | --- |
+| Debian / Ubuntu | `apt install git python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gexiv2-0.10 libgtk-4-1 libusb-1.0-0` |
+| Fedora | `dnf install git python3-gobject gtk4 libadwaita gexiv2 libusb1` |
+| Arch | `pacman -S git python-gobject gtk4 libadwaita gexiv2 libusb` |
+| openSUSE | `zypper install git python3-gobject gtk4 libadwaita-1-0 typelib-1_0-GExiv2-0_10 libusb-1_0-0` |
+| Gentoo | `emerge dev-vcs/git dev-python/pygobject gui-libs/gtk:4 gui-libs/libadwaita media-libs/gexiv2 dev-python/pyusb virtual/libusb` |
+
+**2. Get the code.** rawji is not on PyPI, and grawji installs it from the
+sibling folder, so clone them next to each other:
 
 ```sh
-python -m venv --system-site-packages .venv && . .venv/bin/activate
-pip install -e ../rawji          # rawji is not on PyPI
-pip install -e ".[dev]"          # finds system PyGObject; installs dev tools
-pre-commit install
+git clone https://github.com/pinpox/rawji
+git clone https://github.com/p5k369/grawji
+cd grawji
 ```
 
-Without `--system-site-packages` the venv can't `import gi` and the app
-won't start.
+**3. Python environment.** Create the venv with `--system-site-packages` so it
+can import the system GTK and PyGObject, then install rawji and grawji into it:
 
-### Running
+```sh
+python -m venv --system-site-packages .venv
+. .venv/bin/activate
+pip install -e ../rawji          # rawji, from the sibling clone
+pip install -e .                 # grawji itself
+```
+
+Without `--system-site-packages` the venv cannot `import gi` and the app will
+not start.
+
+**4. Set the camera's USB mode.** Before connecting, put the camera into RAW
+conversion mode, or it enumerates as a card reader and rawji cannot talk to
+it. On the camera:
+
+> **Set Up** (wrench) > **Connection Setting** > **USB Mode** >
+> **USB RAW CONV./BACKUP RESTORE**
+
+Then connect it over USB. This is the same mode Fujifilm X RAW STUDIO uses.
+
+**5. Run:**
 
 ```sh
 python -m grawji
 ```
 
-Connect the camera over USB, open a folder of RAFs, pick one from the
-filmstrip, dial in a recipe and watch the preview update, then **Export**.
+Open a folder of RAFs, pick one from the filmstrip, dial in a recipe, watch
+the preview update, then **Export**.
 
 > The RAF must come from the **connected camera body**. Fuji cameras only
-> convert their own files, so a foreign RAF fails with PTP `0x2002`. Cameras
-> are identified by USB product id; grawji targets the ids rawji already
-> knows, and others can be added in your rawji checkout.
+> convert their own files, so a foreign RAF fails with PTP `0x2002`. The
+> supported bodies are whatever rawji lists. To add yours, register its USB
+> product id in your rawji checkout and grawji picks it up automatically.
 
-System packages by distribution (names vary, USB stack pulled in via rawji):
+> USB access: most distributions already grant non-root access to the camera
+> via `uaccess` or `plugdev`. If yours does not, add a udev rule for the Fuji
+> vendor id `0x04cb`. Check first before adding one.
 
-| Distro | Install |
-| --- | --- |
-| Debian / Ubuntu | `apt install python3-gi gir1.2-gtk-4.0 libgtk-4-1 libusb-1.0-0` |
-| Fedora | `dnf install python3-gobject gtk4 libusb1` |
-| Arch | `pacman -S python-gobject gtk4 libusb` |
-| openSUSE | `zypper install python3-gobject gtk4 libusb-1_0-0` |
-| Gentoo | `emerge dev-python/pygobject gui-libs/gtk:4 dev-python/pyusb virtual/libusb` |
+## Development
+
+For contributing, install the dev extras and the pre-commit hooks on top of
+the steps above:
+
+```sh
+pip install -e ".[dev]"
+pre-commit install
+```
+
+`ruff check` and `ruff format` lint and format (line length 79), `mypy src
+tests` type-checks, and `pytest` runs the tests. `pygobject-stubs` (a dev
+dependency) gives the editor type hints for GTK and libadwaita.
 
 ### Packaging
 
 `pyproject.toml` `[project]` metadata (PEP 621) is the single source of
-truth, built with **hatchling** (PEP 517). No lockfile / `requirements.txt`.
+truth, built with **hatchling** (PEP 517). No lockfile or `requirements.txt`.
 Distros read the metadata and substitute their own dependency versions.
 Runtime deps (`PyGObject`, `rawji`) are declared abstractly so each distro's
 packaging (Debian `pybuild`, Fedora `%pyproject` macros, Arch PKGBUILD,
-Gentoo ebuild, …) maps them to its own system packages.
+Gentoo ebuild, and so on) maps them to its own system packages.
 
-
-> USB: most distributions already grant non-root access to the camera via
-> `uaccess`/`plugdev`. If yours doesn't, add a udev rule for the Fuji vendor
-> id `0x04cb` — check first before adding one.
-
-## Acknowledgements
+## Credits
 
 grawji stands entirely on [rawji](https://github.com/pinpox/rawji) by
 **[pinpox](https://github.com/pinpox)**, who did the hard work of talking to

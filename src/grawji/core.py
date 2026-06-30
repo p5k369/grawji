@@ -25,7 +25,6 @@ from typing import Any, cast
 import rawji
 from rawji.fuji_enums import (
     GrainEffect,
-    ev_to_int,
     int_to_ev,
     validate_color_temp,
     validate_wb_shift,
@@ -52,6 +51,12 @@ _index_items = (
 _PARAM_OFFSETS = {
     name: PROFILE_PARAMS_OFFSET + index * 4 for index, name in _index_items
 }
+
+# Export colour space. rawji has no enum for this, and the values were read
+# off the camera: 1 sets the sRGB EXIF tag, 2 the Adobe RGB (Uncalibrated) one.
+# todo: Needs to be added to rawji.
+_COLOR_SPACE_VALUES = {"sRGB": 1, "AdobeRGB": 2}
+_COLOR_SPACE_NAMES = {v: k for k, v in _COLOR_SPACE_VALUES.items()}
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
@@ -123,6 +128,15 @@ def _enum_value(enum_cls: Any, name: str, kind: str) -> int:
         raise ValueError(msg) from e
 
 
+def _color_space_value(name: str) -> int:
+    """Return the profile value for a colour-space name (sRGB / AdobeRGB)."""
+    try:
+        return _COLOR_SPACE_VALUES[name]
+    except KeyError as e:
+        msg = f"unknown colour space: {name}"
+        raise ValueError(msg) from e
+
+
 def film_simulation_byte(name: str) -> int:
     """Return the profile byte for a film-simulation member name.
 
@@ -163,7 +177,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
     )
     changes = {
         "FilmSimulation": film_sim,
-        "ExposureBias": ev_to_int(recipe.exposure),
+        "ExposureBias": round(recipe.exposure * 1000),
         "DynamicRange": _enum_value(
             rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
         ),
@@ -172,6 +186,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
         "Sharpness": recipe.sharpness,
+        "ColorSpace": _color_space_value(recipe.color_space),
         "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
         "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
     }
@@ -273,6 +288,9 @@ def recipe_from_profile(base: bytes) -> Recipe:
         wb_shift_r=signed("WBShiftR"),
         wb_shift_b=signed("WBShiftB"),
         color_temp=color_temp if color_temp > 0 else defaults.color_temp,
+        color_space=_COLOR_SPACE_NAMES.get(
+            signed("ColorSpace", 1), defaults.color_space
+        ),
     )
 
 
