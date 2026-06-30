@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "grawji"
-version = "0.0.1"
+dynamic = ["version"]
 description = "GTK4 frontend for rawji - interactive Fuji RAF conversion via the camera engine."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,8 +12,6 @@ license = "GPL-3.0-or-later"
 authors = [{ name = "Patrick Zwerschke" }]
 dependencies = [
   "PyGObject",
-  # rawji is not on PyPI - install the fork editable alongside grawji:
-  #   pip install -e ../rawji
   "rawji",
 ]
 
@@ -33,6 +31,9 @@ dev = [
 
 [project.scripts]
 grawji = "grawji.__main__:main"
+
+[tool.hatch.version]
+path = "src/grawji/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/grawji"]
@@ -131,7 +132,7 @@ ignore_missing_imports = true
 
 # pygobject-stubs is installed for editor type hints, but grawji treats the
 # GTK layer as untyped. Skip the gi stubs in mypy so it does not type-check
-# the dynamic GObject API (kwargs ctors, nullable returns, etc.).
+# the dynamic GObject API.
 [[tool.mypy.overrides]]
 module = ["gi", "gi.*"]
 ignore_missing_imports = true
