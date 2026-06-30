@@ -51,11 +51,11 @@ class Recipe:
     color_space: str = "sRGB"
 
     def to_dict(self) -> dict[str, object]:
-        """Return a plain dict suitable for JSON preset storage."""
+        """Return a plain dict suitable for JSON recipe storage."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Recipe:
-        """Build a Recipe from a preset dict, ignoring extras."""
+        """Build a Recipe from a recipe dict, ignoring extras."""
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
         return cls(**known)  # type: ignore[arg-type]

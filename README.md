@@ -1,6 +1,6 @@
 # grawji
 
-GTK4 frontend for [rawji](https://github.com/pinpox/rawji) — develop Fujifilm
+GTK4 frontend for [rawji](https://github.com/pinpox/rawji). Develop Fujifilm
 RAFs natively on Linux through the **real camera engine** (authentic film
 simulations, identical to X RAW STUDIO).
 
@@ -22,7 +22,10 @@ export.
   highlights, shadows, color and sharpness.
 - **Start from the image's own settings** (toggleable) or keep a sticky recipe
   and apply it across shots.
-- **Presets**: save, apply, import and export named recipes.
+- **Recipes**: save, apply and delete named recipes. Import and export them
+  in X RAW Studio's FP format (FP1/FP2/FP3), so a recipe from Fujifilm X RAW
+  Studio drops straight in (and back out). grawji maps the
+  parameters it supports. Effects it does not model are left neutral.
 - **Filmstrip** browser with EXIF info for the selected RAF.
 - **Export** single images or batch-export a whole folder at full resolution.
 - Keyboard shortcuts, pan/zoom with a darktable-style background, and a

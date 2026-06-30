@@ -1,4 +1,4 @@
-"""Named recipe presets with JSON storage and import/export."""
+"""Named recipes with JSON storage."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from grawji.recipe import Recipe
 from grawji.settings import config_dir
 
 
-def presets_path() -> Path:
-    """Return the path to the presets JSON file."""
-    return config_dir() / "presets.json"
+def recipes_path() -> Path:
+    """Return the path to the recipes JSON file."""
+    return config_dir() / "recipes.json"
 
 
-def decode_presets(data: object) -> dict[str, Recipe]:
+def decode_recipes(data: object) -> dict[str, Recipe]:
     """Turn a parsed JSON object into a name -> Recipe mapping.
 
     Entries that are not recipe dicts are skipped.
@@ -28,17 +28,17 @@ def decode_presets(data: object) -> dict[str, Recipe]:
     return out
 
 
-def load_presets(path: Path) -> dict[str, Recipe]:
-    """Load presets from path, returning {} if unreadable."""
+def load_recipes(path: Path) -> dict[str, Recipe]:
+    """Load recipes from path, returning {} if unreadable."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return decode_presets(data)
+    return decode_recipes(data)
 
 
-def save_presets(presets: dict[str, Recipe], path: Path) -> None:
-    """Write presets to path as JSON, creating parent dirs."""
+def save_recipes(recipes: dict[str, Recipe], path: Path) -> None:
+    """Write recipes to path as JSON, creating parent dirs."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = {name: recipe.to_dict() for name, recipe in presets.items()}
+    encoded = {name: recipe.to_dict() for name, recipe in recipes.items()}
     path.write_text(json.dumps(encoded, indent=2), encoding="utf-8")
