@@ -88,6 +88,12 @@ class SliderRow(Adw.ActionRow):
         """Call callback whenever the value changes."""
         self._adj.connect("value-changed", callback)
 
+    def set_range(self, lower: float, upper: float) -> None:
+        """Change the value bounds (value clamps into the new range)."""
+        self._adj.set_lower(lower)
+        self._adj.set_upper(upper)
+        self._update_label()
+
     @property
     def value_chars(self) -> int:
         """Character width its own value text needs."""

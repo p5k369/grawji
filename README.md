@@ -122,6 +122,13 @@ the camera's conversion engine over USB and exposing it as a clean Python
 library. grawji is just a GTK4 face on top of that. Thank you. And if you
 find grawji useful, please go star rawji.
 
+The profile format was reverse-engineered by
+**[petabyt](https://github.com/petabyt)**, whose
+[fp](https://github.com/petabyt/fp) and
+[libfuji](https://github.com/petabyt/libfuji) are the authoritative reference
+for the camera's d185 conversion profile. grawji's parameter encodings (e.g.
+noise reduction, processor capabilities) were verified against that work.
+
 ## License
 
 GPL-3.0-or-later. grawji imports rawji (copyleft), so grawji itself must be

@@ -31,6 +31,10 @@ from rawji.fuji_enums import (  # noqa: E402
 )
 
 from grawji import exif, raf  # noqa: E402
+from grawji.capabilities import (  # noqa: E402
+    Capabilities,
+    capabilities_for,
+)
 from grawji.core import (  # noqa: E402
     CameraSession,
     ForeignRafError,
@@ -554,9 +558,16 @@ class MainWindow(Adw.ApplicationWindow):
         current (sticky) recipe is kept and applied to the new image.
         """
         profile = self._session.profile
+        if profile is not None:
+            self._apply_capabilities(capabilities_for(profile))
         if profile is not None and self._settings.load_recipe_from_image:
             self._set_active_recipe(recipe_from_profile(profile), "From image")
         self._render_preview()
+
+    def _apply_capabilities(self, caps: Capabilities) -> None:
+        """Adjust controls to what the connected body's processor supports."""
+        self._highlights_row.set_range(caps.tone_min, caps.tone_max)
+        self._shadows_row.set_range(caps.tone_min, caps.tone_max)
 
     def _load_recipe(self, recipe: Recipe) -> None:
         """Set the selectors from a recipe without triggering renders."""
@@ -1048,7 +1059,6 @@ class MainWindow(Adw.ApplicationWindow):
         about = Adw.AboutDialog(
             application_name="grawji",
             application_icon="camera-photo-symbolic",
-            developer_name="Patrick Zwerschke",
             version=_app_version(),
             website="https://github.com/p5k369/grawji",
             issue_url="https://github.com/p5k369/grawji/issues",
@@ -1057,7 +1067,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
         about.add_credit_section(
             "Credits",
-            ["rawji by pinpox https://github.com/pinpox/rawji"],
+            [
+                "rawji by pinpox https://github.com/pinpox/rawji",
+                "petabyt https://github.com/petabyt",
+            ],
         )
         about.present(self)
 
