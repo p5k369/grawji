@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tempfile
+import threading
 from functools import partial
 from importlib import metadata, resources
 from pathlib import Path
@@ -13,9 +15,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GExiv2", "0.10")
 
-import rawji  # noqa: E402
-import usb.core  # noqa: E402
-from gi.repository import (  # noqa: E402
+import rawji
+from gi.repository import (
     Adw,
     Gdk,
     GdkPixbuf,
@@ -24,82 +25,49 @@ from gi.repository import (  # noqa: E402
     GLib,
     Gtk,
 )
-from rawji.fuji_enums import (  # noqa: E402
+from rawji.fuji_enums import (
+    FP_TONE_MAX,
+    FP_TONE_MIN,
     FUJIFILM_USB_VENDOR_ID,
+    WB_KELVIN_PRESETS,
+    ColorSpace,
     GrainEffect,
 )
 
-from grawji import exif, raf  # noqa: E402
-from grawji.capabilities import (  # noqa: E402
+from grawji import exif, raf
+from grawji.capabilities import (
     Capabilities,
     capabilities_for,
     read_iopcode,
 )
-from grawji.core import (  # noqa: E402
+from grawji.core import (
     CameraSession,
     ForeignRafError,
     recipe_from_profile,
 )
-from grawji.filmstrip import FilmStrip  # noqa: E402
-from grawji.fp_xml import parse_fp, serialize_fp  # noqa: E402
-from grawji.preview import CameraWorker  # noqa: E402
-from grawji.recipe import Recipe  # noqa: E402
-from grawji.recipes import (  # noqa: E402
+from grawji.filmstrip import FilmStrip
+from grawji.fp_xml import parse_fp, serialize_fp
+from grawji.preferences import PreferencesDialog
+from grawji.preview import CameraWorker
+from grawji.recipe import Recipe
+from grawji.recipes import (
     load_recipes,
     recipes_path,
     save_recipes,
 )
-from grawji.settings import (  # noqa: E402
+from grawji.settings import (
     load_settings,
     save_settings,
     settings_path,
 )
-from grawji.widgets import SliderRow, WBShiftGrid  # noqa: E402
+from grawji.widgets import SliderRow, WBShiftGrid
 
 _FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
 _DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
 _GRAINS = [e.name for e in GrainEffect]
-_COLOR_SPACES = ["sRGB", "AdobeRGB"]
-
-# The Kelvin values the camera offers for Temperature white balance. The
-# engine honors only these exact presets (any other value falls back to the
-# coolest), so the slider snaps to them. This is Fuji's WB-K table, shared
-# across bodies.
-# todo: should be integrated in rawji.
-_WB_KELVIN_PRESETS = [
-    2500,
-    2550,
-    2650,
-    2700,
-    2800,
-    2850,
-    2950,
-    3000,
-    3100,
-    3200,
-    3300,
-    3400,
-    3600,
-    3700,
-    3800,
-    4000,
-    4200,
-    4300,
-    4500,
-    4800,
-    5000,
-    5300,
-    5600,
-    5900,
-    6300,
-    6700,
-    7100,
-    7700,
-    8300,
-    9100,
-    10000,
-]
+_COLOR_SPACES = [member.name for member in ColorSpace]
+_WB_KELVIN_PRESETS = sorted(WB_KELVIN_PRESETS)
 
 
 def _nearest_kelvin_index(kelvin: int) -> int:
@@ -118,8 +86,7 @@ _ROTATIONS = {
 }
 
 # Friendly names for known Fuji product ids. Detection accepts any device on
-# the Fuji vendor id (matching rawji's find_camera); this map only supplies a
-# nice label, falling back to the raw id for bodies not listed here.
+# the Fuji vendor id. This map only supplies a nice label.
 # todo: This map is cosmetic only, could be very well integrated in rawji.
 _PID_NAMES = {
     0x02D1: "X100F",
@@ -129,6 +96,13 @@ _PID_NAMES = {
     0x02E7: "X-T4",
 }
 _CAMERA_POLL_SECONDS = 3
+# Debounce a selection's load so fast scrubbing does not spawn a decode per
+# image passed over, the decode then runs off-thread and never blocks the UI.
+_LOAD_DELAY_MS = 50
+# Kernel USB device tree; read directly so plug/unplug is seen immediately.
+_USB_SYSFS = Path("/sys/bus/usb/devices")
+# Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
+_EV_EPSILON = 1e-9
 
 # Preview canvas backgrounds, cycled by the toolbar button (darktable-style).
 _CANVAS_CSS = """
@@ -215,6 +189,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._pan_h = 0.0
         self._pan_v = 0.0
         self._render_pending_id = 0
+        self._load_pending_id = 0
+        # Bumped on every image selection. Async open/preview callbacks carry
+        # the value they were issued under and ignore themselves if a newer
+        # selection has superseded them (fast filmstrip scrubbing).
+        self._generation = 0
 
         self._settings = load_settings(settings_path())
         self._recipes = load_recipes(recipes_path())
@@ -373,7 +352,7 @@ class MainWindow(Adw.ApplicationWindow):
             return f"{n:+d}" if n else "0"
 
         def evfmt(value: float) -> str:
-            return f"{value:+.1f} EV" if abs(value) > 1e-9 else "0 EV"
+            return f"{value:+.1f} EV" if abs(value) > _EV_EPSILON else "0 EV"
 
         def combo(title: str, names: list[str]) -> Adw.ComboRow:
             row = Adw.ComboRow(title=title)
@@ -420,9 +399,11 @@ class MainWindow(Adw.ApplicationWindow):
             "Highlights", lower=-2, upper=4, fmt=ifmt
         )
         self._shadows_row = SliderRow("Shadows", lower=-2, upper=4, fmt=ifmt)
-        self._color_row = SliderRow("Color", lower=-4, upper=4, fmt=ifmt)
+        self._color_row = SliderRow(
+            "Color", lower=FP_TONE_MIN, upper=FP_TONE_MAX, fmt=ifmt
+        )
         self._sharpness_row = SliderRow(
-            "Sharpness", lower=-4, upper=4, fmt=ifmt
+            "Sharpness", lower=FP_TONE_MIN, upper=FP_TONE_MAX, fmt=ifmt
         )
         self._nr_row = SliderRow(
             "Noise reduction", lower=-4, upper=4, fmt=ifmt
@@ -535,35 +516,104 @@ class MainWindow(Adw.ApplicationWindow):
             self.status.set_label("Reloaded folder.")
 
     def _on_raf_selected(self, raf_path: str) -> None:
-        """Show the embedded preview + EXIF instantly, then open the RAF."""
+        """React to the click instantly; load the RAF on the next idle tick.
+
+        The file read, JPEG decode and EXIF parse are deferred so the click
+        (filmstrip highlight) paints first instead of waiting on them.
+        """
+        self._generation += 1
         self._raf_path = Path(raf_path)
-        self._rotation = 0
-        try:
-            self._embedded_jpeg = raf.embedded_jpeg(raf_path)
-            self._show_jpeg(self._embedded_jpeg)
-            self._show_original(self._embedded_jpeg)
-            self._populate_exif(self._embedded_jpeg)
-        except (ValueError, OSError):
-            self._embedded_jpeg = None
-            self._last_jpeg = None
         self.set_title(f"grawji — {Path(raf_path).name}")
         self._set_busy(busy=True, status="Loading RAF…")
-        self._worker.open(
-            raf_path, on_done=self._on_opened, on_error=self._on_error
+        if self._load_pending_id:
+            GLib.source_remove(self._load_pending_id)
+        self._load_pending_id = GLib.timeout_add(
+            _LOAD_DELAY_MS, self._load_selected, self._generation, raf_path
         )
 
-    def _on_opened(self, _result: object) -> None:
-        """Render the first preview, optionally from the image's recipe.
+    def _load_selected(self, generation: int, raf_path: str) -> bool:
+        """Read the embedded preview + EXIF and open the RAF (off the click).
+
+        Skips itself if a newer selection has already superseded it, so fast
+        scrubbing does not pile up decodes.
+        """
+        self._load_pending_id = 0
+        if generation != self._generation:
+            return GLib.SOURCE_REMOVE
+        self._rotation = 0
+        # The camera open runs on its own worker; the embedded-preview read
+        # and decode run on a short-lived thread. Neither blocks the UI, so
+        # the filmstrip animation stays smooth and the image appears as soon
+        # as it is decoded.
+        self._worker.open(
+            raf_path,
+            on_done=partial(self._on_opened, generation),
+            on_error=self._on_error,
+        )
+        threading.Thread(
+            target=self._decode_selection,
+            args=(generation, raf_path),
+            name="grawji-decode",
+            daemon=True,
+        ).start()
+        return GLib.SOURCE_REMOVE
+
+    def _decode_selection(self, generation: int, raf_path: str) -> None:
+        """Read and decode the embedded preview off the main thread."""
+        try:
+            jpeg = raf.embedded_jpeg(raf_path)
+            pixbuf = self._oriented_pixbuf(jpeg)
+            exif = self._read_exif(jpeg)
+        except (ValueError, OSError, GLib.Error):
+            GLib.idle_add(self._apply_selection, generation, None, None, [])
+            return
+        GLib.idle_add(self._apply_selection, generation, jpeg, pixbuf, exif)
+
+    def _apply_selection(
+        self,
+        generation: int,
+        jpeg: bytes | None,
+        pixbuf: Any,
+        exif: list[tuple[str, str]],
+    ) -> bool:
+        """Show the decoded embedded preview + EXIF (on the main thread)."""
+        if generation != self._generation:
+            return GLib.SOURCE_REMOVE
+        self._embedded_jpeg = jpeg
+        if pixbuf is not None:
+            self._last_jpeg = jpeg
+            self._pixbuf = pixbuf
+            self._apply_zoom()
+            self.rotate_left.set_sensitive(True)
+            self.rotate_right.set_sensitive(True)
+            self.original_picture.set_paintable(
+                Gdk.Texture.new_for_pixbuf(pixbuf)
+            )
+        else:
+            self._last_jpeg = None
+        self._populate_exif_rows(exif)
+        return GLib.SOURCE_REMOVE
+
+    def _on_opened(self, generation: int, _result: object) -> None:
+        """Show the first preview, optionally from the image's recipe.
 
         If the "load recipe from image" setting is on, the controls are
         set to the image's own in-camera recipe first; otherwise the
         current (sticky) recipe is kept and applied to the new image.
         """
+        if generation != self._generation:
+            return  # a newer selection has superseded this open
         profile = self._session.profile
         if profile is not None:
             self._apply_capabilities(capabilities_for(profile))
         if profile is not None and self._settings.load_recipe_from_image:
             self._set_active_recipe(recipe_from_profile(profile), "From image")
+            # The loaded recipe is the image's own, so the embedded JPEG
+            # already shown is exactly what a render would produce - skip the
+            # slow conversion round-trip until the user actually edits.
+            if self._embedded_jpeg is not None:
+                self._set_busy(busy=False, status="Ready.")
+                return
         self._render_preview()
 
     def _apply_capabilities(self, caps: Capabilities) -> None:
@@ -720,12 +770,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._worker.render(
             self._current_recipe(),
             full_resolution=False,
-            on_done=self._on_preview,
+            on_done=partial(self._on_preview, self._generation),
             on_error=self._on_error,
         )
 
-    def _on_preview(self, jpeg: bytes) -> None:
+    def _on_preview(self, generation: int, jpeg: bytes) -> None:
         """Display a finished preview render."""
+        if generation != self._generation:
+            return  # a newer selection has superseded this render
         self._show_jpeg(jpeg)
         self._set_busy(busy=False, status="Ready.")
 
@@ -784,15 +836,25 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_exported(self, path: str, jpeg: bytes) -> None:
         """Save the exported JPEG with orientation and rotation baked in."""
+        # Encode and transplant EXIF on a temp file first, then write the
+        # finished bytes to the chosen path in one go. The chosen path may be
+        # an XDG document-portal proxy (Flatpak), which exiv2 cannot rewrite
+        # in place. Doing so leaves a 0-byte file.
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
         try:
             pixbuf = self._pixbuf_from_jpeg(jpeg)
-            pixbuf.savev(path, "jpeg", ["quality"], ["95"])
+            quality = str(self._settings.jpeg_quality)
+            pixbuf.savev(tmp_path, "jpeg", ["quality"], [quality])
+            # GdkPixbuf re-encoding drops all metadata, so copy the camera's
+            # EXIF back on (orientation is now baked into the pixels).
+            self._copy_exif(jpeg, tmp_path)
+            Path(path).write_bytes(Path(tmp_path).read_bytes())
         except (GLib.Error, OSError) as exc:
             self._set_busy(busy=False, status=f"Export failed: {exc}")
             return
-        # GdkPixbuf re-encoding drops all metadata, so copy the camera's
-        # EXIF back onto the file (orientation is now baked into the pixels).
-        self._copy_exif(jpeg, path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
         self._set_busy(busy=False, status=f"Exported to {path}")
 
     @staticmethod
@@ -806,12 +868,21 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error:
             pass
 
-    def _pixbuf_from_jpeg(self, jpeg: bytes) -> Any:
-        """Decode JPEG bytes, applying EXIF orientation and rotation."""
+    @staticmethod
+    def _oriented_pixbuf(jpeg: bytes) -> Any:
+        """Decode JPEG bytes into an EXIF-oriented pixbuf.
+
+        Static and GTK-free so it can run on a worker thread; the result is
+        only attached to widgets back on the main thread.
+        """
         loader = GdkPixbuf.PixbufLoader()
         loader.write(jpeg)
         loader.close()
-        pixbuf = loader.get_pixbuf().apply_embedded_orientation()
+        return loader.get_pixbuf().apply_embedded_orientation()
+
+    def _pixbuf_from_jpeg(self, jpeg: bytes) -> Any:
+        """Decode JPEG bytes, applying EXIF orientation and rotation."""
+        pixbuf = self._oriented_pixbuf(jpeg)
         rotation = _ROTATIONS.get(self._rotation)
         return pixbuf.rotate_simple(rotation) if rotation else pixbuf
 
@@ -892,12 +963,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._apply_background(_BACKGROUNDS[(index + 1) % len(_BACKGROUNDS)])
         save_settings(self._settings, settings_path())
 
-    def _populate_exif(self, jpeg: bytes) -> None:
-        """Read the JPEG's EXIF and show it in the Image group."""
+    def _populate_exif_rows(self, rows: list[tuple[str, str]]) -> None:
+        """Show already-parsed EXIF (label, value) pairs in the Image group."""
         for row in self._exif_rows:
             self.exif_group.remove(row)
         self._exif_rows = []
-        for label, value in self._read_exif(jpeg):
+        for label, value in rows:
             row = Adw.ActionRow(title=label, subtitle=value)
             self.exif_group.add(row)
             self._exif_rows.append(row)
@@ -963,19 +1034,28 @@ class MainWindow(Adw.ApplicationWindow):
     def _detect_camera() -> str | None:
         """Return the connected camera's label, or None if none is found.
 
-        Mirrors rawji's find_camera, which connects to any Fujifilm-vendor
-        device, not only the product ids it lists. So any Fuji body is
-        reported here too: named from _PID_NAMES when its id is known, or
-        the generic "Camera" otherwise (e.g. an X70, or a body newer than
-        this list), since grawji works with it regardless.
+        Reads sysfs directly rather than enumerating via libusb: the kernel
+        updates /sys on every plug and unplug, whereas libusb caches its
+        device list and only refreshes it from udev hotplug events, which a
+        Flatpak sandbox never receives - so a body plugged in after launch
+        would otherwise go unnoticed. Any Fuji-vendor device counts (matching
+        rawji's find_camera), named from _PID_NAMES when its id is known and
+        the generic "Camera" otherwise (e.g. an X70).
         """
+        vendor = f"{FUJIFILM_USB_VENDOR_ID:04x}"
         try:
-            device = usb.core.find(idVendor=FUJIFILM_USB_VENDOR_ID)
-        except (usb.core.USBError, ValueError, OSError):
+            entries = sorted(_USB_SYSFS.iterdir())
+        except OSError:
             return None
-        if device is None:
-            return None
-        return _PID_NAMES.get(device.idProduct, "Camera")
+        for entry in entries:
+            try:
+                if (entry / "idVendor").read_text().strip() != vendor:
+                    continue
+                pid = int((entry / "idProduct").read_text().strip(), 16)
+            except (OSError, ValueError):
+                continue
+            return _PID_NAMES.get(pid, "Camera")
+        return None
 
     def _rebuild_menu(self) -> None:
         """(Re)build the header menu model, including the recipe lists."""
@@ -1095,23 +1175,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
-        dialog = Adw.PreferencesDialog()
-        page = Adw.PreferencesPage()
-        group = Adw.PreferencesGroup(title="Behaviour")
-        row = Adw.SwitchRow(
-            title="Load recipe from selected image",
-            subtitle="Off: keep the current recipe and apply it to each image",
+        dialog = PreferencesDialog(
+            settings=self._settings, on_change=self._save_settings
         )
-        row.set_active(self._settings.load_recipe_from_image)
-        row.connect("notify::active", self._on_load_setting_toggled)
-        group.add(row)
-        page.add(group)
-        dialog.add(page)
         dialog.present(self)
 
-    def _on_load_setting_toggled(self, row: Any, _param: Any) -> None:
-        """Persist the 'load recipe from image' setting."""
-        self._settings.load_recipe_from_image = row.get_active()
+    def _save_settings(self) -> None:
+        """Persist the current settings to disk."""
         save_settings(self._settings, settings_path())
 
     def _on_save_recipe(self) -> None:

@@ -7,9 +7,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw  # noqa: E402
+from gi.repository import Adw
 
-from grawji.window import MainWindow  # noqa: E402
+from grawji.window import MainWindow
 
 
 class GrawjiApp(Adw.Application):

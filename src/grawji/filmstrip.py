@@ -12,9 +12,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
-from grawji.raf import embedded_jpeg  # noqa: E402
+from grawji.raf import embedded_jpeg
 
 Dispatch = Callable[[Callable[[], None]], Any]
 

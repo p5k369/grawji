@@ -69,31 +69,13 @@ select = [
   "RUF", # Ruff-specific rules
 ]
 
-# multi-line-summary-first-line, mutable-class-default,
-# magic-value-comparison, yoda-conditions, function-call-in-default-argument,
-# expr-or-true, blanket-type-ignore, bare-except,
-# unnecessary-iterable-allocation-for-first-element, multiple-with-statements,
-# S101/S110/S112 (assert + try-except-pass/continue are intentional).
-ignore = ["D212", "RUF012", "PLR2004", "SIM300", "B008", "SIM222", "PGH003", "E722", "RUF015", "SIM117", "S101", "S110", "S112"]
+ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["D104"]  # undocumented-public-package
-"scripts/**" = ["D103", "T201"]  # operational hardware utilities
-"tests/**" = [
-  "D100",   # undocumented-public-module
-  "D101",   # undocumented-public-class
-  "D102",   # undocumented-public-method
-  "D103",   # undocumented-public-function
-  "D104",
-  "D107",
-  "PLR2004",
-  "S",      # security lint not meaningful in test code
-  "ARG",    # unused-function-argument (fixtures)
-  "ANN",    # missing-type-annotation
-  "E501",   # line-too-long (long string literals are common)
-  "F401",   # unused imports (sometimes for side effects)
-  "PLC0415",  # local imports are common in test setups
-]
+"__init__.py" = ["D104"]
+"scripts/**" = ["D103", "T201"]
+"src/grawji/{app,filmstrip,preferences,widgets,window}.py" = ["E402"]
+"tests/**" = ["D100", "D101", "D102", "D103", "D104", "D107", "PLR2004", "S", "ARG", "ANN", "E501", "F401", "PLC0415"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -124,7 +106,7 @@ check_untyped_defs = true
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-module = ["rawji.*", "usb.*", "pytest"]
+module = ["rawji.*", "pytest"]
 ignore_missing_imports = true
 
 # pygobject-stubs is installed for editor type hints, but grawji treats the
@@ -142,6 +124,7 @@ module = [
   "grawji.window",
   "grawji.filmstrip",
   "grawji.widgets",
+  "grawji.preferences",
   "grawji.__main__",
 ]
 disallow_subclassing_any = false
@@ -174,6 +157,7 @@ omit = [
   "src/grawji/app.py",
   "src/grawji/window.py",
   "src/grawji/filmstrip.py",
+  "src/grawji/preferences.py",
   "src/grawji/ui/**",
 ]
 

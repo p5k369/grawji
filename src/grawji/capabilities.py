@@ -4,37 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Offsets in the profile header (matches rawji's layout): a uint16 prop count
-# at 0, a length byte at 2, then the IOPCode as a null-terminated wide-char
-# (UTF-16-LE) string from offset 3.
-_IOPCODE_LEN_OFFSET = 2
-_IOPCODE_STR_OFFSET = 3
+from rawji.fuji_profile import is_xprocessor5, read_iopcode
 
-
-def read_iopcode(profile: bytes) -> int | None:
-    """Return the profile's IOPCode as an int, or None if unreadable."""
-    if len(profile) <= _IOPCODE_STR_OFFSET:
-        return None
-    char_count = profile[_IOPCODE_LEN_OFFSET]
-    chars = []
-    offset = _IOPCODE_STR_OFFSET
-    for _ in range(max(0, char_count)):
-        if offset + 2 > len(profile):
-            return None
-        code = int.from_bytes(profile[offset : offset + 2], "little")
-        offset += 2
-        if code == 0:
-            break
-        chars.append(chr(code))
-    try:
-        return int("".join(chars), 16)
-    except ValueError:
-        return None
-
-
-def is_xprocessor5(iopcode: int) -> bool:
-    """Whether an IOPCode identifies an XProcessor5 body."""
-    return (iopcode & 0x00FFFF00) == 0x00179500
+__all__ = [
+    "Capabilities",
+    "capabilities_for",
+    "is_xprocessor5",
+    "read_iopcode",
+]
 
 
 @dataclass(frozen=True)
