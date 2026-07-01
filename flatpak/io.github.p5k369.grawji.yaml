@@ -76,7 +76,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/pinpox/rawji.git
-        commit: 2228b26d0623234826844c6431ada96bf99180c4
+        commit: 0f5a534b1d164acef152cc8866e5f3f24548039e
 
   - name: grawji
     buildsystem: simple

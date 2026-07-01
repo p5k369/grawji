@@ -93,7 +93,7 @@ _PID_NAMES = {
     0x02D1: "X100F",
     0x02DD: "X-T3",
     0x02E3: "X-T30",
-    0x02E5: "X-T3",
+    0x02E5: "X100V",
     0x02E7: "X-T4",
 }
 _CAMERA_POLL_SECONDS = 3
@@ -312,12 +312,6 @@ class MainWindow(Adw.ApplicationWindow):
                 ["b"],
             ),
             (
-                "open-folder",
-                None,
-                lambda *_a: self._on_open_folder_clicked(None),
-                ["<Ctrl>o"],
-            ),
-            (
                 "shortcuts",
                 None,
                 lambda *_a: self._on_shortcuts(),
@@ -521,22 +515,6 @@ class MainWindow(Adw.ApplicationWindow):
             color_temp=_WB_KELVIN_PRESETS[int(self._temp_row.get_value())],
             color_space=_COLOR_SPACES[self.color_space_row.get_selected()],
         )
-
-    def _on_open_folder_clicked(self, _button: Any) -> None:
-        """Show a folder picker to populate the filmstrip."""
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Open folder of RAFs")
-        dialog.select_folder(self, None, self._on_folder_response)
-
-    def _on_folder_response(self, dialog: Any, result: Any) -> None:
-        """Scan the chosen folder, or do nothing if cancelled."""
-        try:
-            gfile = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return
-        path = gfile.get_path()
-        if path is not None:
-            self._scan_folder(path)
 
     def _scan_folder(self, path: str) -> None:
         """Scan a folder into the filmstrip, remember it, and watch it."""
@@ -1150,7 +1128,6 @@ class MainWindow(Adw.ApplicationWindow):
         """Show a dialog listing the keyboard shortcuts."""
         groups = {
             "Files": [
-                ("Open folder", "<Ctrl>O"),
                 ("Export JPEG", "<Ctrl>E"),
             ],
             "Recipe": [
