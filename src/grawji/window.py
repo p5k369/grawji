@@ -23,6 +23,7 @@ from gi.repository import (
     GExiv2,
     Gio,
     GLib,
+    GObject,
     Gtk,
 )
 from rawji.fuji_enums import (
@@ -108,6 +109,8 @@ _SIDEBAR_COLLAPSED_MAX = 10
 _USB_SYSFS = Path("/sys/bus/usb/devices")
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
 _EV_EPSILON = 1e-9
+# Zoom is multiplicative.
+_ZOOM_STEP = 1.15
 
 # Preview canvas backgrounds, cycled by the toolbar button (darktable-style).
 _CANVAS_CSS = """
@@ -136,6 +139,29 @@ _UI = (
     .joinpath("ui", "grawji.ui")
     .read_text(encoding="utf-8")
 )
+
+
+class _ScaledPaintable(GObject.GObject, Gdk.Paintable):
+    """A texture presented at a chosen intrinsic size, GPU-scaled on draw."""
+
+    def __init__(self, texture: Any, width: int, height: int) -> None:
+        """Present texture as though it were width x height pixels."""
+        super().__init__()
+        self._texture = texture
+        self._width = max(1, width)
+        self._height = max(1, height)
+
+    def do_get_intrinsic_width(self) -> int:
+        """Report the chosen width to the layout system."""
+        return self._width
+
+    def do_get_intrinsic_height(self) -> int:
+        """Report the chosen height to the layout system."""
+        return self._height
+
+    def do_snapshot(self, snapshot: Any, width: float, height: float) -> None:
+        """Draw the texture scaled into the given area."""
+        self._texture.snapshot(snapshot, width, height)
 
 
 def _export_basename(raf_path: Path | str) -> str:
@@ -295,13 +321,13 @@ class MainWindow(Adw.ApplicationWindow):
             (
                 "zoom-in",
                 None,
-                lambda *_a: self._set_zoom(self._zoom * 1.25),
+                lambda *_a: self._set_zoom(self._zoom * _ZOOM_STEP),
                 ["<Ctrl>plus", "<Ctrl>equal"],
             ),
             (
                 "zoom-out",
                 None,
-                lambda *_a: self._set_zoom(self._zoom / 1.25),
+                lambda *_a: self._set_zoom(self._zoom / _ZOOM_STEP),
                 ["<Ctrl>minus"],
             ),
             ("zoom-fit", None, lambda *_a: self._set_zoom(1.0), ["<Ctrl>0"]),
@@ -486,11 +512,20 @@ class MainWindow(Adw.ApplicationWindow):
             slider.connect_changed(self._on_recipe_changed)
         self._wb_grid.connect_changed(self._on_wb_shift_changed)
         self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
+        self._pointer: tuple[float, float] | None = None
+        self._content_w = 0.0
+        self._content_h = 0.0
+        self._texture: Any = None
+        self._texture_src: Any = None
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
         scroll.connect("scroll", self._on_scroll_zoom)
         self.preview_scroll.add_controller(scroll)
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("motion", self._on_pointer_motion)
+        motion.connect("leave", self._on_pointer_leave)
+        self.preview_scroll.add_controller(motion)
         pan = Gtk.GestureDrag()
         pan.connect("drag-begin", self._on_pan_begin)
         pan.connect("drag-update", self._on_pan_update)
@@ -939,44 +974,78 @@ class MainWindow(Adw.ApplicationWindow):
         self.rotate_left.set_sensitive(True)
         self.rotate_right.set_sensitive(True)
 
-    def _set_zoom(self, value: float) -> None:
-        """Set the preview zoom factor (1.0 = fit; <1 shrinks below fit)."""
-        self._zoom = max(0.1, min(value, 8.0))
+    def _set_zoom(
+        self, value: float, anchor: tuple[float, float] | None = None
+    ) -> None:
+        """Set the preview zoom, keeping anchor fixed under the pointer."""
+        value = max(0.1, min(value, 8.0))
+        if value == self._zoom:
+            return
+        hadj = self.preview_scroll.get_hadjustment()
+        vadj = self.preview_scroll.get_vadjustment()
+        vw = self.preview_scroll.get_width()
+        vh = self.preview_scroll.get_height()
+        ax, ay = anchor if anchor is not None else (vw / 2, vh / 2)
+        fx = self._content_fraction(hadj, ax)
+        fy = self._content_fraction(vadj, ay)
+
+        self._zoom = value
         self._apply_zoom()
+        self._anchor_scroll(hadj, fx, ax, self._content_w, vw)
+        self._anchor_scroll(vadj, fy, ay, self._content_h, vh)
+
+    @staticmethod
+    def _content_fraction(adj: Any, anchor: float) -> float:
+        """Fraction of the content that currently sits under anchor."""
+        upper = adj.get_upper()
+        if upper <= 0:
+            return 0.5
+        return (adj.get_value() + anchor) / upper
+
+    @staticmethod
+    def _anchor_scroll(
+        adj: Any, frac: float, anchor: float, content: float, viewport: float
+    ) -> None:
+        """Place content fraction frac under anchor, for the new extent."""
+        adj.set_upper(max(content, viewport))
+        target = frac * content - anchor
+        adj.set_value(max(0.0, min(target, max(0.0, content - viewport))))
+
+    def _on_pointer_motion(self, _c: Any, x: float, y: float) -> None:
+        """Remember the pointer position within the preview viewport."""
+        self._pointer = (x, y)
+
+    def _on_pointer_leave(self, _c: Any) -> None:
+        """Forget the pointer when it leaves the preview."""
+        self._pointer = None
 
     def _apply_zoom(self) -> None:
-        """Show the preview at the zoom factor by scaling the pixbuf.
-
-        The displayed paintable's *intrinsic* size is the zoom size, so
-        the wrapping GtkBox centres it (below fit, with the canvas
-        background around it) or lets the scroller scroll it (above fit).
-        At 1.0 the full pixbuf fills the area (responsive to resize).
-        """
+        """Show the preview at the current zoom factor."""
         if self._pixbuf is None:
             return
         pw, ph = self._pixbuf.get_width(), self._pixbuf.get_height()
         if pw <= 0 or ph <= 0:
             return
+        if self._texture_src is not self._pixbuf:
+            self._texture = Gdk.Texture.new_for_pixbuf(self._pixbuf)
+            self._texture_src = self._pixbuf
+        vw = self.preview_scroll.get_width() or pw
+        vh = self.preview_scroll.get_height() or ph
         if self._zoom == 1.0:
             self.picture.set_can_shrink(True)
             self.picture.set_halign(Gtk.Align.FILL)
             self.picture.set_valign(Gtk.Align.FILL)
-            self.picture.set_paintable(
-                Gdk.Texture.new_for_pixbuf(self._pixbuf)
-            )
+            self.picture.set_paintable(self._texture)
+            self._content_w, self._content_h = vw, vh
             return
-        vw = self.preview_scroll.get_width() or pw
-        vh = self.preview_scroll.get_height() or ph
         fit = min(vw / pw, vh / ph)
-        scaled = self._pixbuf.scale_simple(
-            max(1, int(pw * fit * self._zoom)),
-            max(1, int(ph * fit * self._zoom)),
-            GdkPixbuf.InterpType.BILINEAR,
-        )
+        sw = max(1, int(pw * fit * self._zoom))
+        sh = max(1, int(ph * fit * self._zoom))
         self.picture.set_can_shrink(False)
         self.picture.set_halign(Gtk.Align.CENTER)
         self.picture.set_valign(Gtk.Align.CENTER)
-        self.picture.set_paintable(Gdk.Texture.new_for_pixbuf(scaled))
+        self.picture.set_paintable(_ScaledPaintable(self._texture, sw, sh))
+        self._content_w, self._content_h = sw, sh
 
     def _on_scroll_zoom(self, controller: Any, _dx: float, dy: float) -> bool:
         """Zoom the preview on Ctrl+scroll."""
@@ -984,7 +1053,8 @@ class MainWindow(Adw.ApplicationWindow):
         state = event.get_modifier_state() if event else 0
         if not state & Gdk.ModifierType.CONTROL_MASK:
             return False
-        self._set_zoom(self._zoom * (1.25 if dy < 0 else 1 / 1.25))
+        factor = _ZOOM_STEP if dy < 0 else 1 / _ZOOM_STEP
+        self._set_zoom(self._zoom * factor, anchor=self._pointer)
         return True
 
     def _apply_background(self, css_class: str) -> None:

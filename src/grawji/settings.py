@@ -40,6 +40,8 @@ class Settings:
             carry on, instead of stopping the whole batch.
         wb_grid_tint: When True, tint each white-balance shift grid cell
             with the colour it nudges the image toward.
+        zoom_step_percent: How much each zoom step (scroll wheel or key)
+            changes the zoom, as a percentage of the current level.
     """
 
     load_recipe_from_image: bool = True
@@ -51,6 +53,7 @@ class Settings:
     jpeg_quality: int = 95
     batch_skip_foreign: bool = False
     wb_grid_tint: bool = True
+    zoom_step_percent: int = 25
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""
