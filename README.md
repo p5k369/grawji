@@ -16,7 +16,7 @@ export.
 
 ## Features
 
-- **Live preview** through the camera's own conversion engine — what you see
+- **Live preview** through the camera's own conversion engine. What you see
   is what the camera would write.
 - **Full recipe control**: film simulation, white balance, dynamic range,
   highlights, shadows, color and sharpness.
@@ -49,7 +49,7 @@ Two ways to get grawji: the **[Flatpak](#flatpak)** (bundled, one command, for
 everyone) or **[from source](#from-source)** (you bring GTK from your
 distribution; what packagers will prefer).
 
-First, put the camera in RAW-conversion USB mode — otherwise it enumerates as
+First, put the camera in RAW-conversion USB mode, otherwise it enumerates as
 a card reader and rawji cannot talk to it:
 
 > **Set Up** → **Connection Setting** → **USB Mode** → **USB RAW CONV./BACKUP RESTORE**
@@ -57,7 +57,7 @@ a card reader and rawji cannot talk to it:
 ### Flatpak
 
 Bundles everything (GTK4, libadwaita, the EXIF and USB stacks, rawji and
-grawji); only the shared GNOME runtime comes from the network.
+grawji), only the shared GNOME runtime comes from the network.
 
 <details>
 <summary><b>Step-by-step</b></summary>
@@ -123,9 +123,6 @@ USB access: most distributions already grant non-root access via `uaccess` or
 (check first).
 
 </details>
-
-Then open a folder of RAFs, pick one from the filmstrip, dial in a recipe,
-watch the preview update, and **Export**.
 
 ## Development
 

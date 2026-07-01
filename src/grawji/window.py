@@ -1334,6 +1334,7 @@ class MainWindow(Adw.ApplicationWindow):
             list_recipes=lambda: list(self._recipes),
             on_reorder=self._reorder_recipes,
             on_delete=self._delete_recipe,
+            on_rename=self._rename_recipe,
             on_import=self._on_import_fp,
             on_export=self._export_recipe,
         )
@@ -1357,6 +1358,24 @@ class MainWindow(Adw.ApplicationWindow):
             self._rebuild_recipes()
             self._refresh_recipe_manager()
             self.status.set_label(f"Deleted recipe “{name}”.")
+
+    def _rename_recipe(self, old: str, new: str) -> None:
+        """Rename a saved recipe, keeping its position, and persist."""
+        if old not in self._recipes or not new or new == old:
+            return
+        recipe = self._recipes[old]
+        rebuilt: dict[str, Recipe] = {}
+        for name, value in self._recipes.items():
+            if name == old:
+                rebuilt[new] = recipe
+            elif name != new:  # drop any name collision; the rename wins
+                rebuilt[name] = value
+        self._recipes = rebuilt
+        save_recipes(self._recipes, recipes_path())
+        self._rebuild_recipes()
+        self._refresh_recipe_manager()
+        if self._active_label == old:
+            self._set_active_recipe(recipe, new)
 
     def _reorder_recipes(self, order: list[str]) -> None:
         """Persist a new recipe order (from the manager's drag and drop)."""
