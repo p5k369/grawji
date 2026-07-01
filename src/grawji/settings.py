@@ -48,6 +48,8 @@ class Settings:
             with the colour it nudges the image toward.
         color_scheme: UI theme: "default" follows the desktop, "light" or
             "dark" forces that scheme.
+        show_histogram: Whether the histogram overlay is shown on the
+            preview.
     """
 
     load_recipe_from_image: bool = True
@@ -60,6 +62,7 @@ class Settings:
     batch_skip_foreign: bool = False
     wb_grid_tint: bool = True
     color_scheme: str = "default"
+    show_histogram: bool = False
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

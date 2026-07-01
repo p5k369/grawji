@@ -67,7 +67,7 @@ from grawji.settings import (
     save_settings,
     settings_path,
 )
-from grawji.widgets import SliderRow, WBShiftGrid
+from grawji.widgets import Histogram, SliderRow, WBShiftGrid
 
 _FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
@@ -202,6 +202,8 @@ class MainWindow(Adw.ApplicationWindow):
     spinner = Gtk.Template.Child()
     original_picture = Gtk.Template.Child()
     nav_overlay = Gtk.Template.Child()
+    peek_button = Gtk.Template.Child()
+    histogram_slot = Gtk.Template.Child()
     status = Gtk.Template.Child()
     recipe_row = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
@@ -339,6 +341,12 @@ class MainWindow(Adw.ApplicationWindow):
                 ["b"],
             ),
             (
+                "toggle-peek",
+                None,
+                lambda *_a: self._set_peek(peeking=not self._peek),
+                ["backslash"],
+            ),
+            (
                 "shortcuts",
                 None,
                 lambda *_a: self._on_shortcuts(),
@@ -354,6 +362,16 @@ class MainWindow(Adw.ApplicationWindow):
             self.add_action(action)
             if app is not None and accels:
                 app.set_accels_for_action(f"win.{name}", list(accels))
+
+        histogram = Gio.SimpleAction.new_stateful(
+            "toggle-histogram",
+            None,
+            GLib.Variant.new_boolean(self._settings.show_histogram),
+        )
+        histogram.connect("change-state", self._on_toggle_histogram)
+        self.add_action(histogram)
+        if app is not None:
+            app.set_accels_for_action("win.toggle-histogram", ["h"])
 
     def _init_sidebar(self) -> None:
         """Restore the side panel width and wire its collapse button."""
@@ -512,6 +530,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._content_h = 0.0
         self._texture: Any = None
         self._texture_src: Any = None
+        self._original_pixbuf: Any | None = None
+        self._peek = False
         self._error_showing = False
         self._recipe_manager: RecipeManagerDialog | None = None
         scroll = Gtk.EventControllerScroll.new(
@@ -534,6 +554,18 @@ class MainWindow(Adw.ApplicationWindow):
             picture=self.original_picture,
             get_rotation=lambda: self._rotation,
         )
+
+        self._histogram = Histogram()
+        self._histogram.set_hexpand(True)
+        self._histogram.set_vexpand(True)
+        self.histogram_slot.append(self._histogram)
+        self.histogram_slot.set_visible(self._settings.show_histogram)
+        peek = Gtk.GestureClick()
+        peek.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        peek.connect("pressed", self._on_peek_pressed)
+        peek.connect("released", self._on_peek_released)
+        peek.connect("cancel", self._on_peek_cancel)
+        self.peek_button.add_controller(peek)
 
     def _current_recipe(self) -> Recipe:
         """Read the current selector values into a Recipe."""
@@ -701,8 +733,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._embedded_jpeg = jpeg
         if pixbuf is not None:
             self._last_jpeg = jpeg
-            self._pixbuf = pixbuf
-            self._apply_zoom()
+            self._set_preview(pixbuf)
             self.rotate_left.set_sensitive(True)
             self.rotate_right.set_sensitive(True)
             self.original_picture.set_paintable(
@@ -1014,10 +1045,49 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error as exc:
             self._set_busy(busy=False, status=f"Cannot display image: {exc}")
             return
-        self._pixbuf = pixbuf
-        self._apply_zoom()
+        self._set_preview(pixbuf)
         self.rotate_left.set_sensitive(True)
         self.rotate_right.set_sensitive(True)
+
+    def _set_preview(self, pixbuf: Any) -> None:
+        """Set the shown preview pixbuf, refresh the histogram, redraw."""
+        self._pixbuf = pixbuf
+        self._original_pixbuf = None
+        self._peek = False
+        self.peek_button.set_sensitive(True)
+        self._histogram.update(pixbuf)
+        self._apply_zoom()
+
+    def _on_peek_pressed(
+        self, gesture: Gtk.GestureClick, _n: int, _x: float, _y: float
+    ) -> None:
+        """Start peeking; claim the press so the button does not cancel it."""
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._set_peek(peeking=True)
+
+    def _on_peek_released(
+        self, _gesture: Gtk.GestureClick, _n: int, _x: float, _y: float
+    ) -> None:
+        """Stop peeking when the button is released."""
+        self._set_peek(peeking=False)
+
+    def _on_peek_cancel(self, _gesture: Gtk.GestureClick, _seq: Any) -> None:
+        """Stop peeking if the gesture is cancelled (e.g. pointer lost)."""
+        self._set_peek(peeking=False)
+
+    def _set_peek(self, peeking: bool) -> None:
+        """Show the in-camera original while peeking, else the result."""
+        if peeking and self._original_pixbuf is None:
+            if self._embedded_jpeg is None:
+                return
+            try:
+                self._original_pixbuf = self._pixbuf_from_jpeg(
+                    self._embedded_jpeg
+                )
+            except GLib.Error:
+                return
+        self._peek = peeking
+        self._apply_zoom()
 
     def _set_zoom(
         self, value: float, anchor: tuple[float, float] | None = None
@@ -1064,16 +1134,23 @@ class MainWindow(Adw.ApplicationWindow):
         """Forget the pointer when it leaves the preview."""
         self._pointer = None
 
+    def _preview_pixbuf(self) -> Any:
+        """The pixbuf to show: the original while peeking, else the result."""
+        if self._peek and self._original_pixbuf is not None:
+            return self._original_pixbuf
+        return self._pixbuf
+
     def _apply_zoom(self) -> None:
         """Show the preview at the current zoom factor."""
-        if self._pixbuf is None:
+        pixbuf = self._preview_pixbuf()
+        if pixbuf is None:
             return
-        pw, ph = self._pixbuf.get_width(), self._pixbuf.get_height()
+        pw, ph = pixbuf.get_width(), pixbuf.get_height()
         if pw <= 0 or ph <= 0:
             return
-        if self._texture_src is not self._pixbuf:
-            self._texture = Gdk.Texture.new_for_pixbuf(self._pixbuf)
-            self._texture_src = self._pixbuf
+        if self._texture_src is not pixbuf:
+            self._texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self._texture_src = pixbuf
         vw = self.preview_scroll.get_width() or pw
         vh = self.preview_scroll.get_height() or ph
         if self._zoom == 1.0:
@@ -1257,6 +1334,10 @@ class MainWindow(Adw.ApplicationWindow):
         recipes.append("Manage Recipes…", "win.manage-recipes")
         menu.append_section(None, recipes)
 
+        view = Gio.Menu()
+        view.append("Show Histogram", "win.toggle-histogram")
+        menu.append_section(None, view)
+
         prefs = Gio.Menu()
         prefs.append("Keyboard Shortcuts", "win.shortcuts")
         prefs.append("Preferences", "win.preferences")
@@ -1287,6 +1368,8 @@ class MainWindow(Adw.ApplicationWindow):
                 ("Zoom out", "<Ctrl>minus"),
                 ("Fit to window", "<Ctrl>0"),
                 ("Cycle background", "b"),
+                ("Show original (before/after)", "backslash"),
+                ("Toggle histogram", "h"),
             ],
             "Application": [
                 ("Preferences", "<Ctrl>comma"),
@@ -1406,6 +1489,14 @@ class MainWindow(Adw.ApplicationWindow):
             "dark": Adw.ColorScheme.FORCE_DARK,
         }.get(self._settings.color_scheme, Adw.ColorScheme.DEFAULT)
         Adw.StyleManager.get_default().set_color_scheme(scheme)
+
+    def _on_toggle_histogram(self, action: Any, value: Any) -> None:
+        """Show or hide the histogram overlay and remember the choice."""
+        action.set_state(value)
+        show = value.get_boolean()
+        self._settings.show_histogram = show
+        self.histogram_slot.set_visible(show)
+        self._save_settings()
 
     def _save_settings(self) -> None:
         """Persist the current settings to disk."""
