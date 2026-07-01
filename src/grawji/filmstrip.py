@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -11,12 +14,30 @@ from typing import Any
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("GExiv2", "0.10")
 
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
+from gi.repository import Gdk, GdkPixbuf, GExiv2, GLib, Gtk
 
-from grawji.raf import embedded_jpeg
+from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
+from grawji.settings import cache_dir
+
+_EXIF_PREFIX_BYTES = 256 * 1024
 
 Dispatch = Callable[[Callable[[], None]], Any]
+
+# EXIF orientation -> (GdkPixbuf rotation, flip horizontally) to display it
+# upright. 5 and 7 (rare transpose/transverse) approximate with a rotation.
+_R = GdkPixbuf.PixbufRotation
+_ORIENTATIONS = {
+    1: (_R.NONE, False),
+    2: (_R.NONE, True),
+    3: (_R.UPSIDEDOWN, False),
+    4: (_R.UPSIDEDOWN, True),
+    5: (_R.CLOCKWISE, True),
+    6: (_R.CLOCKWISE, False),
+    7: (_R.COUNTERCLOCKWISE, True),
+    8: (_R.COUNTERCLOCKWISE, False),
+}
 
 
 class FilmStrip(Gtk.ScrolledWindow):
@@ -49,6 +70,9 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._paths: list[str] = []
         self._buttons: list[Gtk.Button] = []
         self._current = -1
+        self._cache_dir = cache_dir() / "thumbs"
+        self._workers = max(1, (os.cpu_count() or 2) - 1)
+        GExiv2.initialize()
 
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         self._box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -157,44 +181,133 @@ class FilmStrip(Gtk.ScrolledWindow):
     def _load_thumbnails(
         self, pictures: list[tuple[str, Any]], scan_id: int
     ) -> None:
-        """Decode each RAF's thumbnail off-thread and dispatch it."""
-        for path, picture in pictures:
-            if scan_id != self._scan_id:
-                return  # a newer scan superseded this one
-            try:
-                pixbuf = self._decode_thumb(embedded_jpeg(path))
-            except (ValueError, OSError, GLib.Error):
-                continue  # skip unreadable / non-RAF files
-            self._dispatch(
-                partial(self._apply_thumb, picture, pixbuf, scan_id)
-            )
+        """Decode this scan's thumbnails in parallel and dispatch each."""
+        with ThreadPoolExecutor(max_workers=self._workers) as pool:
+            for path, picture in pictures:
+                pool.submit(self._decode_one, path, picture, scan_id)
         self._dispatch(partial(self._loading_done, scan_id))
 
-    def _decode_thumb(self, jpeg: bytes) -> Any:
-        """Decode JPEG bytes into an oriented pixbuf exactly thumb_height tall.
+    def _decode_one(self, path: str, picture: Any, scan_id: int) -> None:
+        """Produce one thumbnail (cache or decode) and dispatch it."""
+        if scan_id != self._scan_id:
+            return  # a newer scan superseded this one
+        try:
+            pixbuf = self._thumbnail(path)
+        except (ValueError, OSError, GLib.Error):
+            return  # skip unreadable / non-RAF files
+        self._dispatch(partial(self._apply_thumb, picture, pixbuf, scan_id))
 
-        Orientation can rotate the image after the load-time scaling, so the
-        result is rescaled to the row height to keep widths true to aspect.
-        """
-        loader = GdkPixbuf.PixbufLoader()
-        loader.connect("size-prepared", self._scale_to_thumb)
-        loader.write(jpeg)
-        loader.close()
-        pixbuf = loader.get_pixbuf()
-        pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
-        if pixbuf.get_height() != self._thumb_height:
-            width = max(
-                1,
-                round(
-                    pixbuf.get_width()
-                    * self._thumb_height
-                    / pixbuf.get_height()
-                ),
-            )
-            pixbuf = pixbuf.scale_simple(
-                width, self._thumb_height, GdkPixbuf.InterpType.BILINEAR
-            )
+    def _thumbnail(self, path: str) -> Any:
+        """Return path's thumbnail, from the on-disk cache when possible."""
+        cache = self._cache_file(path)
+        if cache is not None and cache.exists():
+            try:
+                return GdkPixbuf.Pixbuf.new_from_file(str(cache))
+            except GLib.Error:
+                pass  # corrupt cache entry: fall through and re-decode
+        pixbuf = self._decode_thumb(path)
+        if cache is not None:
+            self._store_cache(cache, pixbuf)
         return pixbuf
+
+    def _cache_file(self, path: str) -> Path | None:
+        """Return the cache path for path, keyed by its size and mtime."""
+        target = Path(path)
+        try:
+            stat = target.stat()
+        except OSError:
+            return None
+        key = (
+            f"{target.resolve()}|{stat.st_mtime_ns}"
+            f"|{stat.st_size}|{self._thumb_height}"
+        )
+        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
+        return self._cache_dir / f"{digest}.png"
+
+    def _store_cache(self, cache: Path, pixbuf: Any) -> None:
+        """Write a decoded thumbnail to the cache, ignoring failures."""
+        try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+            pixbuf.savev(str(cache), "png", [], [])
+        except (GLib.Error, OSError):
+            pass
+
+    def _decode_thumb(self, path: str) -> Any:
+        """Decode a RAF's thumbnail into a thumb_height-tall pixbuf.
+
+        Prefers the tiny EXIF thumbnail baked into the embedded JPEG, read
+        from a bounded prefix so the multi-megabyte preview is not touched.
+        Falls back to decoding the full embedded JPEG (downscaled at load)
+        when the RAF carries no embedded thumbnail.
+        """
+        exif_thumb = self._exif_thumbnail_of(path)
+        if exif_thumb is not None:
+            data, orientation = exif_thumb
+            pixbuf = self._orient(self._decode_bytes(data), orientation)
+        else:
+            pixbuf = self._decode_bytes(embedded_jpeg(path), downscale=True)
+            pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
+        return self._to_thumb_height(pixbuf)
+
+    @staticmethod
+    def _exif_thumbnail_of(path: str) -> tuple[bytes, int] | None:
+        """Read only enough of the RAF to extract its EXIF thumbnail."""
+        try:
+            prefix = embedded_jpeg_prefix(path, _EXIF_PREFIX_BYTES)
+        except (ValueError, OSError):
+            return None
+        return FilmStrip._exif_thumbnail(prefix)
+
+    @staticmethod
+    def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int] | None:
+        """Return (thumbnail bytes, EXIF orientation), or None if absent."""
+        try:
+            meta = GExiv2.Metadata()
+            meta.open_buf(jpeg)
+            thumb = meta.get_exif_thumbnail()
+        except GLib.Error:
+            return None
+        if isinstance(thumb, tuple):  # some bindings return (ok, data)
+            thumb = thumb[-1]
+        if not thumb:
+            return None
+        try:
+            orientation = int(meta.get_orientation())
+        except (GLib.Error, ValueError):
+            orientation = 1
+        return bytes(thumb), orientation
+
+    def _decode_bytes(self, data: bytes, *, downscale: bool = False) -> Any:
+        """Decode JPEG bytes, optionally downscaling to the row height."""
+        loader = GdkPixbuf.PixbufLoader()
+        if downscale:
+            loader.connect("size-prepared", self._scale_to_thumb)
+        loader.write(data)
+        loader.close()
+        return loader.get_pixbuf()
+
+    @staticmethod
+    def _orient(pixbuf: Any, orientation: int) -> Any:
+        """Rotate/flip a pixbuf per its EXIF orientation."""
+        rotation, flip = _ORIENTATIONS.get(orientation, (_R.NONE, False))
+        pixbuf = pixbuf.rotate_simple(rotation) or pixbuf
+        if flip:
+            pixbuf = pixbuf.flip(True) or pixbuf
+        return pixbuf
+
+    def _to_thumb_height(self, pixbuf: Any) -> Any:
+        """Scale a pixbuf to exactly the row height, keeping its aspect."""
+        if pixbuf.get_height() == self._thumb_height:
+            return pixbuf
+        width = max(
+            1,
+            round(
+                pixbuf.get_width() * self._thumb_height / pixbuf.get_height()
+            ),
+        )
+        return pixbuf.scale_simple(
+            width, self._thumb_height, GdkPixbuf.InterpType.BILINEAR
+        )
 
     def _scale_to_thumb(self, loader: Any, width: int, height: int) -> None:
         """Scale the image to the thumbnail height, keeping aspect."""

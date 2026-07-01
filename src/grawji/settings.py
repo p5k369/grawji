@@ -19,6 +19,12 @@ def settings_path() -> Path:
     return config_dir() / "settings.json"
 
 
+def cache_dir() -> Path:
+    """Return grawji's cache directory (honours XDG_CACHE_HOME)."""
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "grawji"
+
+
 @dataclass
 class Settings:
     """User-configurable application settings.

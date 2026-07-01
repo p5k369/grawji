@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import tempfile
 import threading
 from functools import partial
@@ -16,6 +18,7 @@ gi.require_version("Adw", "1")
 gi.require_version("GExiv2", "0.10")
 
 import rawji
+import usb.core
 from gi.repository import (
     Adw,
     Gdk,
@@ -105,10 +108,11 @@ _LOAD_DELAY_MS = 50
 _DEFAULT_SIDEBAR_WIDTH = 240
 # Pane positions at or below this count as collapsed.
 _SIDEBAR_COLLAPSED_MAX = 10
-# Kernel USB device tree; read directly so plug/unplug is seen immediately.
-_USB_SYSFS = Path("/sys/bus/usb/devices")
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
 _EV_EPSILON = 1e-9
+# Whether we run inside a Flatpak sandbox, which cannot see a camera that is
+# unplugged and plugged back in until the app restarts.
+_IN_FLATPAK = Path("/.flatpak-info").exists()
 # Zoom is multiplicative.
 _ZOOM_STEP = 1.15
 
@@ -517,6 +521,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._content_h = 0.0
         self._texture: Any = None
         self._texture_src: Any = None
+        self._error_showing = False
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
@@ -1116,18 +1121,70 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_error(self, exc: Exception) -> None:
         """Surface a camera error in a dialog and reset the busy state."""
+        logging.getLogger("grawji").warning("camera operation failed: %s", exc)
+        self._set_busy(busy=False, status="Error.")
+        # A wedged camera fails every queued render in turn; show one dialog.
+        if self._error_showing:
+            return
         if isinstance(exc, ForeignRafError):
+            message = "Camera error"
             detail = (
                 "This RAF was shot by a different camera body. Fuji "
                 "cameras only convert their own RAFs."
             )
+        elif self._is_camera_stuck(exc):
+            message = "Camera not responding"
+            detail = (
+                "The camera stopped responding during conversion and "
+                "appears to be stuck. Turn it off and on again - if it "
+                "will not turn off, briefly remove the battery - then "
+                "reconnect and try the image again."
+            )
+        elif self._is_camera_disconnected(exc):
+            message = "Camera disconnected"
+            detail = (
+                "grawji must be restarted to use a camera that was "
+                "unplugged and reconnected: the Flatpak sandbox does not "
+                "pick up the reconnected camera on its own."
+                if _IN_FLATPAK
+                else "The camera was disconnected. Reconnect it, then "
+                "select an image again to continue."
+            )
         else:
+            message = "Camera error"
             detail = str(exc)
-        self._set_busy(busy=False, status="Error.")
+        self._error_showing = True
         alert = Gtk.AlertDialog()
-        alert.set_message("Camera error")
+        alert.set_message(message)
         alert.set_detail(detail)
-        alert.show(self)
+        alert.set_buttons(["Close"])
+        alert.choose(self, None, self._on_error_dismissed)
+
+    def _on_error_dismissed(self, dialog: Any, result: Any) -> None:
+        """Clear the error-showing guard once the dialog is closed."""
+        with contextlib.suppress(GLib.Error):
+            dialog.choose_finish(result)
+        self._error_showing = False
+
+    @staticmethod
+    def _is_camera_stuck(exc: Exception) -> bool:
+        """Whether exc signals a hung camera (timed-out or busy conversion).
+
+        A conversion that never returns (TimeoutError) or a follow-up call
+        rejected with PTP 0x2019 (Device_Busy) both mean the body is wedged
+        and needs a power cycle - retrying from here cannot recover it.
+        """
+        return isinstance(exc, TimeoutError) or "0x2019" in str(exc)
+
+    @staticmethod
+    def _is_camera_disconnected(exc: Exception) -> bool:
+        """Whether exc signals the camera was unplugged (or gone from USB).
+
+        A write to a vanished device fails with errno 19 (No such device);
+        a fresh connect that finds nothing raises "could not connect".
+        """
+        text = str(exc)
+        return "No such device" in text or "could not connect" in text
 
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""
@@ -1141,28 +1198,16 @@ class MainWindow(Adw.ApplicationWindow):
     def _detect_camera() -> str | None:
         """Return the connected camera's label, or None if none is found.
 
-        Reads sysfs directly rather than enumerating via libusb: the kernel
-        updates /sys on every plug and unplug, whereas libusb caches its
-        device list and only refreshes it from udev hotplug events, which a
-        Flatpak sandbox never receives - so a body plugged in after launch
-        would otherwise go unnoticed. Any Fuji-vendor device counts (matching
-        rawji's find_camera), named from _PID_NAMES when its id is known and
-        the generic "Camera" otherwise (e.g. an X70).
+        Enumeration only. It never opens or claims the device, so it
+        is safe to poll alongside an active camera session.
         """
-        vendor = f"{FUJIFILM_USB_VENDOR_ID:04x}"
         try:
-            entries = sorted(_USB_SYSFS.iterdir())
-        except OSError:
+            device = usb.core.find(idVendor=FUJIFILM_USB_VENDOR_ID)
+        except (usb.core.USBError, OSError, ValueError):
+            return None  # e.g. no libusb backend available
+        if device is None:
             return None
-        for entry in entries:
-            try:
-                if (entry / "idVendor").read_text().strip() != vendor:
-                    continue
-                pid = int((entry / "idProduct").read_text().strip(), 16)
-            except (OSError, ValueError):
-                continue
-            return _PID_NAMES.get(pid, "Camera")
-        return None
+        return _PID_NAMES.get(device.idProduct, "Camera")
 
     def _rebuild_menu(self) -> None:
         """(Re)build the header menu model, including the recipe lists."""
