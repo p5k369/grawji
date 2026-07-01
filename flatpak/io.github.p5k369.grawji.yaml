@@ -21,8 +21,10 @@ finish-args:
   - --socket=fallback-x11
   # The camera talks PTP over raw USB, so the app needs USB device access.
   - --device=all
-  # Open folders of RAFs and write exported JPEGs.
-  - --filesystem=home
+  # Read RAFs from anywhere (cards under /run/media, external drives, ...).
+  # Read-only: exported JPEGs are written through the file-chooser portal,
+  # which grants write access to just the chosen file/folder.
+  - --filesystem=host:ro
 
 modules:
   - name: libusb

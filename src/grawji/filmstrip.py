@@ -26,6 +26,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self,
         *,
         on_select: Callable[[str], None],
+        on_loading: Callable[[bool], None] | None = None,
         dispatch: Dispatch = GLib.idle_add,
         thumb_height: int = 110,
     ) -> None:
@@ -34,11 +35,14 @@ class FilmStrip(Gtk.ScrolledWindow):
         Args:
             on_select: Called with the RAF path when a thumbnail is
                 clicked.
+            on_loading: Called with True when thumbnail decoding starts and
+                False when it finishes, for an activity indicator elsewhere.
             dispatch: Schedules a callback on the GTK main loop.
             thumb_height: Thumbnail height in pixels.
         """
         super().__init__()
         self._on_select = on_select
+        self._on_loading = on_loading
         self._dispatch = dispatch
         self._thumb_height = thumb_height
         self._scan_id = 0
@@ -84,6 +88,8 @@ class FilmStrip(Gtk.ScrolledWindow):
             pictures.append((str(path), picture))
 
         if pictures:
+            if self._on_loading is not None:
+                self._on_loading(True)
             threading.Thread(
                 target=self._load_thumbnails,
                 args=(pictures, scan_id),
@@ -162,6 +168,7 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._dispatch(
                 partial(self._apply_thumb, picture, pixbuf, scan_id)
             )
+        self._dispatch(partial(self._loading_done, scan_id))
 
     def _decode_thumb(self, jpeg: bytes) -> Any:
         """Decode JPEG bytes into an oriented pixbuf exactly thumb_height tall.
@@ -201,3 +208,8 @@ class FilmStrip(Gtk.ScrolledWindow):
         if scan_id == self._scan_id:
             picture.set_size_request(pixbuf.get_width(), self._thumb_height)
             picture.set_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+
+    def _loading_done(self, scan_id: int) -> None:
+        """Signal that this scan's thumbnails have finished decoding."""
+        if scan_id == self._scan_id and self._on_loading is not None:
+            self._on_loading(False)
