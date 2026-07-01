@@ -121,6 +121,7 @@ class WBShiftGrid(Gtk.DrawingArea):
         super().__init__()
         self._r = 0
         self._b = 0
+        self._colored = False
         self._on_changed: Callable[[int, int], None] | None = None
         self.set_content_width(164)
         self.set_content_height(164)
@@ -132,6 +133,21 @@ class WBShiftGrid(Gtk.DrawingArea):
         drag = Gtk.GestureDrag()
         drag.connect("drag-update", self._on_drag)
         self.add_controller(drag)
+
+    def set_colored(self, colored: bool) -> None:
+        """Tint each cell to preview its white-balance shift, or not."""
+        self._colored = colored
+        self.queue_draw()
+
+    @staticmethod
+    def _cell_rgb(r: float, b: float) -> tuple[float, float, float]:
+        """Opponent-colour tint for a shift: +R red, +B blue, and inverses."""
+        base, amp = 0.5, 0.22
+        red = base + amp * (r - b)
+        green = base - amp * (r + b)
+        blue = base + amp * (b - r)
+        clamp = lambda v: max(0.0, min(1.0, v))  # noqa: E731
+        return clamp(red), clamp(green), clamp(blue)
 
     def get_values(self) -> tuple[int, int]:
         """Return the current (red, blue) shift."""
@@ -190,12 +206,27 @@ class WBShiftGrid(Gtk.DrawingArea):
             if self._on_changed is not None:
                 self._on_changed(self._r, self._b)
 
+    def _fill_cells(self, cx: Any, ox: float, oy: float, step: float) -> None:
+        """Tint every grid cell with its opponent-colour shift preview."""
+        cells = 2 * self._RANGE
+        for col in range(cells):
+            r = ((col + 0.5) / cells) * 2 - 1
+            for row in range(cells):
+                b = 1 - ((row + 0.5) / cells) * 2
+                red, green, blue = self._cell_rgb(r, b)
+                cx.set_source_rgb(red, green, blue)
+                cx.rectangle(ox + col * step, oy + row * step, step, step)
+                cx.fill()
+
     def _draw(
         self, _area: Gtk.DrawingArea, cx: Any, _width: int, _height: int
     ) -> None:
         """Draw the grid, axes and current marker (cx is a cairo ctx)."""
         ox, oy, size, step = self._geometry()
         color = self.get_color()
+
+        if self._colored:
+            self._fill_cells(cx, ox, oy, step)
 
         cx.set_line_width(1.0)
         cx.set_source_rgba(color.red, color.green, color.blue, 0.15)
@@ -219,13 +250,14 @@ class WBShiftGrid(Gtk.DrawingArea):
 
         px = ox + (self._r / self._RANGE / 2 + 0.5) * size
         py = oy + (0.5 - self._b / self._RANGE / 2) * size
-        cx.set_source_rgba(color.red, color.green, color.blue, 0.95)
-        cx.arc(px, py, 5.0, 0, 6.2832)
-        cx.fill()
-
-        cx.set_source_rgba(color.red, color.green, color.blue, 0.7)
-        b_ext = cx.text_extents("B")
-        cx.move_to(mid_x - b_ext.width / 2, oy - 4)
-        cx.show_text("B")
-        cx.move_to(ox + size + 4, mid_y + 4)
-        cx.show_text("R")
+        if self._colored:
+            cx.set_source_rgb(1.0, 1.0, 1.0)
+            cx.arc(px, py, 5.5, 0, 6.2832)
+            cx.fill()
+            cx.set_source_rgb(0.0, 0.0, 0.0)
+            cx.arc(px, py, 3.5, 0, 6.2832)
+            cx.fill()
+        else:
+            cx.set_source_rgba(color.red, color.green, color.blue, 0.95)
+            cx.arc(px, py, 5.0, 0, 6.2832)
+            cx.fill()

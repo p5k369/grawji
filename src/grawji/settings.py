@@ -38,6 +38,8 @@ class Settings:
         batch_skip_foreign: On batch export, skip RAFs shot by a different
             camera body (which the connected camera cannot convert) and
             carry on, instead of stopping the whole batch.
+        wb_grid_tint: When True, tint each white-balance shift grid cell
+            with the colour it nudges the image toward.
     """
 
     load_recipe_from_image: bool = True
@@ -48,6 +50,7 @@ class Settings:
     window_height: int = 0
     jpeg_quality: int = 95
     batch_skip_foreign: bool = False
+    wb_grid_tint: bool = True
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""
