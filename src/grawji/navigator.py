@@ -12,21 +12,7 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, Gtk
 
-# At/above this visible fraction the whole image shows, so no rectangle.
-_FULL = 0.999
-# Map a preview-space (fx, fy, fw, fh) fraction rect into the unrotated
-# thumbnail space.
-_RECT_ROTATIONS = {
-    90: lambda fx, fy, fw, fh: (fy, 1 - fx - fw, fh, fw),
-    180: lambda fx, fy, fw, fh: (1 - fx - fw, 1 - fy - fh, fw, fh),
-    270: lambda fx, fy, fw, fh: (1 - fy - fh, fx, fh, fw),
-}
-# Inverse of the above for a single point.
-_POINT_ROTATIONS = {
-    90: lambda ix, iy: (1 - iy, ix),
-    180: lambda ix, iy: (1 - ix, 1 - iy),
-    270: lambda ix, iy: (iy, 1 - ix),
-}
+from grawji import navigator_geometry as geom
 
 
 class Navigator:
@@ -101,7 +87,7 @@ class Navigator:
         ox, oy = (w - dw) / 2, (h - dh) / 2
         ix = min(1.0, max(0.0, (x - ox) / dw))
         iy = min(1.0, max(0.0, (y - oy) / dh))
-        transform = _POINT_ROTATIONS.get(self._get_rotation())
+        transform = geom.POINT_ROTATIONS.get(self._get_rotation())
         px, py = transform(ix, iy) if transform else (ix, iy)
         self._center(self._scroll.get_hadjustment(), px)
         self._center(self._scroll.get_vadjustment(), py)
@@ -127,9 +113,9 @@ class Navigator:
             return
         fx, fw = hadj.get_value() / hu, hadj.get_page_size() / hu
         fy, fh = vadj.get_value() / vu, vadj.get_page_size() / vu
-        if fw >= _FULL and fh >= _FULL:
+        if fw >= geom.FULL and fh >= geom.FULL:
             return
-        transform = _RECT_ROTATIONS.get(self._get_rotation())
+        transform = geom.RECT_ROTATIONS.get(self._get_rotation())
         if transform:
             fx, fy, fw, fh = transform(fx, fy, fw, fh)
 
