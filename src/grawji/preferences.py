@@ -19,6 +19,7 @@ _UI = (
     .joinpath("ui", "preferences.ui")
     .read_text(encoding="utf-8")
 )
+_COLOR_SCHEMES = ["default", "light", "dark"]
 
 
 @Gtk.Template(string=_UI)
@@ -27,6 +28,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     __gtype_name__ = "GrawjiPreferencesDialog"
 
+    color_scheme_row = Gtk.Template.Child()
     load_recipe_row = Gtk.Template.Child()
     wb_grid_row = Gtk.Template.Child()
     jpeg_quality_scale = Gtk.Template.Child()
@@ -45,10 +47,14 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings = settings
         self._on_change = on_change
 
+        scheme = settings.color_scheme
+        index = _COLOR_SCHEMES.index(scheme) if scheme in _COLOR_SCHEMES else 0
+        self.color_scheme_row.set_selected(index)
         self.load_recipe_row.set_active(settings.load_recipe_from_image)
         self.wb_grid_row.set_active(settings.wb_grid_tint)
         self.jpeg_quality_scale.set_value(settings.jpeg_quality)
         self.batch_skip_row.set_active(settings.batch_skip_foreign)
+        self.color_scheme_row.connect("notify::selected", self._on_edited)
         self.load_recipe_row.connect("notify::active", self._on_edited)
         self.wb_grid_row.connect("notify::active", self._on_edited)
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
@@ -56,6 +62,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     def _on_edited(self, *_args: object) -> None:
         """Copy the row values into settings and notify the caller."""
+        self._settings.color_scheme = _COLOR_SCHEMES[
+            self.color_scheme_row.get_selected()
+        ]
         self._settings.load_recipe_from_image = (
             self.load_recipe_row.get_active()
         )

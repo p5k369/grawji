@@ -228,8 +228,9 @@ class WBShiftGrid(Gtk.DrawingArea):
         if self._colored:
             self._fill_cells(cx, ox, oy, step)
 
+        # Grid lines and axes stay bright regardless of the light/dark theme
         cx.set_line_width(1.0)
-        cx.set_source_rgba(color.red, color.green, color.blue, 0.15)
+        cx.set_source_rgba(1.0, 1.0, 1.0, 0.2)
         for i in range(2 * self._RANGE + 1):
             pos = i * step
             cx.move_to(ox, oy + pos)
@@ -240,7 +241,7 @@ class WBShiftGrid(Gtk.DrawingArea):
 
         mid_x = ox + size / 2
         mid_y = oy + size / 2
-        cx.set_source_rgba(color.red, color.green, color.blue, 0.4)
+        cx.set_source_rgba(1.0, 1.0, 1.0, 0.45)
         cx.set_line_width(1.5)
         cx.move_to(ox, mid_y)
         cx.line_to(ox + size, mid_y)
