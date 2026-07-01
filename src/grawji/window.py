@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import tempfile
 import threading
 from functools import partial
@@ -16,6 +18,7 @@ gi.require_version("Adw", "1")
 gi.require_version("GExiv2", "0.10")
 
 import rawji
+import usb.core
 from gi.repository import (
     Adw,
     Gdk,
@@ -23,6 +26,7 @@ from gi.repository import (
     GExiv2,
     Gio,
     GLib,
+    GObject,
     Gtk,
 )
 from rawji.fuji_enums import (
@@ -51,6 +55,7 @@ from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.preferences import PreferencesDialog
 from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
+from grawji.recipe_manager import RecipeManagerDialog
 from grawji.recipes import (
     load_recipes,
     recipes_path,
@@ -93,7 +98,7 @@ _PID_NAMES = {
     0x02D1: "X100F",
     0x02DD: "X-T3",
     0x02E3: "X-T30",
-    0x02E5: "X-T3",
+    0x02E5: "X100V",
     0x02E7: "X-T4",
 }
 _CAMERA_POLL_SECONDS = 3
@@ -104,10 +109,13 @@ _LOAD_DELAY_MS = 50
 _DEFAULT_SIDEBAR_WIDTH = 240
 # Pane positions at or below this count as collapsed.
 _SIDEBAR_COLLAPSED_MAX = 10
-# Kernel USB device tree; read directly so plug/unplug is seen immediately.
-_USB_SYSFS = Path("/sys/bus/usb/devices")
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
 _EV_EPSILON = 1e-9
+# Whether we run inside a Flatpak sandbox, which cannot see a camera that is
+# unplugged and plugged back in until the app restarts.
+_IN_FLATPAK = Path("/.flatpak-info").exists()
+# Zoom is multiplicative.
+_ZOOM_STEP = 1.15
 
 # Preview canvas backgrounds, cycled by the toolbar button (darktable-style).
 _CANVAS_CSS = """
@@ -128,6 +136,9 @@ button.thumb.thumb-selected {
 .folder-tree { color: alpha(currentColor, 0.7); }
 .folder-tree image { opacity: 0.7; }
 .folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
+/* Filmstrip nav buttons: round only the edge facing the window border. */
+.filmstrip-nav-start { border-radius: 0 0 0 8px; }
+.filmstrip-nav-end { border-radius: 0 0 8px 0; }
 """
 _BACKGROUNDS = ["", "canvas-white", "canvas-gray", "canvas-black"]
 
@@ -136,6 +147,29 @@ _UI = (
     .joinpath("ui", "grawji.ui")
     .read_text(encoding="utf-8")
 )
+
+
+class _ScaledPaintable(GObject.GObject, Gdk.Paintable):
+    """A texture presented at a chosen intrinsic size, GPU-scaled on draw."""
+
+    def __init__(self, texture: Any, width: int, height: int) -> None:
+        """Present texture as though it were width x height pixels."""
+        super().__init__()
+        self._texture = texture
+        self._width = max(1, width)
+        self._height = max(1, height)
+
+    def do_get_intrinsic_width(self) -> int:
+        """Report the chosen width to the layout system."""
+        return self._width
+
+    def do_get_intrinsic_height(self) -> int:
+        """Report the chosen height to the layout system."""
+        return self._height
+
+    def do_snapshot(self, snapshot: Any, width: float, height: float) -> None:
+        """Draw the texture scaled into the given area."""
+        self._texture.snapshot(snapshot, width, height)
 
 
 def _export_basename(raf_path: Path | str) -> str:
@@ -221,11 +255,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._build_recipe_controls()
         self._connect_signals()
 
-        self._filmstrip = FilmStrip(
-            on_select=self._on_raf_selected,
-            on_loading=self._on_thumbs_loading,
-        )
-        self.filmstrip_slot.append(self._filmstrip)
+        self._init_filmstrip()
 
         self._foldertree = FolderTree(on_select=self._scan_folder)
         self._foldertree.set_vexpand(True)
@@ -269,15 +299,9 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             ("batch-export", None, lambda *_a: self._on_batch_export(), ()),
             (
-                "import-recipe",
+                "manage-recipes",
                 None,
-                lambda *_a: self._on_import_fp(),
-                (),
-            ),
-            (
-                "export-recipe",
-                None,
-                lambda *_a: self._on_export_fp(),
+                lambda *_a: self._on_manage_recipes(),
                 (),
             ),
             (
@@ -295,13 +319,13 @@ class MainWindow(Adw.ApplicationWindow):
             (
                 "zoom-in",
                 None,
-                lambda *_a: self._set_zoom(self._zoom * 1.25),
+                lambda *_a: self._set_zoom(self._zoom * _ZOOM_STEP),
                 ["<Ctrl>plus", "<Ctrl>equal"],
             ),
             (
                 "zoom-out",
                 None,
-                lambda *_a: self._set_zoom(self._zoom / 1.25),
+                lambda *_a: self._set_zoom(self._zoom / _ZOOM_STEP),
                 ["<Ctrl>minus"],
             ),
             ("zoom-fit", None, lambda *_a: self._set_zoom(1.0), ["<Ctrl>0"]),
@@ -312,24 +336,12 @@ class MainWindow(Adw.ApplicationWindow):
                 ["b"],
             ),
             (
-                "open-folder",
-                None,
-                lambda *_a: self._on_open_folder_clicked(None),
-                ["<Ctrl>o"],
-            ),
-            (
                 "shortcuts",
                 None,
                 lambda *_a: self._on_shortcuts(),
                 ["<Ctrl>question"],
             ),
             ("about", None, lambda *_a: self._on_about(), ()),
-            (
-                "delete-recipe",
-                "s",
-                lambda _a, p: self._delete_recipe(p.get_string()),
-                (),
-            ),
         )
         app = self.get_application()
         for name, ptype, callback, accels in specs:
@@ -492,11 +504,22 @@ class MainWindow(Adw.ApplicationWindow):
             slider.connect_changed(self._on_recipe_changed)
         self._wb_grid.connect_changed(self._on_wb_shift_changed)
         self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
+        self._pointer: tuple[float, float] | None = None
+        self._content_w = 0.0
+        self._content_h = 0.0
+        self._texture: Any = None
+        self._texture_src: Any = None
+        self._error_showing = False
+        self._recipe_manager: RecipeManagerDialog | None = None
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
         scroll.connect("scroll", self._on_scroll_zoom)
         self.preview_scroll.add_controller(scroll)
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("motion", self._on_pointer_motion)
+        motion.connect("leave", self._on_pointer_leave)
+        self.preview_scroll.add_controller(motion)
         pan = Gtk.GestureDrag()
         pan.connect("drag-begin", self._on_pan_begin)
         pan.connect("drag-update", self._on_pan_update)
@@ -522,22 +545,6 @@ class MainWindow(Adw.ApplicationWindow):
             color_space=_COLOR_SPACES[self.color_space_row.get_selected()],
         )
 
-    def _on_open_folder_clicked(self, _button: Any) -> None:
-        """Show a folder picker to populate the filmstrip."""
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Open folder of RAFs")
-        dialog.select_folder(self, None, self._on_folder_response)
-
-    def _on_folder_response(self, dialog: Any, result: Any) -> None:
-        """Scan the chosen folder, or do nothing if cancelled."""
-        try:
-            gfile = dialog.select_folder_finish(result)
-        except GLib.Error:
-            return
-        path = gfile.get_path()
-        if path is not None:
-            self._scan_folder(path)
-
     def _scan_folder(self, path: str) -> None:
         """Scan a folder into the filmstrip, remember it, and watch it."""
         # Already showing this folder (e.g. re-selected in the tree).
@@ -545,6 +552,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._current_folder = path
         self._filmstrip.scan(path)
+        self._update_nav_buttons()
         self._settings.last_folder = path
         save_settings(self._settings, settings_path())
         self.status.set_label("Select an image from the filmstrip.")
@@ -577,12 +585,51 @@ class MainWindow(Adw.ApplicationWindow):
             self._filmstrip.scan(self._current_folder)
         return GLib.SOURCE_REMOVE
 
+    def _init_filmstrip(self) -> None:
+        """Build the filmstrip flanked by previous/next navigation buttons."""
+        self._filmstrip = FilmStrip(
+            on_select=self._on_raf_selected,
+            on_loading=self._on_thumbs_loading,
+        )
+        self._filmstrip.set_hexpand(True)
+        self._prev_button = self._nav_button(
+            "go-previous-symbolic", "Previous image (Left)", -1
+        )
+        self._prev_button.add_css_class("filmstrip-nav-start")
+        self._next_button = self._nav_button(
+            "go-next-symbolic", "Next image (Right)", 1
+        )
+        self._next_button.add_css_class("filmstrip-nav-end")
+        self.filmstrip_slot.append(self._prev_button)
+        self.filmstrip_slot.append(self._filmstrip)
+        self.filmstrip_slot.append(self._next_button)
+        self._update_nav_buttons()
+
+    def _nav_button(self, icon: str, tooltip: str, delta: int) -> Gtk.Button:
+        """Create a flat, full-height filmstrip navigation button."""
+        button = Gtk.Button(icon_name=icon, vexpand=True)
+        button.add_css_class("flat")
+        button.set_tooltip_text(tooltip)
+        button.connect(
+            "clicked", lambda *_a: self._filmstrip.select_relative(delta)
+        )
+        return button
+
+    def _update_nav_buttons(self) -> None:
+        """Enable each navigation button only when a step is possible."""
+        count = len(self._filmstrip.paths)
+        index = self._filmstrip.current_index
+        has_next = index < count - 1 if index >= 0 else count > 0
+        self._prev_button.set_sensitive(index > 0)
+        self._next_button.set_sensitive(has_next)
+
     def _on_raf_selected(self, raf_path: str) -> None:
         """React to the click instantly; load the RAF on the next idle tick.
 
         The file read, JPEG decode and EXIF parse are deferred so the click
         (filmstrip highlight) paints first instead of waiting on them.
         """
+        self._update_nav_buttons()
         self._generation += 1
         self._raf_path = Path(raf_path)
         self.set_title(f"grawji — {Path(raf_path).name}")
@@ -603,7 +650,7 @@ class MainWindow(Adw.ApplicationWindow):
         if generation != self._generation:
             return GLib.SOURCE_REMOVE
         self._rotation = 0
-        # The camera open runs on its own worker; the embedded-preview read
+        # The camera open runs on its own worker. The embedded-preview read
         # and decode run on a short-lived thread. Neither blocks the UI, so
         # the filmstrip animation stays smooth and the image appears as soon
         # as it is decoded.
@@ -723,7 +770,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _rebuild_recipes(self) -> None:
         """Refresh the recipe apply-combo from the saved recipes."""
-        self._recipe_names = sorted(self._recipes)
+        self._recipe_names = list(self._recipes)
         self._suppress_combo_signal = True
         try:
             self.recipe_row.set_model(
@@ -961,44 +1008,78 @@ class MainWindow(Adw.ApplicationWindow):
         self.rotate_left.set_sensitive(True)
         self.rotate_right.set_sensitive(True)
 
-    def _set_zoom(self, value: float) -> None:
-        """Set the preview zoom factor (1.0 = fit; <1 shrinks below fit)."""
-        self._zoom = max(0.1, min(value, 8.0))
+    def _set_zoom(
+        self, value: float, anchor: tuple[float, float] | None = None
+    ) -> None:
+        """Set the preview zoom, keeping anchor fixed under the pointer."""
+        value = max(0.1, min(value, 8.0))
+        if value == self._zoom:
+            return
+        hadj = self.preview_scroll.get_hadjustment()
+        vadj = self.preview_scroll.get_vadjustment()
+        vw = self.preview_scroll.get_width()
+        vh = self.preview_scroll.get_height()
+        ax, ay = anchor if anchor is not None else (vw / 2, vh / 2)
+        fx = self._content_fraction(hadj, ax)
+        fy = self._content_fraction(vadj, ay)
+
+        self._zoom = value
         self._apply_zoom()
+        self._anchor_scroll(hadj, fx, ax, self._content_w, vw)
+        self._anchor_scroll(vadj, fy, ay, self._content_h, vh)
+
+    @staticmethod
+    def _content_fraction(adj: Any, anchor: float) -> float:
+        """Fraction of the content that currently sits under anchor."""
+        upper = adj.get_upper()
+        if upper <= 0:
+            return 0.5
+        return (adj.get_value() + anchor) / upper
+
+    @staticmethod
+    def _anchor_scroll(
+        adj: Any, frac: float, anchor: float, content: float, viewport: float
+    ) -> None:
+        """Place content fraction frac under anchor, for the new extent."""
+        adj.set_upper(max(content, viewport))
+        target = frac * content - anchor
+        adj.set_value(max(0.0, min(target, max(0.0, content - viewport))))
+
+    def _on_pointer_motion(self, _c: Any, x: float, y: float) -> None:
+        """Remember the pointer position within the preview viewport."""
+        self._pointer = (x, y)
+
+    def _on_pointer_leave(self, _c: Any) -> None:
+        """Forget the pointer when it leaves the preview."""
+        self._pointer = None
 
     def _apply_zoom(self) -> None:
-        """Show the preview at the zoom factor by scaling the pixbuf.
-
-        The displayed paintable's *intrinsic* size is the zoom size, so
-        the wrapping GtkBox centres it (below fit, with the canvas
-        background around it) or lets the scroller scroll it (above fit).
-        At 1.0 the full pixbuf fills the area (responsive to resize).
-        """
+        """Show the preview at the current zoom factor."""
         if self._pixbuf is None:
             return
         pw, ph = self._pixbuf.get_width(), self._pixbuf.get_height()
         if pw <= 0 or ph <= 0:
             return
+        if self._texture_src is not self._pixbuf:
+            self._texture = Gdk.Texture.new_for_pixbuf(self._pixbuf)
+            self._texture_src = self._pixbuf
+        vw = self.preview_scroll.get_width() or pw
+        vh = self.preview_scroll.get_height() or ph
         if self._zoom == 1.0:
             self.picture.set_can_shrink(True)
             self.picture.set_halign(Gtk.Align.FILL)
             self.picture.set_valign(Gtk.Align.FILL)
-            self.picture.set_paintable(
-                Gdk.Texture.new_for_pixbuf(self._pixbuf)
-            )
+            self.picture.set_paintable(self._texture)
+            self._content_w, self._content_h = vw, vh
             return
-        vw = self.preview_scroll.get_width() or pw
-        vh = self.preview_scroll.get_height() or ph
         fit = min(vw / pw, vh / ph)
-        scaled = self._pixbuf.scale_simple(
-            max(1, int(pw * fit * self._zoom)),
-            max(1, int(ph * fit * self._zoom)),
-            GdkPixbuf.InterpType.BILINEAR,
-        )
+        sw = max(1, int(pw * fit * self._zoom))
+        sh = max(1, int(ph * fit * self._zoom))
         self.picture.set_can_shrink(False)
         self.picture.set_halign(Gtk.Align.CENTER)
         self.picture.set_valign(Gtk.Align.CENTER)
-        self.picture.set_paintable(Gdk.Texture.new_for_pixbuf(scaled))
+        self.picture.set_paintable(_ScaledPaintable(self._texture, sw, sh))
+        self._content_w, self._content_h = sw, sh
 
     def _on_scroll_zoom(self, controller: Any, _dx: float, dy: float) -> bool:
         """Zoom the preview on Ctrl+scroll."""
@@ -1006,7 +1087,8 @@ class MainWindow(Adw.ApplicationWindow):
         state = event.get_modifier_state() if event else 0
         if not state & Gdk.ModifierType.CONTROL_MASK:
             return False
-        self._set_zoom(self._zoom * (1.25 if dy < 0 else 1 / 1.25))
+        factor = _ZOOM_STEP if dy < 0 else 1 / _ZOOM_STEP
+        self._set_zoom(self._zoom * factor, anchor=self._pointer)
         return True
 
     def _apply_background(self, css_class: str) -> None:
@@ -1068,18 +1150,70 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_error(self, exc: Exception) -> None:
         """Surface a camera error in a dialog and reset the busy state."""
+        logging.getLogger("grawji").warning("camera operation failed: %s", exc)
+        self._set_busy(busy=False, status="Error.")
+        # A wedged camera fails every queued render in turn; show one dialog.
+        if self._error_showing:
+            return
         if isinstance(exc, ForeignRafError):
+            message = "Camera error"
             detail = (
                 "This RAF was shot by a different camera body. Fuji "
                 "cameras only convert their own RAFs."
             )
+        elif self._is_camera_stuck(exc):
+            message = "Camera not responding"
+            detail = (
+                "The camera stopped responding during conversion and "
+                "appears to be stuck. Turn it off and on again - if it "
+                "will not turn off, briefly remove the battery - then "
+                "reconnect and try the image again."
+            )
+        elif self._is_camera_disconnected(exc):
+            message = "Camera disconnected"
+            detail = (
+                "grawji must be restarted to use a camera that was "
+                "unplugged and reconnected: the Flatpak sandbox does not "
+                "pick up the reconnected camera on its own."
+                if _IN_FLATPAK
+                else "The camera was disconnected. Reconnect it, then "
+                "select an image again to continue."
+            )
         else:
+            message = "Camera error"
             detail = str(exc)
-        self._set_busy(busy=False, status="Error.")
+        self._error_showing = True
         alert = Gtk.AlertDialog()
-        alert.set_message("Camera error")
+        alert.set_message(message)
         alert.set_detail(detail)
-        alert.show(self)
+        alert.set_buttons(["Close"])
+        alert.choose(self, None, self._on_error_dismissed)
+
+    def _on_error_dismissed(self, dialog: Any, result: Any) -> None:
+        """Clear the error-showing guard once the dialog is closed."""
+        with contextlib.suppress(GLib.Error):
+            dialog.choose_finish(result)
+        self._error_showing = False
+
+    @staticmethod
+    def _is_camera_stuck(exc: Exception) -> bool:
+        """Whether exc signals a hung camera (timed-out or busy conversion).
+
+        A conversion that never returns (TimeoutError) or a follow-up call
+        rejected with PTP 0x2019 (Device_Busy) both mean the body is wedged
+        and needs a power cycle - retrying from here cannot recover it.
+        """
+        return isinstance(exc, TimeoutError) or "0x2019" in str(exc)
+
+    @staticmethod
+    def _is_camera_disconnected(exc: Exception) -> bool:
+        """Whether exc signals the camera was unplugged (or gone from USB).
+
+        A write to a vanished device fails with errno 19 (No such device);
+        a fresh connect that finds nothing raises "could not connect".
+        """
+        text = str(exc)
+        return "No such device" in text or "could not connect" in text
 
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""
@@ -1093,47 +1227,24 @@ class MainWindow(Adw.ApplicationWindow):
     def _detect_camera() -> str | None:
         """Return the connected camera's label, or None if none is found.
 
-        Reads sysfs directly rather than enumerating via libusb: the kernel
-        updates /sys on every plug and unplug, whereas libusb caches its
-        device list and only refreshes it from udev hotplug events, which a
-        Flatpak sandbox never receives - so a body plugged in after launch
-        would otherwise go unnoticed. Any Fuji-vendor device counts (matching
-        rawji's find_camera), named from _PID_NAMES when its id is known and
-        the generic "Camera" otherwise (e.g. an X70).
+        Enumeration only. It never opens or claims the device, so it
+        is safe to poll alongside an active camera session.
         """
-        vendor = f"{FUJIFILM_USB_VENDOR_ID:04x}"
         try:
-            entries = sorted(_USB_SYSFS.iterdir())
-        except OSError:
+            device = usb.core.find(idVendor=FUJIFILM_USB_VENDOR_ID)
+        except (usb.core.USBError, OSError, ValueError):
+            return None  # e.g. no libusb backend available
+        if device is None:
             return None
-        for entry in entries:
-            try:
-                if (entry / "idVendor").read_text().strip() != vendor:
-                    continue
-                pid = int((entry / "idProduct").read_text().strip(), 16)
-            except (OSError, ValueError):
-                continue
-            return _PID_NAMES.get(pid, "Camera")
-        return None
+        return _PID_NAMES.get(device.idProduct, "Camera")
 
     def _rebuild_menu(self) -> None:
-        """(Re)build the header menu model, including the recipe lists."""
+        """(Re)build the header menu model."""
         menu = Gio.Menu()
 
-        files = Gio.Menu()
-        files.append("Import Recipe…", "win.import-recipe")
-        files.append("Export Recipe…", "win.export-recipe")
-        menu.append_section(None, files)
-
-        if self._recipes:
-            delete_menu = Gio.Menu()
-            for name in sorted(self._recipes):
-                delete_menu.append_item(
-                    self._recipe_item(name, "win.delete-recipe")
-                )
-            recipes = Gio.Menu()
-            recipes.append_submenu("Delete Recipe", delete_menu)
-            menu.append_section(None, recipes)
+        recipes = Gio.Menu()
+        recipes.append("Manage Recipes…", "win.manage-recipes")
+        menu.append_section(None, recipes)
 
         prefs = Gio.Menu()
         prefs.append("Keyboard Shortcuts", "win.shortcuts")
@@ -1150,7 +1261,6 @@ class MainWindow(Adw.ApplicationWindow):
         """Show a dialog listing the keyboard shortcuts."""
         groups = {
             "Files": [
-                ("Open folder", "<Ctrl>O"),
                 ("Export JPEG", "<Ctrl>E"),
             ],
             "Recipe": [
@@ -1207,21 +1317,44 @@ class MainWindow(Adw.ApplicationWindow):
         )
         about.present(self)
 
-    @staticmethod
-    def _recipe_item(name: str, action: str) -> Any:
-        """Build a menu item invoking action with the recipe name."""
-        item = Gio.MenuItem.new(name, None)
-        item.set_action_and_target_value(action, GLib.Variant("s", name))
-        return item
+    def _on_manage_recipes(self) -> None:
+        """Open the recipe manager modal."""
+        self._recipe_manager = RecipeManagerDialog(
+            list_recipes=lambda: list(self._recipes),
+            on_reorder=self._reorder_recipes,
+            on_delete=self._delete_recipe,
+            on_import=self._on_import_fp,
+            on_export=self._export_recipe,
+        )
+        self._recipe_manager.connect("closed", self._on_recipe_manager_closed)
+        self._recipe_manager.present(self)
+
+    def _on_recipe_manager_closed(self, _dialog: Any) -> None:
+        """Forget the manager once it is dismissed."""
+        self._recipe_manager = None
+
+    def _refresh_recipe_manager(self) -> None:
+        """Redraw the recipe manager if it is open."""
+        if self._recipe_manager is not None:
+            self._recipe_manager.refresh()
 
     def _delete_recipe(self, name: str) -> None:
         """Remove a saved recipe and persist the change."""
         if name in self._recipes:
             del self._recipes[name]
             save_recipes(self._recipes, recipes_path())
-            self._rebuild_menu()
             self._rebuild_recipes()
+            self._refresh_recipe_manager()
             self.status.set_label(f"Deleted recipe “{name}”.")
+
+    def _reorder_recipes(self, order: list[str]) -> None:
+        """Persist a new recipe order (from the manager's drag and drop)."""
+        if set(order) != set(self._recipes):
+            return
+        self._recipes = {name: self._recipes[name] for name in order}
+        save_recipes(self._recipes, recipes_path())
+        self._rebuild_recipes()
+        self._refresh_recipe_manager()
 
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
@@ -1286,8 +1419,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._recipes[name] = recipe
         save_recipes(self._recipes, recipes_path())
-        self._rebuild_menu()
         self._rebuild_recipes()
+        self._refresh_recipe_manager()
         self._set_active_recipe(recipe, name)
         if activate and self._session.is_open:
             self._render_preview()
@@ -1334,18 +1467,26 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._prompt_save_recipe(recipe, Path(path).stem, activate=True)
 
-    def _on_export_fp(self) -> None:
-        """Pick a path and write the current recipe as an FP file."""
+    def _export_recipe(self, name: str) -> None:
+        """Pick a path and write the named saved recipe as an FP file."""
+        recipe = self._recipes.get(name)
+        if recipe is None:
+            return
         dialog = Gtk.FileDialog()
         dialog.set_title("Export recipe")
-        stem = self._active_label or _export_basename(
-            self._raf_path or "grawji-recipe"
+        dialog.set_initial_name(f"{name}.FP1")
+        dialog.save(
+            self,
+            None,
+            lambda dlg, res: self._on_export_recipe_response(
+                dlg, res, name, recipe
+            ),
         )
-        dialog.set_initial_name(f"{stem}.FP1")
-        dialog.save(self, None, self._on_export_fp_response)
 
-    def _on_export_fp_response(self, dialog: Any, result: Any) -> None:
-        """Write the current recipe as an FP file to the chosen path."""
+    def _on_export_recipe_response(
+        self, dialog: Any, result: Any, name: str, recipe: Recipe
+    ) -> None:
+        """Write the named recipe as an FP file to the chosen path."""
         try:
             gfile = dialog.save_finish(result)
         except GLib.Error:
@@ -1355,17 +1496,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
         profile = self._session.profile
         iopcode = read_iopcode(profile) if profile is not None else None
-        text = serialize_fp(
-            self._current_recipe(),
-            iopcode=iopcode,
-            label=self._active_label,
-        )
+        text = serialize_fp(recipe, iopcode=iopcode, label=name)
         try:
             Path(path).write_text(text, encoding="utf-8")
         except OSError as exc:
             self.status.set_label(f"Could not export recipe: {exc}")
             return
-        self.status.set_label(f"Exported recipe to {path}.")
+        self.status.set_label(f"Exported recipe “{name}” to {path}.")
 
     def _on_batch_export(self) -> None:
         """Pick a folder and export every RAF with the current recipe."""

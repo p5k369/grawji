@@ -22,6 +22,8 @@ class _FolderItem(GObject.Object):
 
     __gtype_name__ = "GrawjiFolderItem"
 
+    name = GObject.Property(type=str, default="")
+
     def __init__(self, file: Gio.File, name: str) -> None:
         """Wrap a GFile with the label to show for it."""
         super().__init__()
@@ -49,6 +51,10 @@ class FolderTree(Gtk.ScrolledWindow):
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
         self._dir_filter = Gtk.CustomFilter.new(self._is_visible_dir)
+        self._name_sorter = Gtk.StringSorter.new(
+            Gtk.PropertyExpression.new(_FolderItem, None, "name")
+        )
+        self._name_sorter.set_ignore_case(True)
 
         roots = Gio.ListStore.new(_FolderItem)
         roots.append(
@@ -71,7 +77,9 @@ class FolderTree(Gtk.ScrolledWindow):
         factory.connect("setup", self._on_setup)
         factory.connect("bind", self._on_bind)
 
-        self.set_child(Gtk.ListView(model=self._selection, factory=factory))
+        listview = Gtk.ListView(model=self._selection, factory=factory)
+        listview.connect("activate", self._on_row_activated)
+        self.set_child(listview)
 
     def reveal_path(self, target: str) -> None:
         """Expand the tree to target and select it (if it still exists).
@@ -113,6 +121,12 @@ class FolderTree(Gtk.ScrolledWindow):
         GLib.timeout_add(50, self._reveal_chain, chain, index + 1, 0)
         return False
 
+    def _on_row_activated(self, _list: Gtk.ListView, position: int) -> None:
+        """Toggle a folder's expansion on double-click or Enter."""
+        row = self._selection.get_item(position)
+        if row is not None and row.is_expandable():
+            row.set_expanded(not row.get_expanded())
+
     def _find_row(self, path: Path) -> tuple[int, Any]:
         """Return the (index, TreeListRow) for path in the flattened tree."""
         wanted = str(path)
@@ -132,10 +146,11 @@ class FolderTree(Gtk.ScrolledWindow):
         )
 
     def _dir_model(self, folder: Gio.File) -> Gio.ListModel:
-        """Build a sorted, directories-only model of folder's children."""
+        """Build a name-sorted, directories-only model of folder's children."""
         listing = Gtk.DirectoryList.new(_ATTRS, folder)
         dirs = Gtk.FilterListModel.new(listing, self._dir_filter)
-        return Gtk.MapListModel.new(dirs, self._to_item)
+        items = Gtk.MapListModel.new(dirs, self._to_item)
+        return Gtk.SortListModel.new(items, self._name_sorter)
 
     @staticmethod
     def _to_item(info: Gio.FileInfo) -> _FolderItem:
