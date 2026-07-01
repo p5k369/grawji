@@ -22,7 +22,7 @@ def test_round_trip(tmp_path):
     save_settings(
         Settings(
             load_recipe_from_image=False,
-            show_info_panel=True,
+            sidebar_width=200,
             canvas_background="canvas-white",
             last_folder="/photos/raf",
             window_width=1400,
@@ -32,7 +32,7 @@ def test_round_trip(tmp_path):
     )
     loaded = load_settings(path)
     assert loaded.load_recipe_from_image is False
-    assert loaded.show_info_panel is True
+    assert loaded.sidebar_width == 200
     assert loaded.canvas_background == "canvas-white"
     assert loaded.last_folder == "/photos/raf"
     assert loaded.window_width == 1400

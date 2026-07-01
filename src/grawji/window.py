@@ -46,6 +46,7 @@ from grawji.core import (
     recipe_from_profile,
 )
 from grawji.filmstrip import FilmStrip
+from grawji.foldertree import FolderTree
 from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.preferences import PreferencesDialog
 from grawji.preview import CameraWorker
@@ -99,6 +100,10 @@ _CAMERA_POLL_SECONDS = 3
 # Debounce a selection's load so fast scrubbing does not spawn a decode per
 # image passed over, the decode then runs off-thread and never blocks the UI.
 _LOAD_DELAY_MS = 50
+# Default side-panel width, used to restore it after a collapse.
+_DEFAULT_SIDEBAR_WIDTH = 240
+# Pane positions at or below this count as collapsed.
+_SIDEBAR_COLLAPSED_MAX = 10
 # Kernel USB device tree; read directly so plug/unplug is seen immediately.
 _USB_SYSFS = Path("/sys/bus/usb/devices")
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
@@ -119,6 +124,10 @@ button.thumb.thumb-selected {
     margin-top: 0;
     margin-bottom: 16px;
 }
+/* Soften the folder tree: dimmer text and a gentler selection. */
+.folder-tree { color: alpha(currentColor, 0.7); }
+.folder-tree image { opacity: 0.7; }
+.folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
 """
 _BACKGROUNDS = ["", "canvas-white", "canvas-gray", "canvas-black"]
 
@@ -149,7 +158,6 @@ class MainWindow(Adw.ApplicationWindow):
     __gtype_name__ = "MainWindow"
 
     window_title = Gtk.Template.Child()
-    open_button = Gtk.Template.Child()
     rotate_left = Gtk.Template.Child()
     rotate_right = Gtk.Template.Child()
     export_button = Gtk.Template.Child()
@@ -163,7 +171,9 @@ class MainWindow(Adw.ApplicationWindow):
     recipe_group = Gtk.Template.Child()
     exif_group = Gtk.Template.Child()
     filmstrip_slot = Gtk.Template.Child()
-    left_panel = Gtk.Template.Child()
+    foldertree_slot = Gtk.Template.Child()
+    main_paned = Gtk.Template.Child()
+    sidebar_button = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, recipe controls, filmstrip and signals."""
@@ -190,6 +200,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._pan_v = 0.0
         self._render_pending_id = 0
         self._load_pending_id = 0
+        self._reload_pending_id = 0
+        self._file_monitor: Any = None
         # Bumped on every image selection. Async open/preview callbacks carry
         # the value they were issued under and ignore themselves if a newer
         # selection has superseded them (fast filmstrip scrubbing).
@@ -201,22 +213,23 @@ class MainWindow(Adw.ApplicationWindow):
             self.set_default_size(
                 self._settings.window_width, self._settings.window_height
             )
-        self.left_panel.set_visible(self._settings.show_info_panel)
+        self._init_sidebar()
 
-        provider = Gtk.CssProvider()
-        provider.load_from_string(_CANVAS_CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+        self._install_css()
         self._apply_background(self._settings.canvas_background)
 
         self._build_recipe_controls()
         self._connect_signals()
 
-        self._filmstrip = FilmStrip(on_select=self._on_raf_selected)
+        self._filmstrip = FilmStrip(
+            on_select=self._on_raf_selected,
+            on_loading=self._on_thumbs_loading,
+        )
         self.filmstrip_slot.append(self._filmstrip)
+
+        self._foldertree = FolderTree(on_select=self._scan_folder)
+        self._foldertree.set_vexpand(True)
+        self.foldertree_slot.append(self._foldertree)
 
         self._install_actions()
         self._rebuild_menu()
@@ -230,6 +243,7 @@ class MainWindow(Adw.ApplicationWindow):
         last = self._settings.last_folder
         if last and Path(last).is_dir():
             self._scan_folder(last)
+            self._foldertree.reveal_path(last)
 
     def _install_actions(self) -> None:
         """Install window actions used by the menu and keyboard shortcuts."""
@@ -297,7 +311,6 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda *_a: self._cycle_background(),
                 ["b"],
             ),
-            ("reload", None, lambda *_a: self._reload_folder(), ["F5"]),
             (
                 "open-folder",
                 None,
@@ -327,22 +340,44 @@ class MainWindow(Adw.ApplicationWindow):
             if app is not None and accels:
                 app.set_accels_for_action(f"win.{name}", list(accels))
 
-        show_info = Gio.SimpleAction.new_stateful(
-            "show-info",
-            None,
-            GLib.Variant("b", self._settings.show_info_panel),
+    def _init_sidebar(self) -> None:
+        """Restore the side panel width and wire its collapse button."""
+        self.main_paned.set_position(self._settings.sidebar_width)
+        self._sidebar_expanded_width = (
+            self._settings.sidebar_width or _DEFAULT_SIDEBAR_WIDTH
         )
-        show_info.connect("change-state", self._on_show_info)
-        self.add_action(show_info)
-        self.lookup_action("reload").set_enabled(False)
+        self.sidebar_button.connect("clicked", self._toggle_sidebar)
 
-    def _on_show_info(self, action: Any, value: Any) -> None:
-        """Toggle the left original/info panel and persist the choice."""
-        show = value.get_boolean()
-        action.set_state(value)
-        self.left_panel.set_visible(show)
-        self._settings.show_info_panel = show
-        save_settings(self._settings, settings_path())
+    def _toggle_sidebar(self, _button: Any) -> None:
+        """Collapse the side panel, or restore it to its expanded width."""
+        position = self.main_paned.get_position()
+        if position > _SIDEBAR_COLLAPSED_MAX:
+            self._sidebar_expanded_width = position
+            self.main_paned.set_position(0)
+        else:
+            self.main_paned.set_position(self._sidebar_expanded_width)
+
+    def _on_thumbs_loading(self, loading: bool) -> None:
+        """Show the activity spinner while the filmstrip decodes thumbnails."""
+        self._set_spinner(active=loading)
+
+    def _set_spinner(self, *, active: bool) -> None:
+        """Show and run the status-line spinner, or hide and stop it."""
+        self.spinner.set_visible(active)
+        if active:
+            self.spinner.start()
+        else:
+            self.spinner.stop()
+
+    def _install_css(self) -> None:
+        """Load the app's CSS for the preview canvas and thumbnails."""
+        provider = Gtk.CssProvider()
+        provider.load_from_string(_CANVAS_CSS)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
 
     def _build_recipe_controls(self) -> None:
         """Build every recipe control in the Fuji IQ-menu order."""
@@ -443,10 +478,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _connect_signals(self) -> None:
         """Connect widget signals to handlers (done in code, not the .ui)."""
-        self.open_button.connect("clicked", self._on_open_folder_clicked)
         self.rotate_left.connect("clicked", self._on_rotate_left)
         self.rotate_right.connect("clicked", self._on_rotate_right)
         self.export_button.connect("clicked", self._on_export_clicked)
+        export_menu = Gio.Menu()
+        export_menu.append("Batch Export…", "win.batch-export")
+        self.export_button.set_menu_model(export_menu)
         self.recipe_row.connect("notify::selected", self._on_recipe_selected)
         for row in self._combo_rows:
             row.connect("notify::selected", self._on_recipe_changed)
@@ -501,19 +538,43 @@ class MainWindow(Adw.ApplicationWindow):
             self._scan_folder(path)
 
     def _scan_folder(self, path: str) -> None:
-        """Scan a folder into the filmstrip and remember it."""
+        """Scan a folder into the filmstrip, remember it, and watch it."""
+        # Already showing this folder (e.g. re-selected in the tree).
+        if path == self._current_folder:
+            return
         self._current_folder = path
         self._filmstrip.scan(path)
         self._settings.last_folder = path
         save_settings(self._settings, settings_path())
-        self.lookup_action("reload").set_enabled(True)
         self.status.set_label("Select an image from the filmstrip.")
+        self._watch_folder(path)
 
-    def _reload_folder(self) -> None:
+    def _watch_folder(self, path: str) -> None:
+        """Re-scan the filmstrip automatically when the folder changes."""
+        if self._file_monitor is not None:
+            self._file_monitor.cancel()
+            self._file_monitor = None
+        try:
+            monitor = Gio.File.new_for_path(path).monitor_directory(
+                Gio.FileMonitorFlags.WATCH_MOVES, None
+            )
+        except GLib.Error:
+            return
+        monitor.connect("changed", self._on_folder_changed)
+        self._file_monitor = monitor
+
+    def _on_folder_changed(self, *_args: Any) -> None:
+        """Debounce a re-scan after the folder's contents settle."""
+        if self._reload_pending_id:
+            GLib.source_remove(self._reload_pending_id)
+        self._reload_pending_id = GLib.timeout_add(500, self._reload_now)
+
+    def _reload_now(self) -> bool:
         """Re-scan the current folder (picks up added/removed files)."""
+        self._reload_pending_id = 0
         if self._current_folder is not None:
             self._filmstrip.scan(self._current_folder)
-            self.status.set_label("Reloaded folder.")
+        return GLib.SOURCE_REMOVE
 
     def _on_raf_selected(self, raf_path: str) -> None:
         """React to the click instantly; load the RAF on the next idle tick.
@@ -993,10 +1054,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _set_busy(self, *, busy: bool, status: str) -> None:
         """Toggle the spinner and recipe controls, and set the status."""
-        if busy:
-            self.spinner.start()
-        else:
-            self.spinner.stop()
+        self._set_spinner(active=busy)
         # Controls stay live while the camera works - the worker coalesces
         # rapid changes - so the UI never locks up mid-render.
         enabled = self._session.is_open
@@ -1061,13 +1119,10 @@ class MainWindow(Adw.ApplicationWindow):
         """(Re)build the header menu model, including the recipe lists."""
         menu = Gio.Menu()
 
-        view = Gio.Menu()
-        view.append("Show Original & Info", "win.show-info")
-        menu.append_section(None, view)
-
-        actions = Gio.Menu()
-        actions.append("Batch Export…", "win.batch-export")
-        menu.append_section(None, actions)
+        files = Gio.Menu()
+        files.append("Import Recipe…", "win.import-recipe")
+        files.append("Export Recipe…", "win.export-recipe")
+        menu.append_section(None, files)
 
         if self._recipes:
             delete_menu = Gio.Menu()
@@ -1078,11 +1133,6 @@ class MainWindow(Adw.ApplicationWindow):
             recipes = Gio.Menu()
             recipes.append_submenu("Delete Recipe", delete_menu)
             menu.append_section(None, recipes)
-
-        files = Gio.Menu()
-        files.append("Import Recipe…", "win.import-recipe")
-        files.append("Export Recipe…", "win.export-recipe")
-        menu.append_section(None, files)
 
         prefs = Gio.Menu()
         prefs.append("Keyboard Shortcuts", "win.shortcuts")
@@ -1100,7 +1150,6 @@ class MainWindow(Adw.ApplicationWindow):
         groups = {
             "Files": [
                 ("Open folder", "<Ctrl>O"),
-                ("Reload folder", "F5"),
                 ("Export JPEG", "<Ctrl>E"),
             ],
             "Recipe": [
@@ -1337,18 +1386,29 @@ class MainWindow(Adw.ApplicationWindow):
         recipe = self._current_recipe()
         total = len(paths)
         current = str(self._raf_path) if self._raf_path else None
+        skip_foreign = self._settings.batch_skip_foreign
         self._set_busy(busy=True, status=f"Batch export: 0/{total}…")
 
-        def task() -> int:
+        def task() -> tuple[int, int]:
+            exported = 0
+            skipped = 0
             for index, raf_file in enumerate(paths, start=1):
-                self._session.open(raf_file)
-                jpeg = self._session.render(recipe, full_resolution=True)
-                name = _export_basename(raf_file)
-                Path(out_dir, name).write_bytes(jpeg)
+                try:
+                    self._session.open(raf_file)
+                    jpeg = self._session.render(recipe, full_resolution=True)
+                except ForeignRafError:
+                    # RAF from a different body; skip it and carry on.
+                    if not skip_foreign:
+                        raise
+                    skipped += 1
+                else:
+                    name = _export_basename(raf_file)
+                    Path(out_dir, name).write_bytes(jpeg)
+                    exported += 1
                 GLib.idle_add(self._batch_progress, index, total)
             if current is not None:
                 self._session.open(current)  # restore the open image
-            return total
+            return exported, skipped
 
         self._worker.submit(
             task, on_done=self._on_batch_done, on_error=self._on_error
@@ -1359,14 +1419,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.status.set_label(f"Batch export: {index}/{total}…")
         return GLib.SOURCE_REMOVE
 
-    def _on_batch_done(self, count: object) -> None:
-        """Report batch completion."""
-        self._set_busy(busy=False, status=f"Batch exported {count} image(s).")
+    def _on_batch_done(self, result: Any) -> None:
+        """Report batch completion (result is (exported, skipped))."""
+        exported, skipped = result
+        status = f"Batch exported {exported} image(s)."
+        if skipped:
+            status += f" Skipped {skipped} from another camera."
+        self._set_busy(busy=False, status=status)
 
     def _on_close_request(self, _window: Any) -> bool:
         """Persist window size, stop the worker, then allow closing."""
         self._settings.window_width = self.get_width()
         self._settings.window_height = self.get_height()
+        self._settings.sidebar_width = self.main_paned.get_position()
         save_settings(self._settings, settings_path())
         self._worker.stop()
         return False

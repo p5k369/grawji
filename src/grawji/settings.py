@@ -27,22 +27,27 @@ class Settings:
         load_recipe_from_image: When True, selecting an image loads
             its own in-camera recipe into the controls. When False,
             the current recipe is kept and applied to the new image.
-        show_info_panel: Whether the left "Original + info" panel is shown.
+        sidebar_width: Width of the left side panel in pixels; drag the
+            pane handle to 0 to collapse it (remembered across runs).
         canvas_background: Preview background CSS class ("" = themed).
         last_folder: Last folder opened in the filmstrip (re-scanned on
             startup); empty means none.
         window_width: Last window width in pixels (0 = use the default).
         window_height: Last window height in pixels (0 = use the default).
         jpeg_quality: JPEG quality for exports, 1 to 100.
+        batch_skip_foreign: On batch export, skip RAFs shot by a different
+            camera body (which the connected camera cannot convert) and
+            carry on, instead of stopping the whole batch.
     """
 
     load_recipe_from_image: bool = True
-    show_info_panel: bool = False
+    sidebar_width: int = 240
     canvas_background: str = ""
     last_folder: str = ""
     window_width: int = 0
     window_height: int = 0
     jpeg_quality: int = 95
+    batch_skip_foreign: bool = False
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""
