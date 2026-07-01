@@ -74,7 +74,7 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
 "scripts/**" = ["D103", "T201"]
-"src/grawji/{app,filmstrip,foldertree,preferences,widgets,window}.py" = ["E402"]
+"src/grawji/{app,filmstrip,foldertree,preferences,recipe_manager,widgets,window}.py" = ["E402"]
 "tests/**" = ["D100", "D101", "D102", "D103", "D104", "D107", "PLR2004", "S", "ARG", "ANN", "E501", "F401", "PLC0415"]
 
 [tool.ruff.lint.flake8-quotes]
@@ -126,6 +126,7 @@ module = [
   "grawji.foldertree",
   "grawji.widgets",
   "grawji.preferences",
+  "grawji.recipe_manager",
   "grawji.__main__",
 ]
 disallow_subclassing_any = false

@@ -126,6 +126,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         """The RAF paths currently shown, in display order."""
         return list(self._paths)
 
+    @property
+    def current_index(self) -> int:
+        """Index of the selected thumbnail, or -1 if none is selected."""
+        return self._current
+
     def _clear(self) -> None:
         """Remove all thumbnails currently in the strip."""
         child = self._box.get_first_child()

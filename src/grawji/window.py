@@ -55,6 +55,7 @@ from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.preferences import PreferencesDialog
 from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
+from grawji.recipe_manager import RecipeManagerDialog
 from grawji.recipes import (
     load_recipes,
     recipes_path,
@@ -135,6 +136,9 @@ button.thumb.thumb-selected {
 .folder-tree { color: alpha(currentColor, 0.7); }
 .folder-tree image { opacity: 0.7; }
 .folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
+/* Filmstrip nav buttons: round only the edge facing the window border. */
+.filmstrip-nav-start { border-radius: 0 0 0 8px; }
+.filmstrip-nav-end { border-radius: 0 0 8px 0; }
 """
 _BACKGROUNDS = ["", "canvas-white", "canvas-gray", "canvas-black"]
 
@@ -251,11 +255,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._build_recipe_controls()
         self._connect_signals()
 
-        self._filmstrip = FilmStrip(
-            on_select=self._on_raf_selected,
-            on_loading=self._on_thumbs_loading,
-        )
-        self.filmstrip_slot.append(self._filmstrip)
+        self._init_filmstrip()
 
         self._foldertree = FolderTree(on_select=self._scan_folder)
         self._foldertree.set_vexpand(True)
@@ -299,15 +299,9 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             ("batch-export", None, lambda *_a: self._on_batch_export(), ()),
             (
-                "import-recipe",
+                "manage-recipes",
                 None,
-                lambda *_a: self._on_import_fp(),
-                (),
-            ),
-            (
-                "export-recipe",
-                None,
-                lambda *_a: self._on_export_fp(),
+                lambda *_a: self._on_manage_recipes(),
                 (),
             ),
             (
@@ -348,12 +342,6 @@ class MainWindow(Adw.ApplicationWindow):
                 ["<Ctrl>question"],
             ),
             ("about", None, lambda *_a: self._on_about(), ()),
-            (
-                "delete-recipe",
-                "s",
-                lambda _a, p: self._delete_recipe(p.get_string()),
-                (),
-            ),
         )
         app = self.get_application()
         for name, ptype, callback, accels in specs:
@@ -522,6 +510,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._texture: Any = None
         self._texture_src: Any = None
         self._error_showing = False
+        self._recipe_manager: RecipeManagerDialog | None = None
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
@@ -563,6 +552,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._current_folder = path
         self._filmstrip.scan(path)
+        self._update_nav_buttons()
         self._settings.last_folder = path
         save_settings(self._settings, settings_path())
         self.status.set_label("Select an image from the filmstrip.")
@@ -595,12 +585,51 @@ class MainWindow(Adw.ApplicationWindow):
             self._filmstrip.scan(self._current_folder)
         return GLib.SOURCE_REMOVE
 
+    def _init_filmstrip(self) -> None:
+        """Build the filmstrip flanked by previous/next navigation buttons."""
+        self._filmstrip = FilmStrip(
+            on_select=self._on_raf_selected,
+            on_loading=self._on_thumbs_loading,
+        )
+        self._filmstrip.set_hexpand(True)
+        self._prev_button = self._nav_button(
+            "go-previous-symbolic", "Previous image (Left)", -1
+        )
+        self._prev_button.add_css_class("filmstrip-nav-start")
+        self._next_button = self._nav_button(
+            "go-next-symbolic", "Next image (Right)", 1
+        )
+        self._next_button.add_css_class("filmstrip-nav-end")
+        self.filmstrip_slot.append(self._prev_button)
+        self.filmstrip_slot.append(self._filmstrip)
+        self.filmstrip_slot.append(self._next_button)
+        self._update_nav_buttons()
+
+    def _nav_button(self, icon: str, tooltip: str, delta: int) -> Gtk.Button:
+        """Create a flat, full-height filmstrip navigation button."""
+        button = Gtk.Button(icon_name=icon, vexpand=True)
+        button.add_css_class("flat")
+        button.set_tooltip_text(tooltip)
+        button.connect(
+            "clicked", lambda *_a: self._filmstrip.select_relative(delta)
+        )
+        return button
+
+    def _update_nav_buttons(self) -> None:
+        """Enable each navigation button only when a step is possible."""
+        count = len(self._filmstrip.paths)
+        index = self._filmstrip.current_index
+        has_next = index < count - 1 if index >= 0 else count > 0
+        self._prev_button.set_sensitive(index > 0)
+        self._next_button.set_sensitive(has_next)
+
     def _on_raf_selected(self, raf_path: str) -> None:
         """React to the click instantly; load the RAF on the next idle tick.
 
         The file read, JPEG decode and EXIF parse are deferred so the click
         (filmstrip highlight) paints first instead of waiting on them.
         """
+        self._update_nav_buttons()
         self._generation += 1
         self._raf_path = Path(raf_path)
         self.set_title(f"grawji — {Path(raf_path).name}")
@@ -621,7 +650,7 @@ class MainWindow(Adw.ApplicationWindow):
         if generation != self._generation:
             return GLib.SOURCE_REMOVE
         self._rotation = 0
-        # The camera open runs on its own worker; the embedded-preview read
+        # The camera open runs on its own worker. The embedded-preview read
         # and decode run on a short-lived thread. Neither blocks the UI, so
         # the filmstrip animation stays smooth and the image appears as soon
         # as it is decoded.
@@ -741,7 +770,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _rebuild_recipes(self) -> None:
         """Refresh the recipe apply-combo from the saved recipes."""
-        self._recipe_names = sorted(self._recipes)
+        self._recipe_names = list(self._recipes)
         self._suppress_combo_signal = True
         try:
             self.recipe_row.set_model(
@@ -1210,23 +1239,12 @@ class MainWindow(Adw.ApplicationWindow):
         return _PID_NAMES.get(device.idProduct, "Camera")
 
     def _rebuild_menu(self) -> None:
-        """(Re)build the header menu model, including the recipe lists."""
+        """(Re)build the header menu model."""
         menu = Gio.Menu()
 
-        files = Gio.Menu()
-        files.append("Import Recipe…", "win.import-recipe")
-        files.append("Export Recipe…", "win.export-recipe")
-        menu.append_section(None, files)
-
-        if self._recipes:
-            delete_menu = Gio.Menu()
-            for name in sorted(self._recipes):
-                delete_menu.append_item(
-                    self._recipe_item(name, "win.delete-recipe")
-                )
-            recipes = Gio.Menu()
-            recipes.append_submenu("Delete Recipe", delete_menu)
-            menu.append_section(None, recipes)
+        recipes = Gio.Menu()
+        recipes.append("Manage Recipes…", "win.manage-recipes")
+        menu.append_section(None, recipes)
 
         prefs = Gio.Menu()
         prefs.append("Keyboard Shortcuts", "win.shortcuts")
@@ -1299,21 +1317,44 @@ class MainWindow(Adw.ApplicationWindow):
         )
         about.present(self)
 
-    @staticmethod
-    def _recipe_item(name: str, action: str) -> Any:
-        """Build a menu item invoking action with the recipe name."""
-        item = Gio.MenuItem.new(name, None)
-        item.set_action_and_target_value(action, GLib.Variant("s", name))
-        return item
+    def _on_manage_recipes(self) -> None:
+        """Open the recipe manager modal."""
+        self._recipe_manager = RecipeManagerDialog(
+            list_recipes=lambda: list(self._recipes),
+            on_reorder=self._reorder_recipes,
+            on_delete=self._delete_recipe,
+            on_import=self._on_import_fp,
+            on_export=self._export_recipe,
+        )
+        self._recipe_manager.connect("closed", self._on_recipe_manager_closed)
+        self._recipe_manager.present(self)
+
+    def _on_recipe_manager_closed(self, _dialog: Any) -> None:
+        """Forget the manager once it is dismissed."""
+        self._recipe_manager = None
+
+    def _refresh_recipe_manager(self) -> None:
+        """Redraw the recipe manager if it is open."""
+        if self._recipe_manager is not None:
+            self._recipe_manager.refresh()
 
     def _delete_recipe(self, name: str) -> None:
         """Remove a saved recipe and persist the change."""
         if name in self._recipes:
             del self._recipes[name]
             save_recipes(self._recipes, recipes_path())
-            self._rebuild_menu()
             self._rebuild_recipes()
+            self._refresh_recipe_manager()
             self.status.set_label(f"Deleted recipe “{name}”.")
+
+    def _reorder_recipes(self, order: list[str]) -> None:
+        """Persist a new recipe order (from the manager's drag and drop)."""
+        if set(order) != set(self._recipes):
+            return
+        self._recipes = {name: self._recipes[name] for name in order}
+        save_recipes(self._recipes, recipes_path())
+        self._rebuild_recipes()
+        self._refresh_recipe_manager()
 
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
@@ -1378,8 +1419,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._recipes[name] = recipe
         save_recipes(self._recipes, recipes_path())
-        self._rebuild_menu()
         self._rebuild_recipes()
+        self._refresh_recipe_manager()
         self._set_active_recipe(recipe, name)
         if activate and self._session.is_open:
             self._render_preview()
@@ -1426,18 +1467,26 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._prompt_save_recipe(recipe, Path(path).stem, activate=True)
 
-    def _on_export_fp(self) -> None:
-        """Pick a path and write the current recipe as an FP file."""
+    def _export_recipe(self, name: str) -> None:
+        """Pick a path and write the named saved recipe as an FP file."""
+        recipe = self._recipes.get(name)
+        if recipe is None:
+            return
         dialog = Gtk.FileDialog()
         dialog.set_title("Export recipe")
-        stem = self._active_label or _export_basename(
-            self._raf_path or "grawji-recipe"
+        dialog.set_initial_name(f"{name}.FP1")
+        dialog.save(
+            self,
+            None,
+            lambda dlg, res: self._on_export_recipe_response(
+                dlg, res, name, recipe
+            ),
         )
-        dialog.set_initial_name(f"{stem}.FP1")
-        dialog.save(self, None, self._on_export_fp_response)
 
-    def _on_export_fp_response(self, dialog: Any, result: Any) -> None:
-        """Write the current recipe as an FP file to the chosen path."""
+    def _on_export_recipe_response(
+        self, dialog: Any, result: Any, name: str, recipe: Recipe
+    ) -> None:
+        """Write the named recipe as an FP file to the chosen path."""
         try:
             gfile = dialog.save_finish(result)
         except GLib.Error:
@@ -1447,17 +1496,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
         profile = self._session.profile
         iopcode = read_iopcode(profile) if profile is not None else None
-        text = serialize_fp(
-            self._current_recipe(),
-            iopcode=iopcode,
-            label=self._active_label,
-        )
+        text = serialize_fp(recipe, iopcode=iopcode, label=name)
         try:
             Path(path).write_text(text, encoding="utf-8")
         except OSError as exc:
             self.status.set_label(f"Could not export recipe: {exc}")
             return
-        self.status.set_label(f"Exported recipe to {path}.")
+        self.status.set_label(f"Exported recipe “{name}” to {path}.")
 
     def _on_batch_export(self) -> None:
         """Pick a folder and export every RAF with the current recipe."""

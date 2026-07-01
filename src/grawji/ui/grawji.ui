@@ -28,6 +28,13 @@
               </object>
             </child>
             <child type="end">
+              <object class="GtkButton">
+                <property name="icon-name">preferences-system-symbolic</property>
+                <property name="tooltip-text">Preferences (Ctrl+,)</property>
+                <property name="action-name">win.preferences</property>
+              </object>
+            </child>
+            <child type="end">
               <object class="AdwSplitButton" id="export_button">
                 <property name="label">Export…</property>
                 <property name="sensitive">false</property>
@@ -238,6 +245,16 @@
                                 <property name="spacing">2</property>
                                 <child>
                                   <object class="GtkButton">
+                                    <property name="icon-name">view-list-symbolic</property>
+                                    <property name="tooltip-text">Manage recipes</property>
+                                    <property name="action-name">win.manage-recipes</property>
+                                    <style>
+                                      <class name="flat"/>
+                                    </style>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton">
                                     <property name="icon-name">bookmark-new-symbolic</property>
                                     <property name="tooltip-text">Save current as recipe</property>
                                     <property name="action-name">win.save-recipe</property>
@@ -280,7 +297,8 @@
             </child>
             <child>
               <object class="GtkBox" id="filmstrip_slot">
-                <property name="orientation">vertical</property>
+                <property name="orientation">horizontal</property>
+                <property name="spacing">2</property>
               </object>
             </child>
           </object>
