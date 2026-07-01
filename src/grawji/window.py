@@ -415,6 +415,7 @@ class MainWindow(Adw.ApplicationWindow):
             fmt=lambda i: f"{_WB_KELVIN_PRESETS[round(i)]}K",
         )
         self._wb_grid = WBShiftGrid()
+        self._wb_grid.set_colored(self._settings.wb_grid_tint)
         self._wb_shift_label = Gtk.Label(halign=Gtk.Align.CENTER)
         self._wb_shift_label.add_css_class("dim-label")
         wb_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -1225,9 +1226,14 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
         dialog = PreferencesDialog(
-            settings=self._settings, on_change=self._save_settings
+            settings=self._settings, on_change=self._on_settings_changed
         )
         dialog.present(self)
+
+    def _on_settings_changed(self) -> None:
+        """Persist settings and apply any that affect the live UI."""
+        self._wb_grid.set_colored(self._settings.wb_grid_tint)
+        self._save_settings()
 
     def _save_settings(self) -> None:
         """Persist the current settings to disk."""

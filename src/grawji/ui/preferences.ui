@@ -14,6 +14,12 @@
                 <property name="subtitle">Off: keep the current recipe and apply it to each image</property>
               </object>
             </child>
+            <child>
+              <object class="AdwSwitchRow" id="wb_grid_row">
+                <property name="title">Tint the white-balance shift grid</property>
+                <property name="subtitle">Colour each cell with the shift it applies</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
