@@ -7,6 +7,26 @@
       <object class="AdwPreferencesPage">
         <child>
           <object class="AdwPreferencesGroup">
+            <property name="title">Appearance</property>
+            <child>
+              <object class="AdwComboRow" id="color_scheme_row">
+                <property name="title">Theme</property>
+                <property name="subtitle">Follow the desktop, or force a light or dark UI</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item translatable="yes">Follow system</item>
+                      <item translatable="yes">Light</item>
+                      <item translatable="yes">Dark</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesGroup">
             <property name="title">Behaviour</property>
             <child>
               <object class="AdwSwitchRow" id="load_recipe_row">

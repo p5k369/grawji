@@ -52,6 +52,7 @@ from grawji.core import (
 from grawji.filmstrip import FilmStrip
 from grawji.foldertree import FolderTree
 from grawji.fp_xml import parse_fp, serialize_fp
+from grawji.navigator import Navigator
 from grawji.preferences import PreferencesDialog
 from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
@@ -200,6 +201,7 @@ class MainWindow(Adw.ApplicationWindow):
     preview_scroll = Gtk.Template.Child()
     spinner = Gtk.Template.Child()
     original_picture = Gtk.Template.Child()
+    nav_overlay = Gtk.Template.Child()
     status = Gtk.Template.Child()
     recipe_row = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
@@ -242,6 +244,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._generation = 0
 
         self._settings = load_settings(settings_path())
+        self._apply_color_scheme()
         self._recipes = load_recipes(recipes_path())
         if self._settings.window_width and self._settings.window_height:
             self.set_default_size(
@@ -524,6 +527,13 @@ class MainWindow(Adw.ApplicationWindow):
         pan.connect("drag-begin", self._on_pan_begin)
         pan.connect("drag-update", self._on_pan_update)
         self.preview_scroll.add_controller(pan)
+
+        self._navigator = Navigator(
+            area=self.nav_overlay,
+            scroll=self.preview_scroll,
+            picture=self.original_picture,
+            get_rotation=lambda: self._rotation,
+        )
 
     def _current_recipe(self) -> Recipe:
         """Read the current selector values into a Recipe."""
@@ -914,6 +924,7 @@ class MainWindow(Adw.ApplicationWindow):
         except GLib.Error:
             return
         self.original_picture.set_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+        self._navigator.queue_draw()
 
     def _on_export_clicked(self, _button: Any) -> None:
         """Show a save dialog for a full-resolution export."""
@@ -1366,7 +1377,16 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_settings_changed(self) -> None:
         """Persist settings and apply any that affect the live UI."""
         self._wb_grid.set_colored(self._settings.wb_grid_tint)
+        self._apply_color_scheme()
         self._save_settings()
+
+    def _apply_color_scheme(self) -> None:
+        """Apply the chosen theme: follow the desktop, or force light/dark."""
+        scheme = {
+            "light": Adw.ColorScheme.FORCE_LIGHT,
+            "dark": Adw.ColorScheme.FORCE_DARK,
+        }.get(self._settings.color_scheme, Adw.ColorScheme.DEFAULT)
+        Adw.StyleManager.get_default().set_color_scheme(scheme)
 
     def _save_settings(self) -> None:
         """Persist the current settings to disk."""

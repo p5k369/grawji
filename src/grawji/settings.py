@@ -48,6 +48,8 @@ class Settings:
             with the colour it nudges the image toward.
         zoom_step_percent: How much each zoom step (scroll wheel or key)
             changes the zoom, as a percentage of the current level.
+        color_scheme: UI theme: "default" follows the desktop, "light" or
+            "dark" forces that scheme.
     """
 
     load_recipe_from_image: bool = True
@@ -60,6 +62,7 @@ class Settings:
     batch_skip_foreign: bool = False
     wb_grid_tint: bool = True
     zoom_step_percent: int = 25
+    color_scheme: str = "default"
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""
