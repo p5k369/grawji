@@ -21,6 +21,8 @@ from gi.repository import Gdk, GdkPixbuf, GExiv2, GLib, Gtk
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 from grawji.settings import cache_dir
 
+# How much of the embedded JPEG to read for the EXIF thumbnail (near the
+# start), so the multi-megabyte preview is not touched on the fast path.
 _EXIF_PREFIX_BYTES = 256 * 1024
 
 Dispatch = Callable[[Callable[[], None]], Any]
@@ -265,7 +267,12 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     @staticmethod
     def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int] | None:
-        """Return (thumbnail bytes, EXIF orientation), or None if absent."""
+        """Return (thumbnail bytes, EXIF orientation), or None if absent.
+
+        Fuji bakes the photo into a 4:3 thumbnail with black letterbox bars.
+        Those are kept as-is (all thumbnails share the 4:3 frame, so the
+        strip stays a uniform height).
+        """
         try:
             meta = GExiv2.Metadata()
             meta.open_buf(jpeg)

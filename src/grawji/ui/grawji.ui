@@ -169,6 +169,16 @@
                                 </child>
                               </object>
                             </child>
+                            <child type="overlay">
+                              <object class="GtkBox" id="histogram_slot">
+                                <property name="halign">start</property>
+                                <property name="valign">end</property>
+                                <property name="width-request">200</property>
+                                <property name="height-request">110</property>
+                                <property name="margin-start">10</property>
+                                <property name="margin-bottom">10</property>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -191,6 +201,17 @@
                                 <property name="hexpand">true</property>
                                 <style>
                                   <class name="dim-label"/>
+                                </style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkButton" id="peek_button">
+                                <property name="icon-name">view-reveal-symbolic</property>
+                                <property name="tooltip-text">Hold to show the original</property>
+                                <property name="sensitive">false</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="flat"/>
                                 </style>
                               </object>
                             </child>

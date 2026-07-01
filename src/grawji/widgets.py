@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
+import threading
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import gi
@@ -10,10 +13,11 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GdkPixbuf, GLib, Gtk
 from rawji.fuji_enums import FP_WB_SHIFT_MAX
 
 Formatter = Callable[[float], str]
+Dispatch = Callable[[Callable[[], None]], Any]
 
 
 class SliderRow(Adw.ActionRow):
@@ -262,3 +266,139 @@ class WBShiftGrid(Gtk.DrawingArea):
             cx.set_source_rgba(color.red, color.green, color.blue, 0.95)
             cx.arc(px, py, 5.0, 0, 6.2832)
             cx.fill()
+
+
+class Histogram(Gtk.DrawingArea):
+    """A compact histogram overlaid on the preview.
+
+    Click to switch between RGB (per-channel colour) and Luminance (the
+    shadow-to-highlight tonal distribution). Binning runs off the main
+    thread on a downscaled copy; a generation token drops stale results.
+    """
+
+    _SAMPLE = 160
+    _RADIUS = 8.0
+    # RGB channel fill colours.
+    _RGB_COLOURS = ((0.9, 0.32, 0.32), (0.34, 0.85, 0.4), (0.4, 0.55, 1.0))
+    _LUMA_COLOUR = (0.85, 0.85, 0.85)
+
+    def __init__(self, *, dispatch: Dispatch = GLib.idle_add) -> None:
+        """Create the histogram; dispatch schedules a redraw on the UI loop."""
+        super().__init__()
+        self._dispatch = dispatch
+        # (red, green, blue, luma) each a 256-bin count list, or None.
+        self._bins: tuple[list[int], ...] | None = None
+        self._generation = 0
+        self._luma = False
+        self.set_tooltip_text("Click to switch RGB / Luminance")
+        self.set_draw_func(self._draw)
+        click = Gtk.GestureClick()
+        click.connect("released", self._on_clicked)
+        self.add_controller(click)
+
+    def _on_clicked(self, *_args: Any) -> None:
+        """Toggle between RGB and Luminance views."""
+        self._luma = not self._luma
+        self.queue_draw()
+
+    def update(self, pixbuf: Any) -> None:
+        """Recompute the histogram for pixbuf (or clear it if None)."""
+        self._generation += 1
+        if pixbuf is None:
+            self._bins = None
+            self.queue_draw()
+            return
+        small = self._downscale(pixbuf)
+        threading.Thread(
+            target=self._bin,
+            args=(
+                bytes(small.get_pixels()),
+                small.get_n_channels(),
+                small.get_rowstride(),
+                small.get_width(),
+                small.get_height(),
+                self._generation,
+            ),
+            name="grawji-histogram",
+            daemon=True,
+        ).start()
+
+    @classmethod
+    def _downscale(cls, pixbuf: Any) -> Any:
+        """Scale pixbuf down so its longest edge is at most _SAMPLE."""
+        width, height = pixbuf.get_width(), pixbuf.get_height()
+        scale = min(1.0, cls._SAMPLE / max(width, height, 1))
+        return pixbuf.scale_simple(
+            max(1, round(width * scale)),
+            max(1, round(height * scale)),
+            GdkPixbuf.InterpType.BILINEAR,
+        )
+
+    def _bin(
+        self,
+        data: bytes,
+        channels: int,
+        stride: int,
+        width: int,
+        height: int,
+        generation: int,
+    ) -> None:
+        """Count per-channel and luma levels off-thread, then dispatch."""
+        red, green, blue, luma = ([0] * 256 for _ in range(4))
+        for y in range(height):
+            base = y * stride
+            for x in range(width):
+                i = base + x * channels
+                r, g, b = data[i], data[i + 1], data[i + 2]
+                red[r] += 1
+                green[g] += 1
+                blue[b] += 1
+                # Rec. 601 luma - good enough for a tonal readout.
+                luma[(r * 299 + g * 587 + b * 114) // 1000] += 1
+        self._dispatch(
+            partial(self._store, (red, green, blue, luma), generation)
+        )
+
+    def _store(self, bins: tuple[list[int], ...], generation: int) -> None:
+        """Adopt fresh bins unless a newer update has superseded them."""
+        if generation == self._generation:
+            self._bins = bins
+            self.queue_draw()
+
+    def _draw(
+        self, _area: Gtk.DrawingArea, cx: Any, width: int, height: int
+    ) -> None:
+        """Draw a rounded dark panel and the current channels (cx is cairo)."""
+        self._rounded_rect(cx, width, height, self._RADIUS)
+        cx.set_source_rgba(0.0, 0.0, 0.0, 0.55)
+        cx.fill_preserve()
+        cx.clip()
+        if self._bins is None:
+            return
+        red, green, blue, luma = self._bins
+        if self._luma:
+            channels = [(luma, self._LUMA_COLOUR)]
+        else:
+            channels = list(
+                zip((red, green, blue), self._RGB_COLOURS, strict=True)
+            )
+        peak = max(1, *(max(chan[1:255]) for chan, _ in channels))
+        for chan, (cr, cg, cb) in channels:
+            cx.set_source_rgba(cr, cg, cb, 0.6)
+            cx.move_to(0, height)
+            for level in range(256):
+                value = min(chan[level], peak)
+                cx.line_to(level / 255 * width, height - value / peak * height)
+            cx.line_to(width, height)
+            cx.close_path()
+            cx.fill()
+
+    @staticmethod
+    def _rounded_rect(cx: Any, width: int, height: int, r: float) -> None:
+        """Add a rounded-rectangle path covering the whole widget."""
+        cx.new_sub_path()
+        cx.arc(width - r, r, r, -math.pi / 2, 0)
+        cx.arc(width - r, height - r, r, 0, math.pi / 2)
+        cx.arc(r, height - r, r, math.pi / 2, math.pi)
+        cx.arc(r, r, r, math.pi, 3 * math.pi / 2)
+        cx.close_path()
