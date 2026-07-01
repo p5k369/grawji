@@ -49,6 +49,7 @@ class RecipeManagerDialog(Adw.Dialog):
         list_recipes: Callable[[], list[str]],
         on_reorder: Callable[[list[str]], None],
         on_delete: Callable[[str], None],
+        on_rename: Callable[[str, str], None],
         on_import: Callable[[], None],
         on_export: Callable[[str], None],
     ) -> None:
@@ -58,6 +59,7 @@ class RecipeManagerDialog(Adw.Dialog):
             list_recipes: Returns the saved recipe names, in display order.
             on_reorder: Called with the full new order after a drag-drop.
             on_delete: Called with a name to delete that recipe.
+            on_rename: Called with (old_name, new_name) to rename a recipe.
             on_import: Called to start importing a recipe.
             on_export: Called with a name to export that recipe.
         """
@@ -65,6 +67,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self._list_recipes = list_recipes
         self._on_reorder = on_reorder
         self._on_delete = on_delete
+        self._on_rename = on_rename
         self._on_import = on_import
         self._on_export = on_export
         self._drag_item: _RecipeItem | None = None
@@ -93,12 +96,14 @@ class RecipeManagerDialog(Adw.Dialog):
         handle = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
         handle.add_css_class("dim-label")
         label = Gtk.Label(xalign=0.0, hexpand=True)
+        rename = self._icon_button("document-edit-symbolic", "Rename…")
+        rename.connect("clicked", self._on_row_rename, item)
         export = self._icon_button("document-save-symbolic", "Export…")
         export.connect("clicked", self._on_row_export, item)
         delete = self._icon_button("user-trash-symbolic", "Delete")
         delete.add_css_class("destructive-action")
         delete.connect("clicked", self._on_row_delete, item)
-        for child in (handle, label, export, delete):
+        for child in (handle, label, rename, export, delete):
             box.append(child)
         box.label = label
         item.set_child(box)
@@ -174,6 +179,31 @@ class RecipeManagerDialog(Adw.Dialog):
     def _on_row_delete(self, _button: Any, item: Gtk.ListItem) -> None:
         """Delete the recipe of the clicked row."""
         self._on_delete(item.get_item().name)
+
+    def _on_row_rename(self, _button: Any, item: Gtk.ListItem) -> None:
+        """Prompt for a new name and rename the clicked recipe."""
+        old = item.get_item().name
+        entry = Gtk.Entry(text=old)
+        dialog = Adw.AlertDialog(heading="Rename recipe", body="New name:")
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("rename", "Rename")
+        dialog.set_default_response("rename")
+        dialog.set_response_appearance(
+            "rename", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.connect("response", self._on_rename_response, old, entry)
+        dialog.present(self)
+
+    def _on_rename_response(
+        self, _dialog: Any, response: str, old: str, entry: Gtk.Entry
+    ) -> None:
+        """Apply the rename when the dialog is confirmed."""
+        if response != "rename":
+            return
+        new = entry.get_text().strip()
+        if new and new != old:
+            self._on_rename(old, new)
 
     @staticmethod
     def _icon_button(icon: str, tooltip: str) -> Gtk.Button:
