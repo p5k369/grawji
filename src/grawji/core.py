@@ -24,6 +24,7 @@ from rawji.fuji_enums import (
     ChromeEffect,
     ColorSpace,
     GrainEffect,
+    GrainEffectSize,
     ev_to_int,
     int_to_ev,
     validate_color_temp,
@@ -58,6 +59,19 @@ OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 # Params that use the value*10 tone encoding. rawji's TONE_PARAMS already
 # excludes NoiseReduction.
 _TONE_PARAMS = frozenset(TONE_PARAMS)
+
+# Parameters that only exist on bodies with a long-enough profile (the
+# high-index effect slots). On shorter profiles (X100F 601 B, X-T3 605 B)
+# their offset overruns the profile, so they are skipped rather than fatal.
+# The real meanings (verified on the X-E5 via a
+# USB capture of X Raw Studio) are noted per use below.
+_OPTIONAL_PARAMS = frozenset(
+    {"Reserved26", "PortraitEnhancer", "DigitalTeleConv"}
+)
+
+# Clarity encodes the user value * 10 (verified: -5 -> -50, +5 -> +50).
+_CLARITY_SCALE = 10
+_CLARITY_LIMIT = 5
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
@@ -144,6 +158,38 @@ def film_simulation_byte(name: str) -> int:
     return _enum_value(rawji.FilmSimulation, name, "film simulation")
 
 
+def _clamp_clarity(value: int) -> int:
+    """Clamp clarity into the honoured -5..+5 range."""
+    return max(-_CLARITY_LIMIT, min(_CLARITY_LIMIT, value))
+
+
+def _grain_code(effect: str, size: str) -> int:
+    """Combine grain effect and size into the single @545 profile code."""
+    if effect == "Off":
+        return int(GrainEffect.Off)
+    base = _enum_value(GrainEffect, effect, "grain effect")
+    large = _enum_value(GrainEffectSize, size, "grain size") == int(
+        GrainEffectSize.Large
+    )
+    return base + (2 if large else 0)
+
+
+def _grain_effect_name(code: int, fallback: str) -> str:
+    """Decode the grain effect from the combined @545 code (_grain_code)."""
+    return {2: "Weak", 3: "Strong", 4: "Weak", 5: "Strong"}.get(
+        code, "Off" if code == int(GrainEffect.Off) else fallback
+    )
+
+
+def _grain_size_name(code: int, fallback: str) -> str:
+    """Decode the grain size from the combined @545 code (see _grain_code)."""
+    if code in (4, 5):
+        return "Large"
+    if code in (int(GrainEffect.Off), 2, 3):
+        return "Small"
+    return fallback
+
+
 def recipe_changes(recipe: Recipe) -> dict[str, int]:
     """Map a recipe to rawji profile parameter values (validated).
 
@@ -173,13 +219,26 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
         "DynamicRange": _enum_value(
             rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
         ),
-        "GrainEffect": _enum_value(GrainEffect, recipe.grain, "grain effect"),
-        # todo: Color Chrome Effect lives in the profile slot rawji labels
-        #  "SmoothSkinEffect" (index 9 / offset 549).
-        #  That needs to be updated in rawji.
+        # Grain effect and size share one slot (@545); see _grain_code.
+        "GrainEffect": _grain_code(recipe.grain, recipe.grain_size),
+        # todo: rawji mislabels these slots
+        #  (verified on the X-E5 via a USB capture of X Raw Studio).
+        # Real meanings:
+        #   "SmoothSkinEffect" idx 9  @549 = Color Chrome Effect
+        #   "DigitalTeleConv"  idx 23 @605 = Smooth Skin Effect
+        #   "PortraitEnhancer" idx 24 @609 = Color Chrome FX Blue
+        #   "Reserved26"       idx 26 @617 = Clarity (value * 10)
+        # grawji uses the current upstream names until the rename PR lands.
         "SmoothSkinEffect": _enum_value(
             ChromeEffect, recipe.color_chrome, "color chrome"
         ),
+        "DigitalTeleConv": _enum_value(
+            ChromeEffect, recipe.smooth_skin, "smooth skin"
+        ),
+        "PortraitEnhancer": _enum_value(
+            ChromeEffect, recipe.color_chrome_blue, "color chrome blue"
+        ),
+        "Reserved26": _clamp_clarity(recipe.clarity) * _CLARITY_SCALE,
         "HighlightTone": recipe.highlights,
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
@@ -224,6 +283,8 @@ def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
     for name, value in recipe_changes(recipe).items():
         offset = _PARAM_OFFSETS[name]
         if offset + 4 > len(out):
+            if name in _OPTIONAL_PARAMS:
+                continue
             msg = f"profile too short ({len(base)} bytes) for {name}"
             raise ValueError(msg)
         encoded = encode_tone_value(value) if name in _TONE_PARAMS else value
@@ -278,11 +339,21 @@ def recipe_from_profile(base: bytes) -> Recipe:
             signed("DynamicRange", 1),
             defaults.dynamic_range,
         ),
-        grain=_enum_name(
-            GrainEffect, signed("GrainEffect", 1), defaults.grain
+        grain=_grain_effect_name(signed("GrainEffect", 1), defaults.grain),
+        grain_size=_grain_size_name(
+            signed("GrainEffect", 1), defaults.grain_size
         ),
         color_chrome=_enum_name(
             ChromeEffect, signed("SmoothSkinEffect", 1), defaults.color_chrome
+        ),
+        color_chrome_blue=_enum_name(
+            ChromeEffect,
+            signed("PortraitEnhancer", 1),
+            defaults.color_chrome_blue,
+        ),
+        clarity=round(signed("Reserved26") / _CLARITY_SCALE),
+        smooth_skin=_enum_name(
+            ChromeEffect, signed("DigitalTeleConv", 1), defaults.smooth_skin
         ),
         exposure=int_to_ev(signed("ExposureBias")),
         highlights=decode_tone_value(signed("HighlightTone")),

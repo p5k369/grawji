@@ -37,6 +37,7 @@ from rawji.fuji_enums import (
     ChromeEffect,
     ColorSpace,
     GrainEffect,
+    GrainEffectSize,
 )
 
 from grawji import exif, raf
@@ -75,6 +76,7 @@ _FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
 _DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
 _GRAINS = [e.name for e in GrainEffect]
+_GRAIN_SIZES = [e.name for e in GrainEffectSize]
 _CHROME = [e.name for e in ChromeEffect]
 _COLOR_SPACES = [member.name for member in ColorSpace]
 _WB_KELVIN_PRESETS = sorted(WB_KELVIN_PRESETS)
@@ -433,14 +435,20 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.film_row = combo("Film simulation", _FILM_SIMULATIONS)
         self.grain_row = combo("Grain", _GRAINS)
+        self.grain_size_row = combo("Grain size", _GRAIN_SIZES)
         self.chrome_row = combo("Color chrome", _CHROME)
+        self.chrome_blue_row = combo("Color chrome FX blue", _CHROME)
+        self.smooth_skin_row = combo("Smooth skin", _CHROME)
         self.wb_row = combo("White balance", _WHITE_BALANCES)
         self.dr_row = combo("Dynamic range", _DYNAMIC_RANGES)
         self.color_space_row = combo("Color space", _COLOR_SPACES)
         self._combo_rows = (
             self.film_row,
             self.grain_row,
+            self.grain_size_row,
             self.chrome_row,
+            self.chrome_blue_row,
+            self.smooth_skin_row,
             self.wb_row,
             self.dr_row,
             self.color_space_row,
@@ -483,6 +491,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._nr_row = SliderRow(
             "Noise reduction", lower=-4, upper=4, fmt=ifmt
         )
+        self._clarity_row = SliderRow("Clarity", lower=-5, upper=5, fmt=ifmt)
         self._slider_rows = (
             self._exposure_row,
             self._highlights_row,
@@ -490,6 +499,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._color_row,
             self._sharpness_row,
             self._nr_row,
+            self._clarity_row,
             self._temp_row,
         )
         value_chars = max(row.value_chars for row in self._slider_rows)
@@ -501,7 +511,10 @@ class MainWindow(Adw.ApplicationWindow):
         for row in (
             self.film_row,
             self.grain_row,
+            self.grain_size_row,
             self.chrome_row,
+            self.chrome_blue_row,
+            self.smooth_skin_row,
             self.wb_row,
             self._temp_row,
             grid_row,
@@ -512,10 +525,12 @@ class MainWindow(Adw.ApplicationWindow):
             self._color_row,
             self._sharpness_row,
             self._nr_row,
+            self._clarity_row,
             self.color_space_row,
         ):
             self.recipe_group.add(row)
         self._update_temp_visibility()
+        self._update_grain_size_visibility()
 
     def _connect_signals(self) -> None:
         """Connect widget signals to handlers (done in code, not the .ui)."""
@@ -532,6 +547,7 @@ class MainWindow(Adw.ApplicationWindow):
             slider.connect_changed(self._on_recipe_changed)
         self._wb_grid.connect_changed(self._on_wb_shift_changed)
         self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
+        self.grain_row.connect("notify::selected", self._on_grain_changed)
         self._pointer: tuple[float, float] | None = None
         self._content_w = 0.0
         self._content_h = 0.0
@@ -584,13 +600,17 @@ class MainWindow(Adw.ApplicationWindow):
             white_balance=_WHITE_BALANCES[self.wb_row.get_selected()],
             dynamic_range=_DYNAMIC_RANGES[self.dr_row.get_selected()],
             grain=_GRAINS[self.grain_row.get_selected()],
+            grain_size=_GRAIN_SIZES[self.grain_size_row.get_selected()],
             color_chrome=_CHROME[self.chrome_row.get_selected()],
+            color_chrome_blue=_CHROME[self.chrome_blue_row.get_selected()],
+            smooth_skin=_CHROME[self.smooth_skin_row.get_selected()],
             exposure=self._exposure_row.get_value(),
             highlights=int(self._highlights_row.get_value()),
             shadows=int(self._shadows_row.get_value()),
             color=int(self._color_row.get_value()),
             sharpness=int(self._sharpness_row.get_value()),
             noise_reduction=int(self._nr_row.get_value()),
+            clarity=int(self._clarity_row.get_value()),
             wb_shift_r=red,
             wb_shift_b=blue,
             color_temp=_WB_KELVIN_PRESETS[int(self._temp_row.get_value())],
@@ -780,6 +800,11 @@ class MainWindow(Adw.ApplicationWindow):
         """Adjust controls to what the connected body's processor supports."""
         self._highlights_row.set_range(caps.tone_min, caps.tone_max)
         self._shadows_row.set_range(caps.tone_min, caps.tone_max)
+        # Clarity, Color Chrome FX Blue and Smooth Skin live in high-index
+        # profile slots that older bodies do not expose, hide when unsupported.
+        self._clarity_row.set_visible(caps.has_clarity)
+        self.chrome_blue_row.set_visible(caps.has_color_chrome_blue)
+        self.smooth_skin_row.set_visible(caps.has_smooth_skin)
 
     def _load_recipe(self, recipe: Recipe) -> None:
         """Set the selectors from a recipe without triggering renders."""
@@ -795,13 +820,23 @@ class MainWindow(Adw.ApplicationWindow):
                 _DYNAMIC_RANGES.index(recipe.dynamic_range)
             )
             self.grain_row.set_selected(_GRAINS.index(recipe.grain))
+            self.grain_size_row.set_selected(
+                _GRAIN_SIZES.index(recipe.grain_size)
+            )
             self.chrome_row.set_selected(_CHROME.index(recipe.color_chrome))
+            self.chrome_blue_row.set_selected(
+                _CHROME.index(recipe.color_chrome_blue)
+            )
+            self.smooth_skin_row.set_selected(
+                _CHROME.index(recipe.smooth_skin)
+            )
             self._exposure_row.set_value(recipe.exposure)
             self._highlights_row.set_value(recipe.highlights)
             self._shadows_row.set_value(recipe.shadows)
             self._color_row.set_value(recipe.color)
             self._sharpness_row.set_value(recipe.sharpness)
             self._nr_row.set_value(recipe.noise_reduction)
+            self._clarity_row.set_value(recipe.clarity)
             self._temp_row.set_value(_nearest_kelvin_index(recipe.color_temp))
             self._wb_grid.set_values(recipe.wb_shift_r, recipe.wb_shift_b)
             self._update_wb_shift_label()
@@ -811,6 +846,7 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._suppress_recipe_signals = False
         self._update_temp_visibility()
+        self._update_grain_size_visibility()
 
     def _set_active_recipe(self, recipe: Recipe, label: str) -> None:
         """Load a recipe and mark it active (for the recipe indicator)."""
@@ -896,6 +932,15 @@ class MainWindow(Adw.ApplicationWindow):
         """Show the colour-temp slider only when WB is Temperature."""
         wb = _WHITE_BALANCES[self.wb_row.get_selected()]
         self._temp_row.set_visible(wb == "Temperature")
+
+    def _on_grain_changed(self, *_args: object) -> None:
+        """Hide the grain-size row when there is no grain to size."""
+        self._update_grain_size_visibility()
+
+    def _update_grain_size_visibility(self) -> None:
+        """Show the grain-size selector only when grain is not Off."""
+        grain = _GRAINS[self.grain_row.get_selected()]
+        self.grain_size_row.set_visible(grain != "Off")
 
     def _on_recipe_changed(self, *_args: object) -> None:
         """Re-render and update the recipe indicator on a change."""

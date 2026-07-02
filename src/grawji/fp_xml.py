@@ -3,9 +3,9 @@
 X RAW Studio (and petabyt's fp tool) store conversion recipes as small XML
 files with their own string-token vocabulary. This module reads that
 vocabulary and maps it onto grawji's Recipe, which speaks rawji enum member
-names. Only the parameters grawji models are read, the rest (clarity,
-Color Chrome FX Blue, monochrome warmth, lens-modulation, ...) is ignored,
-so a round-trip is lossy by design.
+names. Only the parameters grawji models are read, the rest (monochrome
+warmth, lens-modulation, HDR, ...) is ignored, so a round-trip is lossy by
+design.
 
 The token tables come from fp's data.c and were checked against its sample
 files. See github.com/petabyt/fp for the authoritative field encodings.
@@ -57,6 +57,7 @@ _WHITE_BALANCE = {
 }
 
 _GRAIN = {"OFF": "Off", "WEAK": "Weak", "STRONG": "Strong"}
+_GRAIN_SIZE = {"SMALL": "Small", "LARGE": "Large"}
 _CHROME = {"OFF": "Off", "WEAK": "Weak", "STRONG": "Strong"}
 _DYNAMIC_RANGE = {"100": "DR100", "200": "DR200", "400": "DR400"}
 _COLOR_SPACE = {"sRGB": "sRGB", "AdobeRGB": "AdobeRGB"}
@@ -98,6 +99,7 @@ _WHITE_BALANCE_OUT = {
     "Custom3": "Custom3",
 }
 _GRAIN_OUT = {v: k for k, v in _GRAIN.items()}
+_GRAIN_SIZE_OUT = {v: k for k, v in _GRAIN_SIZE.items()}
 _CHROME_OUT = {v: k for k, v in _CHROME.items()}
 _DYNAMIC_RANGE_OUT = {v: k for k, v in _DYNAMIC_RANGE.items()}
 # EV in thirds (round(ev * 3)) -> FP exposure-bias token, matching fp's exact
@@ -206,8 +208,14 @@ def parse_fp(text: str) -> Recipe:
             fields.get("DynamicRange", ""), defaults.dynamic_range
         ),
         grain=_GRAIN.get(fields.get("GrainEffect", ""), defaults.grain),
+        grain_size=_GRAIN_SIZE.get(
+            fields.get("GrainEffectSize", ""), defaults.grain_size
+        ),
         color_chrome=_CHROME.get(
             fields.get("ChromeEffect", ""), defaults.color_chrome
+        ),
+        color_chrome_blue=_CHROME.get(
+            fields.get("ColorChromeBlue", ""), defaults.color_chrome_blue
         ),
         exposure=_exposure_ev(fields.get("ExposureBias", "0")),
         highlights=integer("HighlightTone"),
@@ -216,6 +224,10 @@ def parse_fp(text: str) -> Recipe:
         sharpness=integer("Sharpness"),
         # X RAW Studio misspells the tag "NoisReduction", keep it verbatim.
         noise_reduction=integer("NoisReduction"),
+        clarity=integer("Clarity"),
+        smooth_skin=_CHROME.get(
+            fields.get("SmoothSkinEffect", ""), defaults.smooth_skin
+        ),
         wb_shift_r=integer("WBShiftR"),
         wb_shift_b=integer("WBShiftB"),
         color_temp=color_temp if color_temp > 0 else defaults.color_temp,
@@ -244,7 +256,7 @@ def serialize_fp(
     The output is a complete ConversionProfile that grawji and
     petabyt's fp can both read back. Parameters grawji does not model are
     written with neutral defaults, so a grawji round-trip is faithful while
-    the dropped effects (clarity, Color Chrome FX Blue, ...) stay off.
+    the dropped effects (monochrome warmth, lens-modulation, ...) stay off.
 
     Args:
         recipe: The recipe to serialise.
@@ -285,10 +297,10 @@ def serialize_fp(
         ("BlackImageTone", "0"),
         ("MonochromaticColor_RG", "0"),
         ("GrainEffect", _GRAIN_OUT.get(recipe.grain, "OFF")),
-        ("GrainEffectSize", "SMALL"),
+        ("GrainEffectSize", _GRAIN_SIZE_OUT.get(recipe.grain_size, "SMALL")),
         ("ChromeEffect", _CHROME_OUT.get(recipe.color_chrome, "OFF")),
-        ("ColorChromeBlue", None),
-        ("SmoothSkinEffect", None),
+        ("ColorChromeBlue", _CHROME_OUT.get(recipe.color_chrome_blue, "OFF")),
+        ("SmoothSkinEffect", _CHROME_OUT.get(recipe.smooth_skin, "OFF")),
         ("WBShootCond", "OFF" if recipe.white_balance == "AsShot" else "ON"),
         (
             "WhiteBalance",
@@ -302,7 +314,7 @@ def serialize_fp(
         ("Color", str(recipe.color)),
         ("Sharpness", str(recipe.sharpness)),
         ("NoisReduction", str(recipe.noise_reduction)),  # sic, see parse_fp.
-        ("Clarity", "0"),
+        ("Clarity", str(recipe.clarity)),
         ("LensModulationOpt", "OFF"),
         ("ColorSpace", _COLOR_SPACE.get(recipe.color_space, "sRGB")),
         ("HDR", None),
