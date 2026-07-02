@@ -20,12 +20,12 @@ class Capabilities:
 
     tone_min: int
     tone_max: int
+    tone_half_step: bool
 
 
-# X-Trans III/IV: highlight/shadow tone is -2 to +4.
-_DEFAULT = Capabilities(tone_min=-2, tone_max=4)
-# XProcessor5 bodies extend the low end to -4.
-_XPROCESSOR5 = Capabilities(tone_min=-4, tone_max=4)
+# Highlight/shadow tone is -2 to +4 on every body verified so far.
+_DEFAULT = Capabilities(tone_min=-2, tone_max=4, tone_half_step=False)
+_XPROCESSOR5 = Capabilities(tone_min=-2, tone_max=4, tone_half_step=True)
 
 
 def capabilities_for(profile: bytes) -> Capabilities:

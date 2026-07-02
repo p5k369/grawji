@@ -281,6 +281,9 @@ class Histogram(Gtk.DrawingArea):
     # RGB channel fill colours.
     _RGB_COLOURS = ((0.9, 0.32, 0.32), (0.34, 0.85, 0.4), (0.4, 0.55, 1.0))
     _LUMA_COLOUR = (0.85, 0.85, 0.85)
+    # A channel is "clipped" once this fraction of pixels sits at 0 or 255.
+    _CLIP_FRACTION = 0.002
+    _CLIP_SIZE = 11.0
 
     def __init__(self, *, dispatch: Dispatch = GLib.idle_add) -> None:
         """Create the histogram; dispatch schedules a redraw on the UI loop."""
@@ -392,6 +395,68 @@ class Histogram(Gtk.DrawingArea):
             cx.line_to(width, height)
             cx.close_path()
             cx.fill()
+        self._draw_clipping(cx, width, red, green, blue, luma)
+
+    def _draw_clipping(
+        self,
+        cx: Any,
+        width: int,
+        red: list[int],
+        green: list[int],
+        blue: list[int],
+        luma: list[int],
+    ) -> None:
+        """Light corner triangles for shadow/highlight clipping."""
+        total = max(1, sum(red))
+        if self._luma:
+            shadow = self._LUMA_COLOUR if self._clips(luma[0], total) else None
+            highlight = (
+                self._LUMA_COLOUR if self._clips(luma[255], total) else None
+            )
+        else:
+            shadow = self._rgb_clip(red[0], green[0], blue[0], total)
+            highlight = self._rgb_clip(red[255], green[255], blue[255], total)
+        if shadow is not None:
+            self._corner(cx, width, shadow, left=True)
+        if highlight is not None:
+            self._corner(cx, width, highlight, left=False)
+
+    def _clips(self, count: int, total: int) -> bool:
+        """Return True if count is a clipping-worthy share of total."""
+        return count / total > self._CLIP_FRACTION
+
+    def _rgb_clip(
+        self, r: int, g: int, b: int, total: int
+    ) -> tuple[float, float, float] | None:
+        """Combine per-channel clipping into one marker colour, or None."""
+        colour = (
+            float(self._clips(r, total)),
+            float(self._clips(g, total)),
+            float(self._clips(b, total)),
+        )
+        return colour if any(colour) else None
+
+    def _corner(
+        self,
+        cx: Any,
+        width: int,
+        colour: tuple[float, float, float],
+        *,
+        left: bool,
+    ) -> None:
+        """Fill a small right-triangle in a top corner."""
+        s = self._CLIP_SIZE
+        cx.set_source_rgb(*colour)
+        if left:
+            cx.move_to(0, 0)
+            cx.line_to(s, 0)
+            cx.line_to(0, s)
+        else:
+            cx.move_to(width, 0)
+            cx.line_to(width - s, 0)
+            cx.line_to(width, s)
+        cx.close_path()
+        cx.fill()
 
     @staticmethod
     def _rounded_rect(cx: Any, width: int, height: int, r: float) -> None:

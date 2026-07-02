@@ -3,8 +3,8 @@
 X RAW Studio (and petabyt's fp tool) store conversion recipes as small XML
 files with their own string-token vocabulary. This module reads that
 vocabulary and maps it onto grawji's Recipe, which speaks rawji enum member
-names. Only the parameters grawji models are read; the rest (clarity,
-colour-chrome effects, monochrome warmth, lens-modulation, ...) is ignored,
+names. Only the parameters grawji models are read, the rest (clarity,
+Color Chrome FX Blue, monochrome warmth, lens-modulation, ...) is ignored,
 so a round-trip is lossy by design.
 
 The token tables come from fp's data.c and were checked against its sample
@@ -57,14 +57,11 @@ _WHITE_BALANCE = {
 }
 
 _GRAIN = {"OFF": "Off", "WEAK": "Weak", "STRONG": "Strong"}
-
+_CHROME = {"OFF": "Off", "WEAK": "Weak", "STRONG": "Strong"}
 _DYNAMIC_RANGE = {"100": "DR100", "200": "DR200", "400": "DR400"}
-
 _COLOR_SPACE = {"sRGB": "sRGB", "AdobeRGB": "AdobeRGB"}
-
 # Two-digit thirds in an exposure token map to 0, 1/3 or 2/3 of an EV.
 _THIRDS = {"": 0, "0": 0, "00": 0, "33": 1, "67": 2}
-
 # Inverse tables for export.
 _FILM_SIM_OUT = {
     "Provia": "Provia",
@@ -85,7 +82,6 @@ _FILM_SIM_OUT = {
     "MonochromeG": "BG",
     "Sepia": "Sepia",
 }
-
 _WHITE_BALANCE_OUT = {
     "AsShot": "AsShot",
     "Auto": "Auto",
@@ -101,10 +97,9 @@ _WHITE_BALANCE_OUT = {
     "Custom2": "Custom2",
     "Custom3": "Custom3",
 }
-
 _GRAIN_OUT = {v: k for k, v in _GRAIN.items()}
+_CHROME_OUT = {v: k for k, v in _CHROME.items()}
 _DYNAMIC_RANGE_OUT = {v: k for k, v in _DYNAMIC_RANGE.items()}
-
 # EV in thirds (round(ev * 3)) -> FP exposure-bias token, matching fp's exact
 # spellings so the file round-trips through fp as well as grawji.
 _EXPOSURE_OUT = {
@@ -128,7 +123,6 @@ _EXPOSURE_OUT = {
     -8: "M2P67",
     -9: "M3P00",
 }
-
 # X-T3 processor code, used when no live profile supplies one on export.
 _DEFAULT_IOPCODE = 0xFF159501
 
@@ -212,6 +206,9 @@ def parse_fp(text: str) -> Recipe:
             fields.get("DynamicRange", ""), defaults.dynamic_range
         ),
         grain=_GRAIN.get(fields.get("GrainEffect", ""), defaults.grain),
+        color_chrome=_CHROME.get(
+            fields.get("ChromeEffect", ""), defaults.color_chrome
+        ),
         exposure=_exposure_ev(fields.get("ExposureBias", "0")),
         highlights=integer("HighlightTone"),
         shadows=integer("ShadowTone"),
@@ -247,7 +244,7 @@ def serialize_fp(
     The output is a complete ConversionProfile that grawji and
     petabyt's fp can both read back. Parameters grawji does not model are
     written with neutral defaults, so a grawji round-trip is faithful while
-    the dropped effects (clarity, colour chrome, ...) stay off.
+    the dropped effects (clarity, Color Chrome FX Blue, ...) stay off.
 
     Args:
         recipe: The recipe to serialise.
@@ -289,7 +286,7 @@ def serialize_fp(
         ("MonochromaticColor_RG", "0"),
         ("GrainEffect", _GRAIN_OUT.get(recipe.grain, "OFF")),
         ("GrainEffectSize", "SMALL"),
-        ("ChromeEffect", "OFF"),
+        ("ChromeEffect", _CHROME_OUT.get(recipe.color_chrome, "OFF")),
         ("ColorChromeBlue", None),
         ("SmoothSkinEffect", None),
         ("WBShootCond", "OFF" if recipe.white_balance == "AsShot" else "ON"),

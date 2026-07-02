@@ -69,12 +69,6 @@
                 </child>
               </object>
             </child>
-            <child>
-              <object class="AdwSwitchRow" id="batch_skip_row">
-                <property name="title">Skip other cameras on batch export</property>
-                <property name="subtitle">Ignore RAFs from a different body and carry on, instead of stopping</property>
-              </object>
-            </child>
           </object>
         </child>
       </object>

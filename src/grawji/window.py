@@ -34,11 +34,13 @@ from rawji.fuji_enums import (
     FP_TONE_MIN,
     FUJIFILM_USB_VENDOR_ID,
     WB_KELVIN_PRESETS,
+    ChromeEffect,
     ColorSpace,
     GrainEffect,
 )
 
 from grawji import exif, raf
+from grawji.batch_export import BatchExportDialog
 from grawji.capabilities import (
     Capabilities,
     capabilities_for,
@@ -73,6 +75,7 @@ _FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
 _DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
 _GRAINS = [e.name for e in GrainEffect]
+_CHROME = [e.name for e in ChromeEffect]
 _COLOR_SPACES = [member.name for member in ColorSpace]
 _WB_KELVIN_PRESETS = sorted(WB_KELVIN_PRESETS)
 
@@ -101,6 +104,7 @@ _PID_NAMES = {
     0x02E3: "X-T30",
     0x02E5: "X100V",
     0x02E7: "X-T4",
+    0x0313: "X-E5",
 }
 _CAMERA_POLL_SECONDS = 3
 # Debounce a selection's load so fast scrubbing does not spawn a decode per
@@ -429,12 +433,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.film_row = combo("Film simulation", _FILM_SIMULATIONS)
         self.grain_row = combo("Grain", _GRAINS)
+        self.chrome_row = combo("Color chrome", _CHROME)
         self.wb_row = combo("White balance", _WHITE_BALANCES)
         self.dr_row = combo("Dynamic range", _DYNAMIC_RANGES)
         self.color_space_row = combo("Color space", _COLOR_SPACES)
         self._combo_rows = (
             self.film_row,
             self.grain_row,
+            self.chrome_row,
             self.wb_row,
             self.dr_row,
             self.color_space_row,
@@ -495,6 +501,7 @@ class MainWindow(Adw.ApplicationWindow):
         for row in (
             self.film_row,
             self.grain_row,
+            self.chrome_row,
             self.wb_row,
             self._temp_row,
             grid_row,
@@ -534,6 +541,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._peek = False
         self._error_showing = False
         self._recipe_manager: RecipeManagerDialog | None = None
+        self._batch_dialog: BatchExportDialog | None = None
+        self._batch_cancel: threading.Event | None = None
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
@@ -575,6 +584,7 @@ class MainWindow(Adw.ApplicationWindow):
             white_balance=_WHITE_BALANCES[self.wb_row.get_selected()],
             dynamic_range=_DYNAMIC_RANGES[self.dr_row.get_selected()],
             grain=_GRAINS[self.grain_row.get_selected()],
+            color_chrome=_CHROME[self.chrome_row.get_selected()],
             exposure=self._exposure_row.get_value(),
             highlights=int(self._highlights_row.get_value()),
             shadows=int(self._shadows_row.get_value()),
@@ -785,6 +795,7 @@ class MainWindow(Adw.ApplicationWindow):
                 _DYNAMIC_RANGES.index(recipe.dynamic_range)
             )
             self.grain_row.set_selected(_GRAINS.index(recipe.grain))
+            self.chrome_row.set_selected(_CHROME.index(recipe.color_chrome))
             self._exposure_row.set_value(recipe.exposure)
             self._highlights_row.set_value(recipe.highlights)
             self._shadows_row.set_value(recipe.shadows)
@@ -1240,6 +1251,11 @@ class MainWindow(Adw.ApplicationWindow):
         """Surface a camera error in a dialog and reset the busy state."""
         logging.getLogger("grawji").warning("camera operation failed: %s", exc)
         self._set_busy(busy=False, status="Error.")
+        # A camera failure aborts any batch mid-flight, unstick its dialog.
+        if self._batch_cancel is not None:
+            self._batch_cancel = None
+            if self._batch_dialog is not None:
+                self._batch_dialog.force_close()
         # A wedged camera fails every queued render in turn; show one dialog.
         if self._error_showing:
             return
@@ -1644,61 +1660,123 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.select_folder(self, None, self._on_batch_folder_response)
 
     def _on_batch_folder_response(self, dialog: Any, result: Any) -> None:
-        """Start the batch export into the chosen folder."""
+        """Open the batch options dialog for the chosen folder."""
         try:
             gfile = dialog.select_folder_finish(result)
         except GLib.Error:
             return
         out_dir = gfile.get_path()
-        if out_dir is not None:
-            self._start_batch(out_dir)
+        if out_dir is None:
+            return
+        self._batch_dialog = BatchExportDialog(
+            count=len(self._filmstrip.paths),
+            overwrite=self._settings.batch_overwrite,
+            on_start=partial(self._start_batch, out_dir),
+            on_cancel=self._on_batch_cancel,
+        )
+        self._batch_dialog.connect("closed", self._on_batch_dialog_closed)
+        self._batch_dialog.present(self)
 
-    def _start_batch(self, out_dir: str) -> None:
+    def _on_batch_dialog_closed(self, _dialog: Any) -> None:
+        """Drop the batch dialog reference once it is dismissed."""
+        self._batch_dialog = None
+
+    def _start_batch(
+        self, out_dir: str, overwrite: bool, skip_foreign: bool
+    ) -> None:
         """Render every RAF in the folder with the current recipe."""
-        paths = self._filmstrip.paths
+        self._settings.batch_overwrite = overwrite
+        paths = list(self._filmstrip.paths)
         recipe = self._current_recipe()
         total = len(paths)
         current = str(self._raf_path) if self._raf_path else None
-        skip_foreign = self._settings.batch_skip_foreign
+        cancel = threading.Event()
+        self._batch_cancel = cancel
         self._set_busy(busy=True, status=f"Batch export: 0/{total}…")
 
-        def task() -> tuple[int, int]:
-            exported = 0
-            skipped = 0
-            for index, raf_file in enumerate(paths, start=1):
-                try:
-                    self._session.open(raf_file)
-                    jpeg = self._session.render(recipe, full_resolution=True)
-                except ForeignRafError:
-                    # RAF from a different body; skip it and carry on.
-                    if not skip_foreign:
-                        raise
-                    skipped += 1
+        def task() -> dict[str, int]:
+            tally = {"exported": 0, "existing": 0, "foreign": 0, "failed": 0}
+            for done, raf_file in enumerate(paths, start=1):
+                if cancel.is_set():
+                    tally["cancelled"] = 1
+                    break
+                out_path = Path(out_dir, _export_basename(raf_file))
+                if not overwrite and out_path.exists():
+                    tally["existing"] += 1
                 else:
-                    name = _export_basename(raf_file)
-                    Path(out_dir, name).write_bytes(jpeg)
-                    exported += 1
-                GLib.idle_add(self._batch_progress, index, total)
+                    self._export_one(
+                        raf_file, out_path, recipe, skip_foreign, tally
+                    )
+                GLib.idle_add(
+                    self._batch_progress, done, total, Path(raf_file).name
+                )
             if current is not None:
                 self._session.open(current)  # restore the open image
-            return exported, skipped
+            return tally
 
         self._worker.submit(
             task, on_done=self._on_batch_done, on_error=self._on_error
         )
 
-    def _batch_progress(self, index: int, total: int) -> int:
-        """Update the status label with batch progress (on the main loop)."""
-        self.status.set_label(f"Batch export: {index}/{total}…")
+    def _export_one(
+        self,
+        raf_file: str,
+        out_path: Path,
+        recipe: Recipe,
+        skip_foreign: bool,
+        tally: dict[str, int],
+    ) -> None:
+        """Convert one RAF into out_path.
+
+        A foreign RAF is skipped (when allowed) and a file-write error is
+        counted so the batch carries on.
+        """
+        try:
+            self._session.open(raf_file)
+            jpeg = self._session.render(recipe, full_resolution=True)
+        except ForeignRafError:
+            if not skip_foreign:
+                raise
+            tally["foreign"] += 1
+            return
+        try:
+            out_path.write_bytes(jpeg)
+        except OSError as exc:
+            logging.getLogger("grawji").warning(
+                "batch export could not write %s: %s", out_path, exc
+            )
+            tally["failed"] += 1
+        else:
+            tally["exported"] += 1
+
+    def _on_batch_cancel(self) -> None:
+        """Ask the running batch to stop after the current image."""
+        if self._batch_cancel is not None:
+            self._batch_cancel.set()
+
+    def _batch_progress(self, done: int, total: int, name: str) -> int:
+        """Advance the dialog's progress bar (on the main loop)."""
+        self.status.set_label(f"Batch export: {done}/{total}…")
+        if self._batch_dialog is not None:
+            self._batch_dialog.update(done, total, name)
         return GLib.SOURCE_REMOVE
 
-    def _on_batch_done(self, result: Any) -> None:
-        """Report batch completion (result is (exported, skipped))."""
-        exported, skipped = result
-        status = f"Batch exported {exported} image(s)."
-        if skipped:
-            status += f" Skipped {skipped} from another camera."
-        self._set_busy(busy=False, status=status)
+    def _on_batch_done(self, tally: dict[str, int]) -> None:
+        """Report batch completion and show the dialog summary."""
+        self._batch_cancel = None
+        exported = tally["exported"]
+        lead = "Cancelled after" if tally.get("cancelled") else "Exported"
+        parts = [f"{lead} {exported} image(s)."]
+        if tally["existing"]:
+            parts.append(f"Skipped {tally['existing']} already present.")
+        if tally["foreign"]:
+            parts.append(f"Skipped {tally['foreign']} from another camera.")
+        if tally["failed"]:
+            parts.append(f"{tally['failed']} failed.")
+        summary = " ".join(parts)
+        self._set_busy(busy=False, status=summary)
+        if self._batch_dialog is not None:
+            self._batch_dialog.finish(summary)
 
     def _on_close_request(self, _window: Any) -> bool:
         """Persist window size, stop the worker, then allow closing."""

@@ -44,9 +44,11 @@ def test_is_xprocessor5():
 
 
 def test_capabilities_default_vs_xprocessor5():
-    """Tone range widens to -4 on XProcessor5, stays -2 otherwise."""
+    """Tone range is -2..+4 on all bodies; XProcessor5 adds 0.5 steps."""
     older = capabilities_for(_profile_with_iopcode("FF159502"))
     assert (older.tone_min, older.tone_max) == (-2, 4)
+    assert older.tone_half_step is False
 
     xproc5 = capabilities_for(_profile_with_iopcode("FF179502"))
-    assert (xproc5.tone_min, xproc5.tone_max) == (-4, 4)
+    assert (xproc5.tone_min, xproc5.tone_max) == (-2, 4)
+    assert xproc5.tone_half_step is True
