@@ -137,6 +137,24 @@ def test_film_simulation_byte_unknown():
         film_simulation_byte("Nope")
 
 
+# todo: consolidate after rawji update
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [
+        ("ClassicNeg", 17),
+        ("EternaBleach", 18),
+        ("NostalgicNeg", 19),
+        ("RealaAce", 20),
+    ],
+)
+def test_film_sims_beyond_rawjis_enum(name, code):
+    """The X-E5-verified codes 17-20 encode and decode correctly."""
+    assert film_simulation_byte(name) == code
+    profile = apply_recipe(bytes(608), Recipe(film_simulation=name))
+    assert _u32(profile, OFFSET_FILM_SIM) == code
+    assert recipe_from_profile(profile).film_simulation == name
+
+
 def test_apply_recipe_patches_film_sim():
     """apply_recipe patches the recipe's film simulation into the profile."""
     base = bytes(608)

@@ -56,6 +56,19 @@ _PARAM_OFFSETS = {
 # The film-simulation byte sits at its own parameter offset in rawji's layout.
 OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 
+# Film-simulation codes at @541. rawji's enum is correct up to Eterna (16),
+# but its EternaBleach=17 is wrong and it lacks the newer sims entirely.
+# Hardware-verified on the X-E5 (render signatures, plus the camera's own
+# profile carrying 20 for a RAF whose EXIF says REALA ACE):
+#   17=Classic Neg, 18=Eterna Bleach Bypass, 19=Nostalgic Neg, 20=Reala Ace.
+# The engine renders any out-of-range code as Provia.
+# todo: fix that in rawji
+FILM_SIM_CODES: dict[str, int] = {e.name: int(e) for e in rawji.FilmSimulation}
+FILM_SIM_CODES.update(
+    {"ClassicNeg": 17, "EternaBleach": 18, "NostalgicNeg": 19, "RealaAce": 20}
+)
+_FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
+
 # Params that use the value*10 tone encoding. rawji's TONE_PARAMS already
 # excludes NoiseReduction.
 _TONE_PARAMS = frozenset(TONE_PARAMS)
@@ -63,8 +76,8 @@ _TONE_PARAMS = frozenset(TONE_PARAMS)
 # Parameters that only exist on bodies with a long-enough profile (the
 # high-index effect slots). On shorter profiles (X100F 601 B, X-T3 605 B)
 # their offset overruns the profile, so they are skipped rather than fatal.
-# The real meanings (verified on the X-E5 via a
-# USB capture of X Raw Studio) are noted per use below.
+# The real meanings (verified on the X-E5 via a SB capture of X Raw Studio)
+# are noted per use below.
 _OPTIONAL_PARAMS = frozenset(
     {"Reserved26", "PortraitEnhancer", "DigitalTeleConv"}
 )
@@ -144,10 +157,10 @@ def _enum_value(enum_cls: Any, name: str, kind: str) -> int:
 
 
 def film_simulation_byte(name: str) -> int:
-    """Return the profile byte for a film-simulation member name.
+    """Return the profile byte for a film-simulation name.
 
     Args:
-        name: Film-simulation member name, e.g. "Velvia".
+        name: Film-simulation name, e.g. "Velvia" or "RealaAce".
 
     Returns:
         The byte value written at OFFSET_FILM_SIM.
@@ -155,7 +168,11 @@ def film_simulation_byte(name: str) -> int:
     Raises:
         ValueError: If the name is not a known film simulation.
     """
-    return _enum_value(rawji.FilmSimulation, name, "film simulation")
+    try:
+        return FILM_SIM_CODES[name]
+    except KeyError as e:
+        msg = f"unknown film simulation: {name}"
+        raise ValueError(msg) from e
 
 
 def _clamp_clarity(value: int) -> int:
@@ -203,11 +220,8 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
     Raises:
         ValueError: If a name is unknown or a tone value is out of range.
     """
-    film_sim = _enum_value(
-        rawji.FilmSimulation, recipe.film_simulation, "film simulation"
-    )
+    film_sim = film_simulation_byte(recipe.film_simulation)
     rawji.validate_params(
-        film_sim=film_sim,
         highlights=recipe.highlights,
         shadows=recipe.shadows,
         color=recipe.color,
@@ -326,10 +340,8 @@ def recipe_from_profile(base: bytes) -> Recipe:
 
     color_temp = signed("WBColorTemp", defaults.color_temp)
     return Recipe(
-        film_simulation=_enum_name(
-            rawji.FilmSimulation,
-            signed("FilmSimulation", 1),
-            defaults.film_simulation,
+        film_simulation=_FILM_SIM_NAMES.get(
+            signed("FilmSimulation", 1), defaults.film_simulation
         ),
         white_balance=_enum_name(
             rawji.WhiteBalance, signed("WhiteBalance"), defaults.white_balance
