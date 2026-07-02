@@ -32,7 +32,6 @@ class PreferencesDialog(Adw.PreferencesDialog):
     load_recipe_row = Gtk.Template.Child()
     wb_grid_row = Gtk.Template.Child()
     jpeg_quality_scale = Gtk.Template.Child()
-    batch_skip_row = Gtk.Template.Child()
 
     def __init__(
         self, *, settings: Settings, on_change: Callable[[], None]
@@ -53,12 +52,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.load_recipe_row.set_active(settings.load_recipe_from_image)
         self.wb_grid_row.set_active(settings.wb_grid_tint)
         self.jpeg_quality_scale.set_value(settings.jpeg_quality)
-        self.batch_skip_row.set_active(settings.batch_skip_foreign)
         self.color_scheme_row.connect("notify::selected", self._on_edited)
         self.load_recipe_row.connect("notify::active", self._on_edited)
         self.wb_grid_row.connect("notify::active", self._on_edited)
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
-        self.batch_skip_row.connect("notify::active", self._on_edited)
 
     def _on_edited(self, *_args: object) -> None:
         """Copy the row values into settings and notify the caller."""
@@ -70,5 +67,4 @@ class PreferencesDialog(Adw.PreferencesDialog):
         )
         self._settings.wb_grid_tint = self.wb_grid_row.get_active()
         self._settings.jpeg_quality = int(self.jpeg_quality_scale.get_value())
-        self._settings.batch_skip_foreign = self.batch_skip_row.get_active()
         self._on_change()

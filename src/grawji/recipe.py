@@ -21,6 +21,7 @@ class Recipe:
         dynamic_range: Dynamic range: "DR100", "DR200" or
             "DR400".
         grain: Grain effect: "Off", "Weak" or "Strong".
+        color_chrome: Color Chrome Effect: "Off", "Weak" or "Strong".
         exposure: Exposure compensation in EV, -2.0 to +3.0 (1/3 steps).
         highlights: Highlight tone, -2 to +4.
         shadows: Shadow tone, -2 to +4.
@@ -39,6 +40,7 @@ class Recipe:
     white_balance: str = "AsShot"
     dynamic_range: str = "DR100"
     grain: str = "Off"
+    color_chrome: str = "Off"
     exposure: float = 0.0
     highlights: int = 0
     shadows: int = 0

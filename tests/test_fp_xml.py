@@ -16,6 +16,7 @@ KODACHROME_FP1 = """<?xml version="1.0" encoding="utf-8"?>
         <DynamicRange>100</DynamicRange>
         <FilmSimulation>Classic</FilmSimulation>
         <GrainEffect>STRONG</GrainEffect>
+        <ChromeEffect>WEAK</ChromeEffect>
         <WhiteBalance>Auto</WhiteBalance>
         <WBShiftR>2</WBShiftR>
         <WBShiftB>-5</WBShiftB>
@@ -35,6 +36,7 @@ def test_parses_real_sample() -> None:
     recipe = parse_fp(KODACHROME_FP1)
     assert recipe.film_simulation == "ClassicChrome"
     assert recipe.grain == "Strong"
+    assert recipe.color_chrome == "Weak"
     assert recipe.white_balance == "Auto"
     assert recipe.wb_shift_r == 2
     assert recipe.wb_shift_b == -5
@@ -76,6 +78,20 @@ def test_exposure_tokens(token: str, expected: float) -> None:
 def test_film_simulation_vocabulary(token: str, expected: str) -> None:
     recipe = _with(f"<FilmSimulation>{token}</FilmSimulation>")
     assert recipe.film_simulation == expected
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [("OFF", "Off"), ("WEAK", "Weak"), ("STRONG", "Strong")],
+)
+def test_color_chrome_vocabulary(token: str, expected: str) -> None:
+    recipe = _with(f"<ChromeEffect>{token}</ChromeEffect>")
+    assert recipe.color_chrome == expected
+
+
+def test_color_chrome_serializes_to_chrome_effect() -> None:
+    out = serialize_fp(Recipe(color_chrome="Strong"))
+    assert "<ChromeEffect>STRONG</ChromeEffect>" in out
 
 
 def test_invalid_white_balance_means_as_shot() -> None:
@@ -126,6 +142,7 @@ def test_wrong_root_raises() -> None:
             white_balance="Auto",
             dynamic_range="DR200",
             grain="Strong",
+            color_chrome="Weak",
             exposure=2 / 3,
             highlights=2,
             shadows=-2,
@@ -150,6 +167,7 @@ def test_round_trip(recipe: Recipe) -> None:
     assert parsed.white_balance == recipe.white_balance
     assert parsed.dynamic_range == recipe.dynamic_range
     assert parsed.grain == recipe.grain
+    assert parsed.color_chrome == recipe.color_chrome
     assert parsed.exposure == pytest.approx(recipe.exposure)
     assert parsed.highlights == recipe.highlights
     assert parsed.shadows == recipe.shadows

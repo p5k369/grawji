@@ -41,9 +41,9 @@ class Settings:
         window_width: Last window width in pixels (0 = use the default).
         window_height: Last window height in pixels (0 = use the default).
         jpeg_quality: JPEG quality for exports, 1 to 100.
-        batch_skip_foreign: On batch export, skip RAFs shot by a different
-            camera body (which the connected camera cannot convert) and
-            carry on, instead of stopping the whole batch.
+        batch_overwrite: On batch export, re-export images whose JPEG
+            already exists in the target folder. When False, such images
+            are skipped so an interrupted batch can be resumed cheaply.
         wb_grid_tint: When True, tint each white-balance shift grid cell
             with the colour it nudges the image toward.
         color_scheme: UI theme: "default" follows the desktop, "light" or
@@ -59,7 +59,7 @@ class Settings:
     window_width: int = 0
     window_height: int = 0
     jpeg_quality: int = 95
-    batch_skip_foreign: bool = False
+    batch_overwrite: bool = False
     wb_grid_tint: bool = True
     color_scheme: str = "default"
     show_histogram: bool = False

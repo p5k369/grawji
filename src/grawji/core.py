@@ -21,6 +21,7 @@ from typing import Any, cast
 
 import rawji
 from rawji.fuji_enums import (
+    ChromeEffect,
     ColorSpace,
     GrainEffect,
     ev_to_int,
@@ -173,6 +174,12 @@ def recipe_changes(recipe: Recipe) -> dict[str, int]:
             rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
         ),
         "GrainEffect": _enum_value(GrainEffect, recipe.grain, "grain effect"),
+        # todo: Color Chrome Effect lives in the profile slot rawji labels
+        #  "SmoothSkinEffect" (index 9 / offset 549).
+        #  That needs to be updated in rawji.
+        "SmoothSkinEffect": _enum_value(
+            ChromeEffect, recipe.color_chrome, "color chrome"
+        ),
         "HighlightTone": recipe.highlights,
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
@@ -273,6 +280,9 @@ def recipe_from_profile(base: bytes) -> Recipe:
         ),
         grain=_enum_name(
             GrainEffect, signed("GrainEffect", 1), defaults.grain
+        ),
+        color_chrome=_enum_name(
+            ChromeEffect, signed("SmoothSkinEffect", 1), defaults.color_chrome
         ),
         exposure=int_to_ev(signed("ExposureBias")),
         highlights=decode_tone_value(signed("HighlightTone")),
