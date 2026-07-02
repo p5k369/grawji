@@ -17,12 +17,17 @@ from xml.etree import ElementTree as ET
 
 from grawji.recipe import Recipe
 
-# FP film-simulation token -> rawji FilmSimulation member name.
+# FP film-simulation token -> grawji film-simulation name. ClassicNEGA and
+# NostalgicNEGA are libfuji-confirmed, the RealaACE and BleachBypass tokens
+# follow Fuji's naming pattern but are not capture-confirmed yet.
 _FILM_SIM = {
     "Provia": "Provia",
     "Velvia": "Velvia",
     "Astia": "Astia",
     "Classic": "ClassicChrome",
+    "ClassicNEGA": "ClassicNeg",
+    "NostalgicNEGA": "NostalgicNeg",
+    "RealaACE": "RealaAce",
     "NEGAStd": "ProNegStd",
     "NEGAhi": "ProNegHi",
     "Acros": "Acros",
@@ -30,12 +35,12 @@ _FILM_SIM = {
     "AcrosR": "AcrosR",
     "AcrosG": "AcrosG",
     "Eterna": "Eterna",
+    "BleachBypass": "EternaBleach",
     "BW": "Monochrome",
     "BYe": "MonochromeYe",
     "BR": "MonochromeR",
     "BG": "MonochromeG",
     "Sepia": "Sepia",
-    "NostalgicNEGA": "ClassicChrome",
 }
 
 # FP white-balance token -> rawji WhiteBalance member name.
@@ -64,25 +69,7 @@ _COLOR_SPACE = {"sRGB": "sRGB", "AdobeRGB": "AdobeRGB"}
 # Two-digit thirds in an exposure token map to 0, 1/3 or 2/3 of an EV.
 _THIRDS = {"": 0, "0": 0, "00": 0, "33": 1, "67": 2}
 # Inverse tables for export.
-_FILM_SIM_OUT = {
-    "Provia": "Provia",
-    "Velvia": "Velvia",
-    "Astia": "Astia",
-    "ClassicChrome": "Classic",
-    "ProNegStd": "NEGAStd",
-    "ProNegHi": "NEGAhi",
-    "Acros": "Acros",
-    "AcrosYe": "AcrosYe",
-    "AcrosR": "AcrosR",
-    "AcrosG": "AcrosG",
-    "Eterna": "Eterna",
-    "EternaBleach": "Eterna",
-    "Monochrome": "BW",
-    "MonochromeYe": "BYe",
-    "MonochromeR": "BR",
-    "MonochromeG": "BG",
-    "Sepia": "Sepia",
-}
+_FILM_SIM_OUT = {v: k for k, v in _FILM_SIM.items()}
 _WHITE_BALANCE_OUT = {
     "AsShot": "AsShot",
     "Auto": "Auto",

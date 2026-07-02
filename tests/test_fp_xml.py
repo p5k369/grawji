@@ -72,7 +72,10 @@ def test_exposure_tokens(token: str, expected: float) -> None:
         ("NEGAStd", "ProNegStd"),
         ("NEGAhi", "ProNegHi"),
         ("Acros", "Acros"),
-        ("NostalgicNEGA", "ClassicChrome"),
+        ("ClassicNEGA", "ClassicNeg"),
+        ("NostalgicNEGA", "NostalgicNeg"),
+        ("RealaACE", "RealaAce"),
+        ("BleachBypass", "EternaBleach"),
     ],
 )
 def test_film_simulation_vocabulary(token: str, expected: str) -> None:
@@ -201,9 +204,10 @@ def test_iopcode_is_eight_hex_digits() -> None:
     )
 
 
-def test_eterna_bleach_falls_back_to_eterna() -> None:
-    out = serialize_fp(Recipe(film_simulation="EternaBleach"))
-    assert "<FilmSimulation>Eterna</FilmSimulation>" in out
+def test_new_film_sims_round_trip() -> None:
+    for name in ("ClassicNeg", "NostalgicNeg", "RealaAce", "EternaBleach"):
+        out = serialize_fp(Recipe(film_simulation=name))
+        assert parse_fp(out).film_simulation == name
 
 
 def _with(field_xml: str) -> Recipe:

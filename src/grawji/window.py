@@ -43,6 +43,7 @@ from rawji.fuji_enums import (
 from grawji import exif, raf
 from grawji.batch_export import BatchExportDialog
 from grawji.capabilities import (
+    FILM_SIMULATIONS,
     Capabilities,
     capabilities_for,
     read_iopcode,
@@ -72,7 +73,7 @@ from grawji.settings import (
 )
 from grawji.widgets import Histogram, SliderRow, WBShiftGrid
 
-_FILM_SIMULATIONS = [e.name for e in rawji.FilmSimulation]
+_FILM_SIMULATIONS = list(FILM_SIMULATIONS)
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
 _DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
 _GRAINS = [e.name for e in GrainEffect]
@@ -433,6 +434,11 @@ class MainWindow(Adw.ApplicationWindow):
             row.set_model(Gtk.StringList.new(names))
             return row
 
+        # Refined per body on open. Start with everything so the panel
+        # looks complete before the first image.
+        self._caps: Capabilities | None = None
+        self._film_sims: list[str] = list(_FILM_SIMULATIONS)
+
         self.film_row = combo("Film simulation", _FILM_SIMULATIONS)
         self.grain_row = combo("Grain", _GRAINS)
         self.grain_size_row = combo("Grain size", _GRAIN_SIZES)
@@ -596,7 +602,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Read the current selector values into a Recipe."""
         red, blue = self._wb_grid.get_values()
         return Recipe(
-            film_simulation=_FILM_SIMULATIONS[self.film_row.get_selected()],
+            film_simulation=self._film_sims[self.film_row.get_selected()],
             white_balance=_WHITE_BALANCES[self.wb_row.get_selected()],
             dynamic_range=_DYNAMIC_RANGES[self.dr_row.get_selected()],
             grain=_GRAINS[self.grain_row.get_selected()],
@@ -785,7 +791,10 @@ class MainWindow(Adw.ApplicationWindow):
             return  # a newer selection has superseded this open
         profile = self._session.profile
         if profile is not None:
-            self._apply_capabilities(capabilities_for(profile))
+            # The RAF is provably from the connected body (a foreign one
+            # fails with 0x2002), so its EXIF model identifies the camera.
+            model = self._read_camera_model()
+            self._apply_capabilities(capabilities_for(profile, model=model))
         if profile is not None and self._settings.load_recipe_from_image:
             self._set_active_recipe(recipe_from_profile(profile), "From image")
             # The loaded recipe is the image's own, so the embedded JPEG
@@ -796,22 +805,59 @@ class MainWindow(Adw.ApplicationWindow):
                 return
         self._render_preview()
 
+    def _read_camera_model(self) -> str | None:
+        """Read the camera model from the open RAF's EXIF, or None."""
+        if self._raf_path is None:
+            return None
+        meta = GExiv2.Metadata()
+        try:
+            meta.open_path(str(self._raf_path))
+            return meta.try_get_tag_string("Exif.Image.Model")
+        except GLib.Error:
+            return None
+
     def _apply_capabilities(self, caps: Capabilities) -> None:
-        """Adjust controls to what the connected body's processor supports."""
+        """Restrict the recipe controls to what the camera supports.
+
+        The body is identified from the open RAF's EXIF model (a foreign
+        RAF fails with 0x2002, so the RAF's body is the connected camera).
+        Only when that lookup fails - no model tag, or a model missing
+        from the capability table - does the X-Pro2 baseline apply, so
+        nothing is offered that the camera might silently ignore.
+        """
+        self._caps = caps
         self._highlights_row.set_range(caps.tone_min, caps.tone_max)
         self._shadows_row.set_range(caps.tone_min, caps.tone_max)
-        # Clarity, Color Chrome FX Blue and Smooth Skin live in high-index
-        # profile slots that older bodies do not expose, hide when unsupported.
+        self.chrome_row.set_visible(caps.has_color_chrome)
         self._clarity_row.set_visible(caps.has_clarity)
         self.chrome_blue_row.set_visible(caps.has_color_chrome_blue)
         self.smooth_skin_row.set_visible(caps.has_smooth_skin)
+        self._set_film_simulations(list(caps.film_simulations))
+        self._update_grain_size_visibility()
+
+    def _set_film_simulations(self, sims: list[str]) -> None:
+        """Offer only the given film simulations, keeping the selection."""
+        if sims == self._film_sims:
+            return
+        current = self._film_sims[self.film_row.get_selected()]
+        self._film_sims = sims
+        self._suppress_recipe_signals = True
+        try:
+            self.film_row.set_model(Gtk.StringList.new(sims))
+            self.film_row.set_selected(
+                sims.index(current) if current in sims else 0
+            )
+        finally:
+            self._suppress_recipe_signals = False
 
     def _load_recipe(self, recipe: Recipe) -> None:
         """Set the selectors from a recipe without triggering renders."""
         self._suppress_recipe_signals = True
         try:
             self.film_row.set_selected(
-                _FILM_SIMULATIONS.index(recipe.film_simulation)
+                self._film_sims.index(recipe.film_simulation)
+                if recipe.film_simulation in self._film_sims
+                else 0
             )
             self.wb_row.set_selected(
                 _WHITE_BALANCES.index(recipe.white_balance)
@@ -938,9 +984,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_grain_size_visibility()
 
     def _update_grain_size_visibility(self) -> None:
-        """Show the grain-size selector only when grain is not Off."""
+        """Show grain size only when the body has it and grain is on."""
         grain = _GRAINS[self.grain_row.get_selected()]
-        self.grain_size_row.set_visible(grain != "Off")
+        supported = self._caps is None or self._caps.has_grain_size
+        self.grain_size_row.set_visible(supported and grain != "Off")
 
     def _on_recipe_changed(self, *_args: object) -> None:
         """Re-render and update the recipe indicator on a change."""
