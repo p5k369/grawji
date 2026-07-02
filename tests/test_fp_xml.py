@@ -142,7 +142,11 @@ def test_wrong_root_raises() -> None:
             white_balance="Auto",
             dynamic_range="DR200",
             grain="Strong",
+            grain_size="Large",
             color_chrome="Weak",
+            color_chrome_blue="Strong",
+            smooth_skin="Weak",
+            clarity=-3,
             exposure=2 / 3,
             highlights=2,
             shadows=-2,
@@ -167,7 +171,11 @@ def test_round_trip(recipe: Recipe) -> None:
     assert parsed.white_balance == recipe.white_balance
     assert parsed.dynamic_range == recipe.dynamic_range
     assert parsed.grain == recipe.grain
+    assert parsed.grain_size == recipe.grain_size
     assert parsed.color_chrome == recipe.color_chrome
+    assert parsed.color_chrome_blue == recipe.color_chrome_blue
+    assert parsed.smooth_skin == recipe.smooth_skin
+    assert parsed.clarity == recipe.clarity
     assert parsed.exposure == pytest.approx(recipe.exposure)
     assert parsed.highlights == recipe.highlights
     assert parsed.shadows == recipe.shadows

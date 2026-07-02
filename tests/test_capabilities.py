@@ -52,3 +52,16 @@ def test_capabilities_default_vs_xprocessor5():
     xproc5 = capabilities_for(_profile_with_iopcode("FF179502"))
     assert (xproc5.tone_min, xproc5.tone_max) == (-2, 4)
     assert xproc5.tone_half_step is True
+
+
+def test_high_index_effects_need_a_long_profile():
+    """Clarity (617) and FX Blue (609) require a long-enough profile."""
+    short = capabilities_for(b"\x00" * 605)  # X-T3-length profile
+    assert short.has_clarity is False
+    assert short.has_color_chrome_blue is False
+    assert short.has_smooth_skin is False
+
+    full = capabilities_for(b"\x00" * 629)  # X-E5-length profile
+    assert full.has_clarity is True
+    assert full.has_color_chrome_blue is True
+    assert full.has_smooth_skin is True

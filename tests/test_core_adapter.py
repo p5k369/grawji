@@ -34,6 +34,10 @@ OFF_HIGHLIGHTS = 573
 OFF_COLOR = 581
 OFF_NOISE_REDUCTION = 589
 OFF_COLOR_SPACE = 597
+OFF_SMOOTH_SKIN = 605
+OFF_COLOR_CHROME_BLUE = 609
+OFF_CLARITY = 617
+FULL_PROFILE = 632
 
 
 def _u32(profile, offset):
@@ -251,6 +255,75 @@ def test_apply_recipe_patches_color_space():
     adobe = apply_recipe(base, Recipe(color_space="AdobeRGB"))
     assert _u32(srgb, OFF_COLOR_SPACE) == 1
     assert _u32(adobe, OFF_COLOR_SPACE) == 2
+
+
+@pytest.mark.parametrize(
+    ("grain", "size", "expected"),
+    [
+        ("Off", "Small", 1),
+        ("Weak", "Small", 2),
+        ("Strong", "Small", 3),
+        ("Weak", "Large", 4),
+        ("Strong", "Large", 5),
+    ],
+)
+def test_apply_recipe_encodes_grain_effect_and_size(grain, size, expected):
+    """Grain effect and size fold into the single @545 code."""
+    patched = apply_recipe(bytes(608), Recipe(grain=grain, grain_size=size))
+    assert _u32(patched, OFF_GRAIN) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "grain", "size"),
+    [(1, "Off", "Small"), (2, "Weak", "Small"), (5, "Strong", "Large")],
+)
+def test_grain_round_trips_effect_and_size(code, grain, size):
+    """recipe_from_profile splits the @545 code back into effect and size."""
+    profile = bytearray(608)
+    struct.pack_into("<I", profile, OFF_GRAIN, code)
+    decoded = recipe_from_profile(bytes(profile))
+    assert decoded.grain == grain
+    assert decoded.grain_size == size
+
+
+def test_apply_recipe_patches_smooth_skin():
+    """Smooth skin uses the ChromeEffect enum at @605 on a full profile."""
+    patched = apply_recipe(bytes(FULL_PROFILE), Recipe(smooth_skin="Strong"))
+    assert _u32(patched, OFF_SMOOTH_SKIN) == 3  # ChromeEffect.Strong
+
+
+def test_apply_recipe_patches_clarity_and_fx_blue():
+    """Clarity (x10 @617) and FX Blue (ChromeEffect @609) are written."""
+    base = bytes(FULL_PROFILE)
+    patched = apply_recipe(base, Recipe(clarity=5, color_chrome_blue="Strong"))
+    assert _u32(patched, OFF_CLARITY) == 50
+    assert _u32(patched, OFF_COLOR_CHROME_BLUE) == 3  # ChromeEffect.Strong
+
+
+def test_apply_recipe_clamps_clarity():
+    """Out-of-range clarity is clamped to the honoured -5..+5."""
+    patched = apply_recipe(bytes(FULL_PROFILE), Recipe(clarity=99))
+    assert _u32(patched, OFF_CLARITY) == 50
+
+
+def test_high_index_effects_skipped_on_short_profile():
+    """On a short profile clarity/FX Blue are skipped, not fatal."""
+    base = bytes(608)  # too short for offsets 605 / 609 / 617
+    # Must not raise, and the profile is not extended to reach those slots.
+    patched = apply_recipe(
+        base,
+        Recipe(clarity=5, color_chrome_blue="Strong", smooth_skin="Strong"),
+    )
+    assert len(patched) == len(base)
+
+
+def test_clarity_and_fx_blue_round_trip():
+    """recipe_from_profile recovers clarity and FX Blue on a full profile."""
+    recipe = Recipe(clarity=-3, color_chrome_blue="Weak")
+    profile = apply_recipe(bytes(FULL_PROFILE), recipe)
+    decoded = recipe_from_profile(profile)
+    assert decoded.clarity == -3
+    assert decoded.color_chrome_blue == "Weak"
 
 
 def test_apply_recipe_rejects_short_profile():
