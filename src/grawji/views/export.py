@@ -17,12 +17,12 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk
 
-from grawji import imagemeta
-from grawji.batch_export import BatchExportDialog
 from grawji.core import CameraSession, ForeignRafError
 from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
 from grawji.settings import Settings
+from grawji.views import imagemeta
+from grawji.views.batch_export import BatchExportDialog
 
 SetBusy = Callable[..., None]
 

@@ -74,7 +74,7 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
 "scripts/**" = ["D103", "T201"]
-"src/grawji/{app,batch_export,dialogs,export,filmstrip,foldertree,imagemeta,navigator,preferences,preview_view,recipe_manager,recipe_panel,widgets,window}.py" = ["E402"]
+"src/grawji/views/*.py" = ["E402"]
 "tests/**" = ["D100", "D101", "D102", "D103", "D104", "D107", "PLR2004", "S", "ARG", "ANN", "E501", "F401", "PLC0415"]
 
 [tool.ruff.lint.flake8-quotes]
@@ -120,19 +120,7 @@ follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
 module = [
-  "grawji.app",
-  "grawji.window",
-  "grawji.batch_export",
-  "grawji.dialogs",
-  "grawji.export",
-  "grawji.filmstrip",
-  "grawji.foldertree",
-  "grawji.imagemeta",
-  "grawji.preview_view",
-  "grawji.recipe_panel",
-  "grawji.widgets",
-  "grawji.preferences",
-  "grawji.recipe_manager",
+  "grawji.views.*",
   "grawji.__main__",
 ]
 disallow_subclassing_any = false
@@ -162,13 +150,7 @@ branch = true
 omit = [
   "**/__init__.py",
   "**/__main__.py",
-  "src/grawji/app.py",
-  "src/grawji/window.py",
-  "src/grawji/filmstrip.py",
-  "src/grawji/foldertree.py",
-  "src/grawji/preferences.py",
-  "src/grawji/preview_view.py",
-  "src/grawji/recipe_panel.py",
+  "src/grawji/views/**",
   "src/grawji/ui/**",
 ]
 

@@ -12,7 +12,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gdk, GdkPixbuf, GLib, GObject, Gtk
 
-from grawji.widgets import Histogram
+from grawji.views.widgets import Histogram
 
 # Manual rotation (degrees clockwise) -> GdkPixbuf rotation.
 _ROTATIONS = {
