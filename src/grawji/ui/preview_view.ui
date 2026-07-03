@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiPreviewView" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <child>
+      <object class="GtkOverlay">
+        <property name="vexpand">true</property>
+        <child>
+          <object class="GtkScrolledWindow" id="scroll">
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+            <child>
+              <object class="GtkBox">
+                <child>
+                  <object class="GtkPicture" id="picture">
+                    <property name="content-fit">contain</property>
+                    <property name="hexpand">true</property>
+                    <property name="vexpand">true</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkBox" id="histogram_slot">
+            <property name="halign">start</property>
+            <property name="valign">end</property>
+            <property name="width-request">200</property>
+            <property name="height-request">110</property>
+            <property name="margin-start">10</property>
+            <property name="margin-bottom">10</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">6</property>
+        <property name="margin-start">6</property>
+        <property name="margin-end">6</property>
+        <property name="margin-top">2</property>
+        <property name="margin-bottom">2</property>
+        <child>
+          <object class="GtkSpinner" id="spinner">
+            <property name="valign">center</property>
+            <property name="visible">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="status">
+            <property name="label">Open a folder to begin.</property>
+            <property name="xalign">0</property>
+            <property name="hexpand">true</property>
+            <style>
+              <class name="dim-label"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="peek_button">
+            <property name="icon-name">view-reveal-symbolic</property>
+            <property name="tooltip-text">Hold to show the original</property>
+            <property name="sensitive">false</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton">
+            <property name="icon-name">zoom-fit-best-symbolic</property>
+            <property name="tooltip-text">Fit to window (Ctrl+0)</property>
+            <property name="action-name">win.zoom-fit</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="rotate_left">
+            <property name="icon-name">object-rotate-left-symbolic</property>
+            <property name="tooltip-text">Rotate left</property>
+            <property name="sensitive">false</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="rotate_right">
+            <property name="icon-name">object-rotate-right-symbolic</property>
+            <property name="tooltip-text">Rotate right</property>
+            <property name="sensitive">false</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton">
+            <property name="icon-name">display-brightness-symbolic</property>
+            <property name="tooltip-text">Cycle preview background (b)</property>
+            <property name="action-name">win.cycle-background</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

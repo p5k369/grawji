@@ -1,9 +1,10 @@
-"""Modal dialog to manage saved recipes: reorder, delete, import, export."""
+"""The saved-recipe library UI: the manager dialog and its controller."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import gi
@@ -11,7 +12,12 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GObject, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
+
+from grawji.fp_xml import parse_fp, serialize_fp
+from grawji.recipe import Recipe
+from grawji.recipe_panel import RecipePanel
+from grawji.recipes import RecipeLibrary
 
 _UI = (
     resources.files("grawji")
@@ -212,3 +218,211 @@ class RecipeManagerDialog(Adw.Dialog):
         button.add_css_class("flat")
         button.set_tooltip_text(tooltip)
         return button
+
+
+class RecipeLibraryController:
+    """Glue between the library, the panel and the library dialogs.
+
+    Owns the manager dialog's lifecycle plus the save-name prompt and
+    the FP1/FP2/FP3 import and export file dialogs, keeping the panel's
+    saved-recipe combo in sync with every library change.
+    """
+
+    def __init__(
+        self,
+        *,
+        parent: Gtk.Widget,
+        library: RecipeLibrary,
+        panel: RecipePanel,
+        on_render: Callable[[], None],
+        on_status: Callable[[str], None],
+        get_iopcode: Callable[[], int | None],
+    ) -> None:
+        """Wire the controller.
+
+        Args:
+            parent: The window the dialogs attach to.
+            library: The saved-recipe store.
+            panel: The recipe panel whose combo mirrors the library.
+            on_render: Re-render the preview if an image is open.
+            on_status: Sets the window's status line.
+            get_iopcode: The open profile's IOPCode for FP export, or
+                None when no image is open.
+        """
+        self._parent = parent
+        self._library = library
+        self._panel = panel
+        self._on_render = on_render
+        self._on_status = on_status
+        self._get_iopcode = get_iopcode
+        self._manager: RecipeManagerDialog | None = None
+        panel.set_recipe_names(library.names)
+
+    def manage(self) -> None:
+        """Open the recipe manager modal."""
+        self._manager = RecipeManagerDialog(
+            list_recipes=lambda: self._library.names,
+            on_reorder=self._reorder,
+            on_delete=self._delete,
+            on_rename=self._rename,
+            on_import=self.import_fp,
+            on_export=self.export_fp,
+        )
+        self._manager.connect("closed", self._on_manager_closed)
+        self._manager.present(self._parent)
+
+    def save_current(self) -> None:
+        """Ask for a name and save the panel's controls as a recipe."""
+        self._prompt_save(self._panel.get_recipe())
+
+    def apply(self, name: str) -> None:
+        """Apply a saved recipe to the controls and re-render."""
+        recipe = self._library.get(name)
+        if recipe is None:
+            return
+        self._panel.set_recipe(recipe)
+        self._on_render()
+        self._on_status(f"Applied recipe “{name}”.")
+
+    def import_fp(self) -> None:
+        """Pick an X RAW Studio FP file and import its recipe."""
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Import recipe")
+        fp_filter = Gtk.FileFilter()
+        fp_filter.set_name("X RAW Studio recipes (FP1/FP2/FP3)")
+        for pattern in ("*.FP1", "*.FP2", "*.FP3", "*.fp1", "*.fp2", "*.fp3"):
+            fp_filter.add_pattern(pattern)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(fp_filter)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(fp_filter)
+        dialog.open(self._parent, None, self._on_import_response)
+
+    def export_fp(self, name: str) -> None:
+        """Pick a path and write the named saved recipe as an FP file."""
+        recipe = self._library.get(name)
+        if recipe is None:
+            return
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Export recipe")
+        dialog.set_initial_name(f"{name}.FP1")
+        dialog.save(
+            self._parent,
+            None,
+            lambda dlg, res: self._on_export_response(dlg, res, name, recipe),
+        )
+
+    def _refresh(self) -> None:
+        """Mirror the library into the panel combo and an open manager."""
+        self._panel.set_recipe_names(self._library.names)
+        if self._manager is not None:
+            self._manager.refresh()
+
+    def _on_manager_closed(self, _dialog: Any) -> None:
+        """Forget the manager once it is dismissed."""
+        self._manager = None
+
+    def _delete(self, name: str) -> None:
+        """Remove a saved recipe and persist the change."""
+        if self._library.delete(name):
+            self._refresh()
+            self._on_status(f"Deleted recipe “{name}”.")
+
+    def _rename(self, old: str, new: str) -> None:
+        """Rename a saved recipe, keeping its position, and persist."""
+        if not self._library.rename(old, new):
+            return
+        self._refresh()
+        if self._panel.active_label == old:
+            renamed = self._library.get(new)
+            if renamed is not None:
+                self._panel.set_active(renamed, new)
+
+    def _reorder(self, order: list[str]) -> None:
+        """Persist a new recipe order (from the manager's drag and drop)."""
+        if self._library.reorder(order):
+            self._refresh()
+
+    def _prompt_save(
+        self, recipe: Recipe, default_name: str = "", *, activate: bool = False
+    ) -> None:
+        """Ask for a name, then store recipe under it and make it active.
+
+        Args:
+            recipe: The recipe to store.
+            default_name: The name pre-filled in the entry.
+            activate: Re-render the preview after saving (used for imports,
+                where the saved recipe is new to the controls).
+        """
+        dialog = Adw.AlertDialog(
+            heading="Save recipe", body="Name this recipe:"
+        )
+        entry = Gtk.Entry(text=default_name)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_default_response("save")
+        dialog.set_response_appearance(
+            "save", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.connect(
+            "response", self._on_save_response, entry, recipe, activate
+        )
+        dialog.present(self._parent)
+
+    def _on_save_response(
+        self,
+        _dialog: Any,
+        response: str,
+        entry: Any,
+        recipe: Recipe,
+        activate: bool,
+    ) -> None:
+        """Store the named recipe when the save dialog is confirmed."""
+        if response != "save":
+            return
+        name = entry.get_text().strip()
+        if not name:
+            return
+        self._library.add(name, recipe)
+        self._refresh()
+        self._panel.set_active(recipe, name)
+        if activate:
+            self._on_render()
+        verb = "Imported" if activate else "Saved"
+        self._on_status(f"{verb} recipe “{name}”.")
+
+    def _on_import_response(self, dialog: Any, result: Any) -> None:
+        """Parse the chosen FP file, then save it as a named recipe."""
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return
+        try:
+            recipe = parse_fp(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            self._on_status(f"Could not import recipe: {exc}")
+            return
+        self._prompt_save(recipe, Path(path).stem, activate=True)
+
+    def _on_export_response(
+        self, dialog: Any, result: Any, name: str, recipe: Recipe
+    ) -> None:
+        """Write the named recipe as an FP file to the chosen path."""
+        try:
+            gfile = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return
+        text = serialize_fp(recipe, iopcode=self._get_iopcode(), label=name)
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            self._on_status(f"Could not export recipe: {exc}")
+            return
+        self._on_status(f"Exported recipe “{name}” to {path}.")
