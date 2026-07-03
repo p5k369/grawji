@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiRecipePanel" parent="AdwPreferencesPage">
+    <property name="width-request">345</property>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="header-suffix">
+          <object class="GtkBox">
+            <property name="spacing">2</property>
+            <child>
+              <object class="GtkButton">
+                <property name="icon-name">view-list-symbolic</property>
+                <property name="tooltip-text">Manage recipes</property>
+                <property name="action-name">win.manage-recipes</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton">
+                <property name="icon-name">bookmark-new-symbolic</property>
+                <property name="tooltip-text">Save current as recipe</property>
+                <property name="action-name">win.save-recipe</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton">
+                <property name="icon-name">edit-undo-symbolic</property>
+                <property name="tooltip-text">Reset to default</property>
+                <property name="action-name">win.reset</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </property>
+        <child>
+          <object class="AdwComboRow" id="recipe_row">
+            <property name="title">Recipe</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="recipe_group">
+      </object>
+    </child>
+  </template>
+</interface>

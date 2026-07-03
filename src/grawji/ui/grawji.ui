@@ -2,6 +2,44 @@
 <interface>
   <requires lib="gtk" version="4.0"/>
   <requires lib="libadwaita" version="1.0"/>
+  <menu id="main_menu">
+    <section>
+      <item>
+        <attribute name="label">Manage Recipes…</attribute>
+        <attribute name="action">win.manage-recipes</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label">Show Histogram</attribute>
+        <attribute name="action">win.toggle-histogram</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label">Keyboard Shortcuts</attribute>
+        <attribute name="action">win.shortcuts</attribute>
+      </item>
+      <item>
+        <attribute name="label">Preferences</attribute>
+        <attribute name="action">win.preferences</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label">About grawji</attribute>
+        <attribute name="action">win.about</attribute>
+      </item>
+    </section>
+  </menu>
+  <menu id="export_menu">
+    <section>
+      <item>
+        <attribute name="label">Batch Export…</attribute>
+        <attribute name="action">win.batch-export</attribute>
+      </item>
+    </section>
+  </menu>
   <template class="MainWindow" parent="AdwApplicationWindow">
     <property name="default-width">1360</property>
     <property name="default-height">880</property>
@@ -22,9 +60,10 @@
               </object>
             </child>
             <child type="end">
-              <object class="GtkMenuButton" id="menu_button">
+              <object class="GtkMenuButton">
                 <property name="icon-name">open-menu-symbolic</property>
                 <property name="tooltip-text">Menu</property>
+                <property name="menu-model">main_menu</property>
               </object>
             </child>
             <child type="end">
@@ -38,6 +77,7 @@
               <object class="AdwSplitButton" id="export_button">
                 <property name="label">Export…</property>
                 <property name="sensitive">false</property>
+                <property name="menu-model">export_menu</property>
                 <style>
                   <class name="suggested-action"/>
                 </style>
@@ -147,174 +187,10 @@
                     <property name="resize-end-child">false</property>
                     <property name="shrink-end-child">false</property>
                     <property name="start-child">
-                      <object class="GtkBox">
-                        <property name="orientation">vertical</property>
-                        <child>
-                          <object class="GtkOverlay">
-                            <property name="vexpand">true</property>
-                            <child>
-                              <object class="GtkScrolledWindow" id="preview_scroll">
-                                <property name="hexpand">true</property>
-                                <property name="vexpand">true</property>
-                                <child>
-                                  <object class="GtkBox">
-                                    <child>
-                                      <object class="GtkPicture" id="picture">
-                                        <property name="content-fit">contain</property>
-                                        <property name="hexpand">true</property>
-                                        <property name="vexpand">true</property>
-                                      </object>
-                                    </child>
-                                  </object>
-                                </child>
-                              </object>
-                            </child>
-                            <child type="overlay">
-                              <object class="GtkBox" id="histogram_slot">
-                                <property name="halign">start</property>
-                                <property name="valign">end</property>
-                                <property name="width-request">200</property>
-                                <property name="height-request">110</property>
-                                <property name="margin-start">10</property>
-                                <property name="margin-bottom">10</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="spacing">6</property>
-                            <property name="margin-start">6</property>
-                            <property name="margin-end">6</property>
-                            <property name="margin-top">2</property>
-                            <property name="margin-bottom">2</property>
-                            <child>
-                              <object class="GtkSpinner" id="spinner">
-                                <property name="valign">center</property>
-                                <property name="visible">false</property>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkLabel" id="status">
-                                <property name="label">Open a folder to begin.</property>
-                                <property name="xalign">0</property>
-                                <property name="hexpand">true</property>
-                                <style>
-                                  <class name="dim-label"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton" id="peek_button">
-                                <property name="icon-name">view-reveal-symbolic</property>
-                                <property name="tooltip-text">Hold to show the original</property>
-                                <property name="sensitive">false</property>
-                                <property name="valign">center</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton">
-                                <property name="icon-name">zoom-fit-best-symbolic</property>
-                                <property name="tooltip-text">Fit to window (Ctrl+0)</property>
-                                <property name="action-name">win.zoom-fit</property>
-                                <property name="valign">center</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton" id="rotate_left">
-                                <property name="icon-name">object-rotate-left-symbolic</property>
-                                <property name="tooltip-text">Rotate left</property>
-                                <property name="sensitive">false</property>
-                                <property name="valign">center</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton" id="rotate_right">
-                                <property name="icon-name">object-rotate-right-symbolic</property>
-                                <property name="tooltip-text">Rotate right</property>
-                                <property name="sensitive">false</property>
-                                <property name="valign">center</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
-                            <child>
-                              <object class="GtkButton">
-                                <property name="icon-name">display-brightness-symbolic</property>
-                                <property name="tooltip-text">Cycle preview background (b)</property>
-                                <property name="action-name">win.cycle-background</property>
-                                <property name="valign">center</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
+                      <object class="GrawjiPreviewView" id="preview_view"/>
                     </property>
                     <property name="end-child">
-                      <object class="AdwPreferencesPage">
-                        <property name="width-request">345</property>
-                        <child>
-                          <object class="AdwPreferencesGroup">
-                            <property name="header-suffix">
-                              <object class="GtkBox">
-                                <property name="spacing">2</property>
-                                <child>
-                                  <object class="GtkButton">
-                                    <property name="icon-name">view-list-symbolic</property>
-                                    <property name="tooltip-text">Manage recipes</property>
-                                    <property name="action-name">win.manage-recipes</property>
-                                    <style>
-                                      <class name="flat"/>
-                                    </style>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="GtkButton">
-                                    <property name="icon-name">bookmark-new-symbolic</property>
-                                    <property name="tooltip-text">Save current as recipe</property>
-                                    <property name="action-name">win.save-recipe</property>
-                                    <style>
-                                      <class name="flat"/>
-                                    </style>
-                                  </object>
-                                </child>
-                                <child>
-                                  <object class="GtkButton">
-                                    <property name="icon-name">edit-undo-symbolic</property>
-                                    <property name="tooltip-text">Reset to default</property>
-                                    <property name="action-name">win.reset</property>
-                                    <style>
-                                      <class name="flat"/>
-                                    </style>
-                                  </object>
-                                </child>
-                              </object>
-                            </property>
-                            <child>
-                              <object class="AdwComboRow" id="recipe_row">
-                                <property name="title">Recipe</property>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwPreferencesGroup" id="recipe_group">
-                          </object>
-                        </child>
-                      </object>
+                      <object class="GrawjiRecipePanel" id="recipe_panel"/>
                     </property>
                   </object>
                 </property>
