@@ -79,14 +79,10 @@ _TONE_PARAMS = frozenset(TONE_PARAMS)
 # Parameters that only exist on bodies with a long-enough profile (the
 # high-index effect slots). On shorter profiles (X100F 601 B, X-T3 605 B)
 # their offset overruns the profile, so they are skipped rather than fatal.
-# The real meanings (verified on the X-E5 via a SB capture of X Raw Studio)
-# are noted per use below.
 _OPTIONAL_PARAMS = frozenset(
-    {"Reserved26", "PortraitEnhancer", "DigitalTeleConv"}
+    {"Clarity", "ColorChromeBlue", "SmoothSkinEffect"}
 )
 
-# Clarity encodes the user value * 10 (verified: -5 -> -50, +5 -> +50).
-_CLARITY_SCALE = 10
 _CLARITY_LIMIT = 5
 
 # Default wait_for_result timeout, in seconds.
@@ -259,24 +255,16 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
         ),
         # Grain effect and size share one slot (@545); see _grain_code.
         "GrainEffect": _grain_code(recipe.grain, recipe.grain_size),
-        # todo: rawji mislabels these slots
-        #  (verified on the X-E5 via a USB capture of X Raw Studio).
-        # Real meanings:
-        #   "SmoothSkinEffect" idx 9  @549 = Color Chrome Effect
-        #   "DigitalTeleConv"  idx 23 @605 = Smooth Skin Effect
-        #   "PortraitEnhancer" idx 24 @609 = Color Chrome FX Blue
-        #   "Reserved26"       idx 26 @617 = Clarity (value * 10)
-        # grawji uses the current upstream names until the rename PR lands.
-        "SmoothSkinEffect": _enum_value(
+        "ColorChromeEffect": _enum_value(
             ChromeEffect, recipe.color_chrome, "color chrome"
         ),
-        "DigitalTeleConv": _enum_value(
+        "SmoothSkinEffect": _enum_value(
             ChromeEffect, recipe.smooth_skin, "smooth skin"
         ),
-        "PortraitEnhancer": _enum_value(
+        "ColorChromeBlue": _enum_value(
             ChromeEffect, recipe.color_chrome_blue, "color chrome blue"
         ),
-        "Reserved26": _clamp_clarity(recipe.clarity) * _CLARITY_SCALE,
+        "Clarity": _clamp_clarity(recipe.clarity),
         "HighlightTone": recipe.highlights,
         "ShadowTone": recipe.shadows,
         "Color": recipe.color,
@@ -395,16 +383,18 @@ def recipe_from_profile(base: bytes) -> Recipe:
             signed("GrainEffect", 1), defaults.grain_size
         ),
         color_chrome=_enum_name(
-            ChromeEffect, signed("SmoothSkinEffect", 1), defaults.color_chrome
+            ChromeEffect,
+            signed("ColorChromeEffect", 1),
+            defaults.color_chrome,
         ),
         color_chrome_blue=_enum_name(
             ChromeEffect,
-            signed("PortraitEnhancer", 1),
+            signed("ColorChromeBlue", 1),
             defaults.color_chrome_blue,
         ),
-        clarity=round(signed("Reserved26") / _CLARITY_SCALE),
+        clarity=decode_tone_value(signed("Clarity")),
         smooth_skin=_enum_name(
-            ChromeEffect, signed("DigitalTeleConv", 1), defaults.smooth_skin
+            ChromeEffect, signed("SmoothSkinEffect", 1), defaults.smooth_skin
         ),
         exposure=int_to_ev(signed("ExposureBias")),
         highlights=_decode_half_tone(signed("HighlightTone")),
