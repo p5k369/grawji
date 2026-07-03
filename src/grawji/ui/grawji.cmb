@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<!DOCTYPE cambalache-project SYSTEM "cambalache-project.dtd">
+<!-- Created with Cambalache 1.0.3 -->
+<cambalache-project version="1.0.0" target_tk="gtk-4.0" depends="libadwaita-1">
+  <ui filename="preview_view.ui" sha256="1922c395769b06c3746c6d4de402acebb58c9a2bc9297a0814ba81e922742c91"/>
+  <ui filename="recipe_panel.ui" sha256="2d0c3cd9541acd230689df41a6fbf88ea20173b7842edb3cc28799d5f06bac21"/>
+  <ui filename="grawji.ui" sha256="82762175ea187587dae248604fffe0fbfa801f9c2311bd3595f5c5b1220a8173"/>
+  <ui filename="batch_export.ui" sha256="153e059c409bf68c0a1254c2b0490072e9dd93923381c0bc511c129ddd296298"/>
+  <ui filename="preferences.ui" sha256="966f2d13871db7cf94261d3355d2fafab6a90fb7df4cd66cf8dc41509398ddd7"/>
+  <ui filename="recipe_manager.ui" sha256="9b4a2c6d4d9fbea551b943aded4c707de72a1bc46b80a14b954720b1907e685c"/>
+</cambalache-project>

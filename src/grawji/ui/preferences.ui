@@ -2,6 +2,18 @@
 <interface>
   <requires lib="gtk" version="4.0"/>
   <requires lib="libadwaita" version="1.0"/>
+  <object class="GtkAdjustment" id="glide_speed_adjustment">
+    <property name="lower">200</property>
+    <property name="upper">2000</property>
+    <property name="step-increment">50</property>
+    <property name="page-increment">200</property>
+  </object>
+  <object class="GtkAdjustment" id="jpeg_quality_adjustment">
+    <property name="lower">1</property>
+    <property name="upper">100</property>
+    <property name="step-increment">1</property>
+    <property name="page-increment">10</property>
+  </object>
   <template class="GrawjiPreferencesDialog" parent="AdwPreferencesDialog">
     <child>
       <object class="AdwPreferencesPage">
@@ -52,14 +64,7 @@
                     <property name="draw-value">true</property>
                     <property name="value-pos">left</property>
                     <property name="digits">0</property>
-                    <property name="adjustment">
-                      <object class="GtkAdjustment">
-                        <property name="lower">200</property>
-                        <property name="upper">2000</property>
-                        <property name="step-increment">50</property>
-                        <property name="page-increment">200</property>
-                      </object>
-                    </property>
+                    <property name="adjustment">glide_speed_adjustment</property>
                   </object>
                 </child>
               </object>
@@ -81,14 +86,7 @@
                     <property name="draw-value">true</property>
                     <property name="value-pos">left</property>
                     <property name="digits">0</property>
-                    <property name="adjustment">
-                      <object class="GtkAdjustment">
-                        <property name="lower">1</property>
-                        <property name="upper">100</property>
-                        <property name="step-increment">1</property>
-                        <property name="page-increment">10</property>
-                      </object>
-                    </property>
+                    <property name="adjustment">jpeg_quality_adjustment</property>
                   </object>
                 </child>
               </object>
