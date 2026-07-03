@@ -6,6 +6,7 @@ import contextlib
 import logging
 import tempfile
 import threading
+from collections.abc import Callable
 from functools import partial
 from importlib import metadata, resources
 from pathlib import Path
@@ -119,11 +120,22 @@ _DEFAULT_SIDEBAR_WIDTH = 240
 _SIDEBAR_COLLAPSED_MAX = 10
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
 _EV_EPSILON = 1e-9
+
+
+def _tone_fmt(step: float) -> Callable[[float], str]:
+    """Value formatter for a tone slider with the given snap step."""
+    if step >= 1:
+        return lambda v: f"{round(v):+d}" if round(v) else "0"
+    return lambda v: f"{v:+g}" if v else "0"
+
+
 # Whether we run inside a Flatpak sandbox, which cannot see a camera that is
 # unplugged and plugged back in until the app restarts.
 _IN_FLATPAK = Path("/.flatpak-info").exists()
 # Zoom is multiplicative.
 _ZOOM_STEP = 1.15
+# Holding a filmstrip arrow longer than this glides instead of stepping.
+_NAV_HOLD_MS = 350
 
 # Preview canvas backgrounds, cycled by the toolbar button (darktable-style).
 _CANVAS_CSS = """
@@ -131,7 +143,7 @@ _CANVAS_CSS = """
 .canvas-gray, .canvas-gray > viewport { background-color: #777777; }
 .canvas-black, .canvas-black > viewport { background-color: #000000; }
 button.thumb {
-    padding: 0;
+    padding: 2px 6px;
     margin-top: 16px;
     margin-bottom: 0;
     transition: margin 120ms ease;
@@ -140,8 +152,8 @@ button.thumb.thumb-selected {
     margin-top: 0;
     margin-bottom: 16px;
 }
-/* Soften the folder tree: dimmer text and a gentler selection. */
-.folder-tree { color: alpha(currentColor, 0.7); }
+/* Soften the folder tree: slightly dimmed text and a gentler selection. */
+.folder-tree { color: alpha(currentColor, 0.85); font-weight: normal; }
 .folder-tree image { opacity: 0.7; }
 .folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
 /* Filmstrip nav buttons: round only the edge facing the window border. */
@@ -269,7 +281,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._init_filmstrip()
 
-        self._foldertree = FolderTree(on_select=self._scan_folder)
+        self._foldertree = FolderTree(
+            on_select=self._scan_folder,
+            bookmarks=self._settings.bookmarks,
+            on_bookmarks_changed=self._on_bookmarks_changed,
+        )
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
 
@@ -315,18 +331,6 @@ class MainWindow(Adw.ApplicationWindow):
                 None,
                 lambda *_a: self._on_manage_recipes(),
                 (),
-            ),
-            (
-                "prev-image",
-                None,
-                lambda *_a: self._filmstrip.select_relative(-1),
-                ["Left"],
-            ),
-            (
-                "next-image",
-                None,
-                lambda *_a: self._filmstrip.select_relative(1),
-                ["Right"],
             ),
             (
                 "zoom-in",
@@ -611,8 +615,8 @@ class MainWindow(Adw.ApplicationWindow):
             color_chrome_blue=_CHROME[self.chrome_blue_row.get_selected()],
             smooth_skin=_CHROME[self.smooth_skin_row.get_selected()],
             exposure=self._exposure_row.get_value(),
-            highlights=int(self._highlights_row.get_value()),
-            shadows=int(self._shadows_row.get_value()),
+            highlights=self._highlights_row.get_value(),
+            shadows=self._shadows_row.get_value(),
             color=int(self._color_row.get_value()),
             sharpness=int(self._sharpness_row.get_value()),
             noise_reduction=int(self._nr_row.get_value()),
@@ -669,37 +673,116 @@ class MainWindow(Adw.ApplicationWindow):
             on_select=self._on_raf_selected,
             on_loading=self._on_thumbs_loading,
         )
+        self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
         self._filmstrip.set_hexpand(True)
         self._prev_button = self._nav_button(
-            "go-previous-symbolic", "Previous image (Left)", -1
+            "go-previous-symbolic", "One image left (hold to scroll)", -1
         )
         self._prev_button.add_css_class("filmstrip-nav-start")
         self._next_button = self._nav_button(
-            "go-next-symbolic", "Next image (Right)", 1
+            "go-next-symbolic", "One image right (hold to scroll)", 1
         )
         self._next_button.add_css_class("filmstrip-nav-end")
         self.filmstrip_slot.append(self._prev_button)
         self.filmstrip_slot.append(self._filmstrip)
         self.filmstrip_slot.append(self._next_button)
+        self._init_nav_keys()
+        adj = self._filmstrip.get_hadjustment()
+        adj.connect("value-changed", lambda *_a: self._update_nav_buttons())
+        adj.connect("changed", lambda *_a: self._update_nav_buttons())
         self._update_nav_buttons()
 
+    def _init_nav_keys(self) -> None:
+        """Bind Left/Right to the same tap/hold scrolling as the arrows."""
+        self._nav_key_hold: int | None = None
+        self._nav_key_dir = 0
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_nav_key_pressed)
+        keys.connect("key-released", self._on_nav_key_released)
+        self.add_controller(keys)
+
+    def _on_nav_key_pressed(
+        self, _controller: Any, keyval: int, _keycode: int, modifiers: Any
+    ) -> bool:
+        """Start the tap/hold cycle for a bare Left/Right key press."""
+        direction = {Gdk.KEY_Left: -1, Gdk.KEY_Right: 1}.get(keyval, 0)
+        modifier_mask = Gtk.accelerator_get_default_mod_mask()
+        if direction == 0 or (modifiers & modifier_mask):
+            return False
+        focus = self.get_focus()
+        if isinstance(focus, Gtk.Editable | Gtk.Text):
+            return False  # keep arrows for text-cursor movement
+        if self._nav_key_dir == direction:
+            return True  # keyboard auto-repeat while held: already handled
+        self._nav_key_dir = direction
+
+        def begin_glide() -> int:
+            self._nav_key_hold = None
+            self._filmstrip.start_glide(direction)
+            return GLib.SOURCE_REMOVE
+
+        self._nav_key_hold = GLib.timeout_add(_NAV_HOLD_MS, begin_glide)
+        return True
+
+    def _on_nav_key_released(
+        self, _controller: Any, keyval: int, _keycode: int, _modifiers: Any
+    ) -> None:
+        """End the cycle: a quick tap steps one card, a hold stops gliding."""
+        direction = {Gdk.KEY_Left: -1, Gdk.KEY_Right: 1}.get(keyval, 0)
+        if direction == 0 or direction != self._nav_key_dir:
+            return
+        self._nav_key_dir = 0
+        if self._nav_key_hold is not None:
+            GLib.source_remove(self._nav_key_hold)
+            self._nav_key_hold = None
+            self._filmstrip.scroll_step(direction)
+        else:
+            self._filmstrip.stop_glide()
+
     def _nav_button(self, icon: str, tooltip: str, delta: int) -> Gtk.Button:
-        """Create a flat, full-height filmstrip navigation button."""
+        """Create a filmstrip scroll button: tap one card, hold to glide."""
         button = Gtk.Button(icon_name=icon, vexpand=True)
         button.add_css_class("flat")
         button.set_tooltip_text(tooltip)
-        button.connect(
-            "clicked", lambda *_a: self._filmstrip.select_relative(delta)
-        )
+        state: dict[str, int | None] = {"hold": None}
+
+        def begin_glide() -> int:
+            state["hold"] = None
+            self._filmstrip.start_glide(delta)
+            return GLib.SOURCE_REMOVE
+
+        def on_pressed(
+            gesture: Gtk.GestureClick, _n: int, _x: float, _y: float
+        ) -> None:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            state["hold"] = GLib.timeout_add(_NAV_HOLD_MS, begin_glide)
+
+        def settle(*, step: bool) -> None:
+            if state["hold"] is not None:
+                GLib.source_remove(state["hold"])
+                state["hold"] = None
+                if step:  # released before the threshold: a tap, one card
+                    self._filmstrip.scroll_step(delta)
+            else:
+                self._filmstrip.stop_glide()
+
+        gesture = Gtk.GestureClick()
+        gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        gesture.connect("pressed", on_pressed)
+        gesture.connect("released", lambda *_a: settle(step=True))
+        gesture.connect("cancel", lambda *_a: settle(step=False))
+        button.add_controller(gesture)
         return button
 
     def _update_nav_buttons(self) -> None:
-        """Enable each navigation button only when a step is possible."""
-        count = len(self._filmstrip.paths)
-        index = self._filmstrip.current_index
-        has_next = index < count - 1 if index >= 0 else count > 0
-        self._prev_button.set_sensitive(index > 0)
-        self._next_button.set_sensitive(has_next)
+        """Enable each arrow only when the strip can scroll that way."""
+        adj = self._filmstrip.get_hadjustment()
+        value = adj.get_value()
+        self._prev_button.set_sensitive(value > adj.get_lower())
+        self._next_button.set_sensitive(
+            value + adj.get_page_size() < adj.get_upper()
+        )
 
     def _on_raf_selected(self, raf_path: str) -> None:
         """React to the click instantly; load the RAF on the next idle tick.
@@ -828,6 +911,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._caps = caps
         self._highlights_row.set_range(caps.tone_min, caps.tone_max)
         self._shadows_row.set_range(caps.tone_min, caps.tone_max)
+        # XProcessor5 bodies honour 0.5 tone steps (verified on the X-E5).
+        tone_step = 0.5 if caps.tone_half_step else 1.0
+        for row in (self._highlights_row, self._shadows_row):
+            row.set_step(tone_step, fmt=_tone_fmt(tone_step))
         self.chrome_row.set_visible(caps.has_color_chrome)
         self._clarity_row.set_visible(caps.has_clarity)
         self.chrome_blue_row.set_visible(caps.has_color_chrome_blue)
@@ -1584,9 +1671,15 @@ class MainWindow(Adw.ApplicationWindow):
         )
         dialog.present(self)
 
+    def _on_bookmarks_changed(self, bookmarks: list[str]) -> None:
+        """Persist the folder-tree bookmarks."""
+        self._settings.bookmarks = bookmarks
+        self._save_settings()
+
     def _on_settings_changed(self) -> None:
         """Persist settings and apply any that affect the live UI."""
         self._wb_grid.set_colored(self._settings.wb_grid_tint)
+        self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
         self._apply_color_scheme()
         self._save_settings()
 

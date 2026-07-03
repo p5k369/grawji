@@ -28,8 +28,9 @@ class Recipe:
             Only honoured on bodies whose profile is long enough (offset
             609); ignored on older, shorter profiles.
         exposure: Exposure compensation in EV, -2.0 to +3.0 (1/3 steps).
-        highlights: Highlight tone, -2 to +4.
-        shadows: Shadow tone, -2 to +4.
+        highlights: Highlight tone, -2 to +4. XProcessor5 bodies honour
+            0.5 steps, older bodies integer steps only.
+        shadows: Shadow tone, -2 to +4 (0.5 steps on XProcessor5).
         color: Colour / saturation, -4 to +4.
         sharpness: Sharpness, -4 to +4.
         noise_reduction: Noise reduction, -4 to +4.
@@ -53,8 +54,8 @@ class Recipe:
     color_chrome: str = "Off"
     color_chrome_blue: str = "Off"
     exposure: float = 0.0
-    highlights: int = 0
-    shadows: int = 0
+    highlights: float = 0.0
+    shadows: float = 0.0
     color: int = 0
     sharpness: int = 0
     noise_reduction: int = 0

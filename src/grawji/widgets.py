@@ -99,6 +99,21 @@ class SliderRow(Adw.ActionRow):
         self._adj.set_upper(upper)
         self._update_label()
 
+    def set_step(self, step: float, fmt: Formatter | None = None) -> None:
+        """Change the snap increment (and optionally the formatter).
+
+        The current value re-snaps to the new increment. Used to widen
+        or narrow a row's granularity per camera body, e.g. half-step
+        tone on XProcessor5 bodies.
+        """
+        self._step = step
+        self._adj.set_step_increment(step)
+        self._adj.set_page_increment(step)
+        if fmt is not None:
+            self._fmt = fmt
+        self.set_value(self._adj.get_value())
+        self._update_label()
+
     @property
     def value_chars(self) -> int:
         """Character width its own value text needs."""

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 
@@ -46,6 +46,10 @@ class Settings:
             are skipped so an interrupted batch can be resumed cheaply.
         wb_grid_tint: When True, tint each white-balance shift grid cell
             with the colour it nudges the image toward.
+        nav_glide_speed: Filmstrip scroll speed while an arrow is held,
+            in pixels per second.
+        bookmarks: Bookmarked folder paths, shown at the top of the
+            folder tree in the order they were added.
         color_scheme: UI theme: "default" follows the desktop, "light" or
             "dark" forces that scheme.
         show_histogram: Whether the histogram overlay is shown on the
@@ -61,6 +65,8 @@ class Settings:
     jpeg_quality: int = 95
     batch_overwrite: bool = False
     wb_grid_tint: bool = True
+    nav_glide_speed: int = 600
+    bookmarks: list[str] = field(default_factory=list)
     color_scheme: str = "default"
     show_histogram: bool = False
 
