@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sys
 
-from grawji.app import GrawjiApp
 from grawji.logsetup import configure_logging
+from grawji.views.app import GrawjiApp
 
 _VERBOSE_FLAGS = ("--verbose", "-v")
 

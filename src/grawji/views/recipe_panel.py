@@ -25,7 +25,7 @@ from rawji.fuji_enums import (
 
 from grawji.capabilities import FILM_SIMULATIONS, Capabilities
 from grawji.recipe import Recipe
-from grawji.widgets import SliderRow, WBShiftGrid
+from grawji.views.widgets import SliderRow, WBShiftGrid
 
 _FILM_SIMULATIONS = list(FILM_SIMULATIONS)
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]

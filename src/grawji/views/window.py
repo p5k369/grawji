@@ -18,29 +18,30 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import camera_info, dialogs, imagemeta, raf
+from grawji import camera_info, raf
 from grawji.capabilities import capabilities_for, read_iopcode
 from grawji.core import (
     CameraSession,
     ForeignRafError,
     recipe_from_profile,
 )
-from grawji.export import BatchController, export_basename, write_jpeg
-from grawji.filmstrip import FilmStrip, FilmStripNav
-from grawji.foldertree import FolderTree
-from grawji.navigator import Navigator
-from grawji.preferences import PreferencesDialog
 from grawji.preview import CameraWorker
-from grawji.preview_view import PreviewView, oriented_pixbuf
 from grawji.recipe import Recipe
-from grawji.recipe_manager import RecipeLibraryController
-from grawji.recipe_panel import RecipePanel
 from grawji.recipes import RecipeLibrary, recipes_path
 from grawji.settings import (
     load_settings,
     save_settings,
     settings_path,
 )
+from grawji.views import dialogs, imagemeta
+from grawji.views.export import BatchController, export_basename, write_jpeg
+from grawji.views.filmstrip import FilmStrip, FilmStripNav
+from grawji.views.foldertree import FolderTree
+from grawji.views.navigator import Navigator
+from grawji.views.preferences import PreferencesDialog
+from grawji.views.preview_view import PreviewView, oriented_pixbuf
+from grawji.views.recipe_manager import RecipeLibraryController
+from grawji.views.recipe_panel import RecipePanel
 
 _CAMERA_POLL_SECONDS = 3
 # Debounce a selection's load so fast scrubbing does not spawn a decode per

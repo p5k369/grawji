@@ -16,8 +16,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
-from grawji.recipe_panel import RecipePanel
 from grawji.recipes import RecipeLibrary
+from grawji.views.recipe_panel import RecipePanel
 
 _UI = (
     resources.files("grawji")

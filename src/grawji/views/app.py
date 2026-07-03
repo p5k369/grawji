@@ -9,7 +9,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw
 
-from grawji.window import MainWindow
+from grawji.views.window import MainWindow
 
 
 class GrawjiApp(Adw.Application):
