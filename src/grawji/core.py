@@ -15,12 +15,15 @@ from __future__ import annotations
 import contextlib
 import struct
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import rawji
+import usb.core
 from rawji.fuji_enums import (
+    FUJIFILM_USB_VENDOR_ID,
     ChromeEffect,
     ColorSpace,
     GrainEffect,
@@ -88,6 +91,26 @@ _CLARITY_LIMIT = 5
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
+
+# How long a USB device reset needs before the camera answers again.
+_USB_RESET_SETTLE_S = 2.0
+
+
+def _reset_camera_usb() -> None:
+    """Reset the camera's USB device to recover a wedged interface.
+
+    A crashed session can leave the camera's PTP interface unclaimable:
+    claiming fails with "Entity not found" or writes time out,
+    even though the device still enumerates.
+    A device-level USB reset re-enumerates it into a claimable state again,
+    so open() tries one reset before giving up.
+    Any failure here is swallowed, the retry's connect reports the error.
+    """
+    with contextlib.suppress(Exception):
+        device = usb.core.find(idVendor=FUJIFILM_USB_VENDOR_ID)
+        if device is not None:
+            device.reset()
+            time.sleep(_USB_RESET_SETTLE_S)
 
 
 class CameraError(RuntimeError):
@@ -207,15 +230,16 @@ def _grain_size_name(code: int, fallback: str) -> str:
     return fallback
 
 
-def recipe_changes(recipe: Recipe) -> dict[str, int]:
+def recipe_changes(recipe: Recipe) -> dict[str, float]:
     """Map a recipe to rawji profile parameter values (validated).
 
     Args:
         recipe: The recipe to translate.
 
     Returns:
-        A dict of rawji parameter name -> integer value. Tone values are
-        the raw user values here; encoding happens in apply_recipe().
+        A dict of rawji parameter name -> value. Tone values are the raw
+        user values here (possibly half steps); encoding to the integer
+        profile representation happens in apply_recipe().
 
     Raises:
         ValueError: If a name is unknown or a tone value is out of range.
@@ -301,7 +325,13 @@ def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
                 continue
             msg = f"profile too short ({len(base)} bytes) for {name}"
             raise ValueError(msg)
-        encoded = encode_tone_value(value) if name in _TONE_PARAMS else value
+        # Tone values may be half steps (0.5 -> raw 5), so round after
+        # the *10 encoding rather than truncating.
+        encoded = (
+            round(encode_tone_value(value))
+            if name in _TONE_PARAMS
+            else int(value)
+        )
         if encoded < 0:
             encoded = (1 << 32) + encoded
         struct.pack_into("<I", out, offset, encoded)
@@ -314,6 +344,15 @@ def _enum_name(enum_cls: Any, value: int, fallback: str) -> str:
         return str(enum_cls(value).name)
     except ValueError:
         return fallback
+
+
+def _decode_half_tone(raw: int) -> float:
+    """Decode a *10 tone raw value keeping 0.5 steps.
+
+    rawji's decode_tone_value floor-divides and destroys halves
+    (raw 5 -> 0 instead of 0.5); this snaps to the nearest half.
+    """
+    return round(raw / 5) / 2
 
 
 def recipe_from_profile(base: bytes) -> Recipe:
@@ -368,8 +407,8 @@ def recipe_from_profile(base: bytes) -> Recipe:
             ChromeEffect, signed("DigitalTeleConv", 1), defaults.smooth_skin
         ),
         exposure=int_to_ev(signed("ExposureBias")),
-        highlights=decode_tone_value(signed("HighlightTone")),
-        shadows=decode_tone_value(signed("ShadowTone")),
+        highlights=_decode_half_tone(signed("HighlightTone")),
+        shadows=_decode_half_tone(signed("ShadowTone")),
         color=decode_tone_value(signed("Color")),
         sharpness=decode_tone_value(signed("Sharpness")),
         noise_reduction=decode_noise_reduction(
@@ -398,6 +437,7 @@ class CameraSession:
         *,
         camera_factory: Callable[[], Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
+        usb_reset: Callable[[], None] | None = None,
     ) -> None:
         """Create a session.
 
@@ -405,9 +445,15 @@ class CameraSession:
             camera_factory: Callable returning a fresh camera object.
                 Defaults to rawji.FujiCamera. Injectable for tests.
             timeout: wait_for_result timeout in seconds.
+            usb_reset: Recovery hook run when a connect fails, before the
+                one retry. Defaults to a USB device reset, injectable so
+                tests never reset real hardware.
         """
         self._camera_factory: Callable[[], Any] = (
             camera_factory or rawji.FujiCamera
+        )
+        self._usb_reset = (
+            usb_reset if usb_reset is not None else _reset_camera_usb
         )
         self._timeout = timeout
         self._lock = threading.Lock()
@@ -447,22 +493,37 @@ class CameraSession:
         """
         with self._lock:
             self._close_locked()
-            camera = self._camera_factory()
             try:
-                if not camera.connect():
-                    raise CameraError("could not connect to camera")
-                camera.send_raf(str(raf_path))
-                base: bytes = camera.get_profile()
-            except Exception as e:
-                self._safe_disconnect(camera)
-                if "0x2002" in str(e):
-                    raise ForeignRafError(
-                        "RAF was shot by a different camera body (PTP 0x2002)"
-                    ) from e
-                raise
+                camera, base = self._open_attempt(raf_path)
+            except ForeignRafError:
+                raise  # the camera is fine; a reset would not help
+            except Exception:
+                # A wedged USB interface (failed claim, bulk-write
+                # timeout) often recovers with one device reset; retry
+                # the whole open once after it. Opening is safe to retry
+                # - no conversion is in flight yet.
+                self._usb_reset()
+                camera, base = self._open_attempt(raf_path)
             self._camera = camera
             self._base_profile = base
             self._raf_path = Path(raf_path)
+
+    def _open_attempt(self, raf_path: str | Path) -> tuple[Any, bytes]:
+        """Run one connect / send_raf / get_profile sequence."""
+        camera = self._camera_factory()
+        try:
+            if not camera.connect():
+                raise CameraError("could not connect to camera")
+            camera.send_raf(str(raf_path))
+            base: bytes = camera.get_profile()
+        except Exception as e:
+            self._safe_disconnect(camera)
+            if "0x2002" in str(e):
+                raise ForeignRafError(
+                    "RAF was shot by a different camera body (PTP 0x2002)"
+                ) from e
+            raise
+        return camera, base
 
     def render(self, recipe: Recipe, *, full_resolution: bool) -> bytes:
         """Apply a recipe and render the open RAF (fast; call often).

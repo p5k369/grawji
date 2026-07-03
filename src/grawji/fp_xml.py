@@ -177,6 +177,13 @@ def parse_fp(text: str) -> Recipe:
         except ValueError:
             return default
 
+    def tone(tag: str) -> float:
+        """Parse a tone value, tolerating the 0.5 steps newer bodies use."""
+        try:
+            return float(fields.get(tag, ""))
+        except ValueError:
+            return 0.0
+
     defaults = Recipe()
     temp_token = fields.get("WBColorTemp", "").rstrip("Kk")  # "<kelvin>K".
     try:
@@ -205,8 +212,8 @@ def parse_fp(text: str) -> Recipe:
             fields.get("ColorChromeBlue", ""), defaults.color_chrome_blue
         ),
         exposure=_exposure_ev(fields.get("ExposureBias", "0")),
-        highlights=integer("HighlightTone"),
-        shadows=integer("ShadowTone"),
+        highlights=tone("HighlightTone"),
+        shadows=tone("ShadowTone"),
         color=integer("Color"),
         sharpness=integer("Sharpness"),
         # X RAW Studio misspells the tag "NoisReduction", keep it verbatim.
@@ -296,8 +303,9 @@ def serialize_fp(
         ("WBShiftR", str(recipe.wb_shift_r)),
         ("WBShiftB", str(recipe.wb_shift_b)),
         ("WBColorTemp", f"{recipe.color_temp}K" if is_temp else "0K"),
-        ("HighlightTone", str(recipe.highlights)),
-        ("ShadowTone", str(recipe.shadows)),
+        # :g keeps integer tones as "2" (fp-compatible) and halves as "0.5".
+        ("HighlightTone", f"{recipe.highlights:g}"),
+        ("ShadowTone", f"{recipe.shadows:g}"),
         ("Color", str(recipe.color)),
         ("Sharpness", str(recipe.sharpness)),
         ("NoisReduction", str(recipe.noise_reduction)),  # sic, see parse_fp.

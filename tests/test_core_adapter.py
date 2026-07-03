@@ -99,8 +99,12 @@ class FakeCamera:
 
 
 def session_for(camera):
-    """Build a CameraSession whose factory always returns ``camera``."""
-    return CameraSession(camera_factory=lambda: camera)
+    """Build a CameraSession whose factory always returns ``camera``.
+
+    The USB-reset recovery hook is stubbed out so a failure-path test can
+    never reset real hardware on the developer's machine.
+    """
+    return CameraSession(camera_factory=lambda: camera, usb_reset=lambda: None)
 
 
 def test_rmw_patch_sets_film_sim_byte():
@@ -190,6 +194,21 @@ def test_apply_recipe_encodes_tone_values():
     assert _u32(patched, OFF_HIGHLIGHTS) == encode_tone_value(2)
     expected_color = (1 << 32) + encode_tone_value(-4)
     assert _u32(patched, OFF_COLOR) == expected_color
+
+
+def test_apply_recipe_encodes_half_step_tones():
+    """Half-step tones encode to raw 5s (X-E5-verified 0.5 granularity)."""
+    patched = apply_recipe(bytes(608), Recipe(highlights=0.5, shadows=-1.5))
+    assert _u32(patched, OFF_HIGHLIGHTS) == 5
+    assert _u32(patched, 577) == (1 << 32) - 15  # ShadowTone @577
+
+
+def test_half_step_tones_round_trip():
+    """recipe_from_profile keeps 0.5 steps (rawji's decoder floors them)."""
+    recipe = Recipe(highlights=0.5, shadows=-1.5)
+    decoded = recipe_from_profile(apply_recipe(bytes(608), recipe))
+    assert decoded.highlights == 0.5
+    assert decoded.shadows == -1.5
 
 
 def test_apply_recipe_validates_range():
@@ -432,6 +451,51 @@ def test_connect_failure_raises_camera_error():
     with pytest.raises(CameraError):
         session.open("/tmp/shot.RAF")
     assert not session.is_open
+
+
+def test_connect_recovers_via_usb_reset():
+    """A failed connect triggers one USB reset, then a fresh retry."""
+    cameras = [FakeCamera(connect_ok=False), FakeCamera()]
+    resets: list[bool] = []
+    session = CameraSession(
+        camera_factory=lambda: cameras.pop(0),
+        usb_reset=lambda: resets.append(True),
+    )
+    session.open("/tmp/shot.RAF")
+    assert resets == [True]
+    assert session.is_open
+
+
+class _WriteTimeoutCamera(FakeCamera):
+    """A camera whose RAF upload dies like a wedged USB interface."""
+
+    def send_raf(self, filepath):
+        raise RuntimeError("USB write failed: [Errno 110] Operation timed out")
+
+
+def test_open_write_timeout_recovers_via_usb_reset():
+    """A bulk-write timeout during open also gets the reset-and-retry."""
+    cameras = [_WriteTimeoutCamera(), FakeCamera()]
+    resets: list[bool] = []
+    session = CameraSession(
+        camera_factory=lambda: cameras.pop(0),
+        usb_reset=lambda: resets.append(True),
+    )
+    session.open("/tmp/shot.RAF")
+    assert resets == [True]
+    assert session.is_open
+
+
+def test_foreign_raf_does_not_trigger_usb_reset():
+    """A 0x2002 foreign RAF fails fast: the camera is fine, no reset."""
+    resets: list[bool] = []
+    session = CameraSession(
+        camera_factory=lambda: FakeCamera(fail_on="get_profile"),
+        usb_reset=lambda: resets.append(True),
+    )
+    with pytest.raises(ForeignRafError):
+        session.open("/tmp/shot.RAF")
+    assert resets == []
 
 
 def test_foreign_raf_raises_and_cleans_up():

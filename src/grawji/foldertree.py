@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +25,14 @@ class _FolderItem(GObject.Object):
 
     name = GObject.Property(type=str, default="")
 
-    def __init__(self, file: Gio.File, name: str) -> None:
+    def __init__(
+        self, file: Gio.File, name: str, *, is_bookmark: bool = False
+    ) -> None:
         """Wrap a GFile with the label to show for it."""
         super().__init__()
         self.file = file
         self.name = name
+        self.is_bookmark = is_bookmark
 
 
 class FolderTree(Gtk.ScrolledWindow):
@@ -38,14 +42,25 @@ class FolderTree(Gtk.ScrolledWindow):
     and the filesystem root so cards mounted outside home are reachable.
     """
 
-    def __init__(self, *, on_select: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        *,
+        on_select: Callable[[str], None],
+        bookmarks: list[str] | None = None,
+        on_bookmarks_changed: Callable[[list[str]], None] | None = None,
+    ) -> None:
         """Create the tree.
 
         Args:
             on_select: Called with a folder path when one is selected.
+            bookmarks: Folder paths pinned above the filesystem roots.
+            on_bookmarks_changed: Called with the new bookmark list after
+                the user adds or removes one, so it can be persisted.
         """
         super().__init__()
         self._on_select = on_select
+        self._bookmarks = list(bookmarks or [])
+        self._on_bookmarks_changed = on_bookmarks_changed
         self._launcher: Any = None
         self.add_css_class("folder-tree")
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -56,14 +71,18 @@ class FolderTree(Gtk.ScrolledWindow):
         )
         self._name_sorter.set_ignore_case(True)
 
-        roots = Gio.ListStore.new(_FolderItem)
-        roots.append(
+        self._roots = Gio.ListStore.new(_FolderItem)
+        for path in self._bookmarks:
+            self._roots.append(self._bookmark_item(path))
+        self._roots.append(
             _FolderItem(Gio.File.new_for_path(str(Path.home())), "Home")
         )
-        roots.append(_FolderItem(Gio.File.new_for_path("/"), "Filesystem"))
+        self._roots.append(
+            _FolderItem(Gio.File.new_for_path("/"), "Filesystem")
+        )
 
         self._tree = Gtk.TreeListModel.new(
-            roots,
+            self._roots,
             passthrough=False,
             autoexpand=False,
             create_func=self._children_of,
@@ -208,36 +227,94 @@ class FolderTree(Gtk.ScrolledWindow):
         row = item.get_item()
         if row is None:
             return
-        folder = row.get_item().file
-        button = Gtk.Button(label="Open file browser here")
-        button.add_css_class("flat")
-        popover = Gtk.Popover()
-        popover.set_child(button)
+        folder_item = row.get_item()
+        folder = folder_item.file
+        path = folder.get_path() or ""
+
+        actions = Gio.SimpleActionGroup()
+
+        def add(name: str, label: str, callback: Callable[[], None]) -> None:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda *_a: callback())
+            actions.add_action(action)
+            menu.append(label, f"ctx.{name}")
+
+        menu = Gio.Menu()
+        if folder_item.is_bookmark:
+            add(
+                "remove-bookmark",
+                "Remove Bookmark",
+                partial(self._remove_bookmark, path),
+            )
+        elif path and path not in self._bookmarks:
+            add(
+                "add-bookmark",
+                "Add Bookmark",
+                partial(self._add_bookmark, path),
+            )
+        add(
+            "open-files",
+            "Open File Browser Here",
+            partial(self._open_file_manager, folder),
+        )
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.insert_action_group("ctx", actions)
         popover.set_has_arrow(False)
         popover.set_parent(gesture.get_widget())
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
-        button.connect("clicked", self._on_open_file_manager, folder, popover)
         popover.popup()
 
-    def _on_open_file_manager(
-        self, _button: Gtk.Button, folder: Gio.File, popover: Gtk.Popover
-    ) -> None:
+    def _bookmark_item(self, path: str) -> _FolderItem:
+        """Build the pinned tree item for a bookmarked path."""
+        name = Path(path).name or path
+        return _FolderItem(Gio.File.new_for_path(path), name, is_bookmark=True)
+
+    def _add_bookmark(self, path: str) -> None:
+        """Pin path above the filesystem roots and persist the list."""
+        if path in self._bookmarks:
+            return
+        self._roots.insert(len(self._bookmarks), self._bookmark_item(path))
+        self._bookmarks.append(path)
+        self._notify_bookmarks()
+
+    def _remove_bookmark(self, path: str) -> None:
+        """Unpin path and persist the list."""
+        if path not in self._bookmarks:
+            return
+        index = self._bookmarks.index(path)
+        self._roots.remove(index)
+        self._bookmarks.remove(path)
+        self._notify_bookmarks()
+
+    def _notify_bookmarks(self) -> None:
+        """Hand the current bookmark list to the persistence callback."""
+        if self._on_bookmarks_changed is not None:
+            self._on_bookmarks_changed(list(self._bookmarks))
+
+    def _open_file_manager(self, folder: Gio.File) -> None:
         """Open the folder in the system file manager (via the portal)."""
-        popover.popdown()
         # Held on the instance so the async launch is not GC'd mid-flight.
         self._launcher = Gtk.FileLauncher.new(folder)
         self._launcher.launch(self.get_root(), None, None)
 
     @staticmethod
     def _on_bind(_factory: Any, item: Gtk.ListItem) -> None:
-        """Bind the row's folder name and wire its expander."""
+        """Bind the row's folder name, icon and expander."""
         row = item.get_item()
         expander = item.get_child()
         expander.set_list_row(row)
-        label = expander.get_child().get_last_child()
-        label.set_label(row.get_item().name)
+        folder_item = row.get_item()
+        box = expander.get_child()
+        icon = box.get_first_child()
+        icon.set_from_icon_name(
+            "user-bookmarks-symbolic"
+            if folder_item.is_bookmark
+            else "folder-symbolic"
+        )
+        box.get_last_child().set_label(folder_item.name)
 
     def _on_selected(self, selection: Gtk.SingleSelection, _p: Any) -> None:
         """Notify the listener when a folder is selected."""

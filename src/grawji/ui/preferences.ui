@@ -23,6 +23,12 @@
                 </property>
               </object>
             </child>
+            <child>
+              <object class="AdwSwitchRow" id="wb_grid_row">
+                <property name="title">Tint the white-balance shift grid</property>
+                <property name="subtitle">Colour each cell with the shift it applies</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>
@@ -35,9 +41,27 @@
               </object>
             </child>
             <child>
-              <object class="AdwSwitchRow" id="wb_grid_row">
-                <property name="title">Tint the white-balance shift grid</property>
-                <property name="subtitle">Colour each cell with the shift it applies</property>
+              <object class="AdwActionRow">
+                <property name="title">Filmstrip scroll speed</property>
+                <property name="subtitle">Pixels per second while holding an arrow</property>
+                <child type="suffix">
+                  <object class="GtkScale" id="glide_speed_scale">
+                    <property name="valign">center</property>
+                    <property name="hexpand">true</property>
+                    <property name="width-request">200</property>
+                    <property name="draw-value">true</property>
+                    <property name="value-pos">left</property>
+                    <property name="digits">0</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">200</property>
+                        <property name="upper">2000</property>
+                        <property name="step-increment">50</property>
+                        <property name="page-increment">200</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
               </object>
             </child>
           </object>
