@@ -270,6 +270,14 @@ class FilmStrip(Gtk.ScrolledWindow):
         width = self._buttons[0].get_width() if self._buttons else 0
         return (width or self._thumb_height * 1.5) + 6  # + box spacing
 
+    def select_path(self, path: str) -> bool:
+        """Select the thumbnail for path. False if it is not in the strip."""
+        if path not in self._paths:
+            return False
+        self._set_current(self._paths.index(path))
+        self._on_select(path)
+        return True
+
     def select_relative(self, delta: int) -> None:
         """Select the image delta positions away (for keyboard nav)."""
         if not self._paths:
