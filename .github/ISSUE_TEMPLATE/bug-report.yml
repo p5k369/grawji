@@ -1,0 +1,53 @@
+name: Bug report
+description: Something broke or behaves wrongly.
+labels: ["bug"]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Camera body
+      placeholder: FUJIFILM X-T5 (or "no camera involved")
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is grawji installed?
+      options:
+        - Flatpak
+        - From source
+    validations:
+      required: true
+  - type: checkboxes
+    id: mode
+    attributes:
+      label: Camera connection
+      options:
+        - label: >
+            The camera was in "USB RAW CONV./BACKUP RESTORE" mode
+            (SET UP - CONNECTION SETTING - USB MODE)
+        - label: The RAF files were shot by this same camera body
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open folder ...
+        2. Select image ...
+        3. ...
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: >
+        Run grawji from a terminal with `--verbose`
+        (`flatpak run io.github.p5k369.grawji --verbose` or
+        `python -m grawji --verbose`) and paste the output around the
+        failure.
+      render: text

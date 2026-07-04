@@ -1,0 +1,59 @@
+name: Camera body report
+description: >
+  Report how grawji behaves with your camera body - especially if grawji
+  told you it is not in the capability table yet, or a control is missing
+  or has no effect.
+title: "[body] "
+labels: ["body-report"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thank you! grawji's per-body feature table is only as good as the
+        bodies people test it on. Every report here makes the table more trustworthy.
+  - type: input
+    id: model
+    attributes:
+      label: Camera body
+      description: Exactly as the camera reports it (shown in grawji's Info tab).
+      placeholder: FUJIFILM X-T5
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: SET UP menu, or hold DISP/BACK while powering on.
+      placeholder: "3.02"
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: What happened?
+      options:
+        - grawji said my body is not in the capability table
+        - A control is shown but changing it does nothing in the render
+        - A control I expected is missing
+        - Everything works - consider this body confirmed
+        - Something else (describe below)
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: >
+        Which controls were shown or missing, and which had a visible
+        effect in the preview. For "does nothing": name the control and
+        the values you tried.
+    validations:
+      required: true
+  - type: textarea
+    id: verify_output
+    attributes:
+      label: verify_offsets.py output (optional, gold standard)
+      description: >
+        If you can run from a source checkout with your camera connected -
+        see CONTRIBUTING.md - paste the output of
+        `python scripts/verify_offsets.py YOUR.RAF` here. This is the
+        hardware proof that gets a body marked verified.
+      render: text

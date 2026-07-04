@@ -421,7 +421,16 @@ class MainWindow(Adw.ApplicationWindow):
             "showing the safe baseline. Please report your body!"
         )
         toast.set_timeout(0)  # stays until dismissed, it is actionable
+        toast.set_button_label("Report…")
+        toast.connect("button-clicked", self._on_report_body)
         self.toast_overlay.add_toast(toast)
+
+    def _on_report_body(self, _toast: Any) -> None:
+        """Open the new-body issue template in the browser."""
+        Gtk.UriLauncher.new(
+            "https://github.com/p5k369/grawji/issues/new"
+            "?template=new-body-report.yml"
+        ).launch(self, None, None)
 
     def open_raf(self, path: str) -> None:
         """Open a RAF from outside (file manager or command line).
