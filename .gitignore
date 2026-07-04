@@ -28,8 +28,7 @@ dist/
 # Compiled GResource bundles / generated UI
 src/grawji/ui/*.gresource
 
-# Cambalache design project
-*.cmb
+# Cambalache autosave backups
 *.cmb.bak
 
 # Flatpak build artifacts
