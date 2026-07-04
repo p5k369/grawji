@@ -4,12 +4,42 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import re
 import sys
 import tomllib
 from pathlib import Path
 
 METAINFO = Path("data/io.github.p5k369.grawji.metainfo.xml")
+
+
+def _release_errors(release_tag: str) -> list[str]:
+    """Return the problems that make the metainfo unfit to release."""
+    text = METAINFO.read_text()
+    match = re.search(r"<release\b[^>]*>", text)
+    if match is None:
+        return ["metainfo has no <release> entry"]
+    entry = match.group(0)
+    errors = []
+    if 'type="development"' in entry:
+        errors.append(
+            'metainfo release is marked type="development"; '
+            "remove the marker to publish"
+        )
+    today = datetime.datetime.now(tz=datetime.UTC).date()
+    date = re.search(r'date="([^"]+)"', entry)
+    try:
+        found = datetime.date.fromisoformat(date.group(1)) if date else None
+    except ValueError:
+        found = None
+    # A day of slack absorbs the releaser's timezone vs the runner's UTC.
+    if found is None or abs((found - today).days) > 1:
+        errors.append(
+            f"metainfo release date is "
+            f"{date.group(1) if date else 'missing'}, but {release_tag} "
+            f"is being released today ({today}); update the date"
+        )
+    return errors
 
 
 def main() -> int:
@@ -32,6 +62,13 @@ def main() -> int:
     if len(set(versions.values())) != 1:
         print("version mismatch: bump them together", file=sys.stderr)
         return 1
+
+    if args.tag is not None:
+        errors = _release_errors(args.tag)
+        for error in errors:
+            print(error, file=sys.stderr)
+        if errors:
+            return 1
     return 0
 
 
