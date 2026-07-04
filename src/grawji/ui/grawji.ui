@@ -89,6 +89,9 @@
           <object class="GtkBox">
             <property name="orientation">vertical</property>
             <child>
+              <object class="AdwToastOverlay" id="toast_overlay">
+                <property name="vexpand">true</property>
+                <property name="child">
               <object class="GtkPaned" id="main_paned">
                 <property name="vexpand">true</property>
                 <property name="resize-start-child">false</property>
@@ -193,6 +196,8 @@
                       <object class="GrawjiRecipePanel" id="recipe_panel"/>
                     </property>
                   </object>
+                </property>
+              </object>
                 </property>
               </object>
             </child>

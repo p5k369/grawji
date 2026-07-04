@@ -22,6 +22,7 @@ __all__ = [
     "FILM_SIMULATIONS",
     "Capabilities",
     "capabilities_for",
+    "is_known_model",
     "is_xprocessor5",
     "read_iopcode",
 ]
@@ -179,6 +180,16 @@ def _normalize(model: str) -> str:
     return "".join(
         ch for ch in model.upper().replace("FUJIFILM", "") if ch.isalnum()
     )
+
+
+def is_known_model(model: str | None) -> bool:
+    """Whether the model has a row in the capability table.
+
+    False means capabilities_for falls back to the conservative
+    baseline. Either the model tag was unreadable or the body is
+    newer than the table.
+    """
+    return model is not None and _normalize(model) in _MODEL_CAPABILITIES
 
 
 def capabilities_for(profile: bytes, model: str | None = None) -> Capabilities:

@@ -23,6 +23,15 @@
     </ul>
   </description>
   <launchable type="desktop-id">io.github.p5k369.grawji.desktop</launchable>
+  <provides>
+    <mediatype>image/x-fuji-raf</mediatype>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Tuning a recipe with a live preview from the camera</caption>
+      <image>https://raw.githubusercontent.com/p5k369/grawji/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
   <url type="homepage">https://github.com/p5k369/grawji</url>
   <url type="bugtracker">https://github.com/p5k369/grawji/issues</url>
   <developer id="io.github.p5k369">
