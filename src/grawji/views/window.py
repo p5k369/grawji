@@ -19,7 +19,11 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from grawji import camera_info, raf
-from grawji.capabilities import capabilities_for, read_iopcode
+from grawji.capabilities import (
+    capabilities_for,
+    is_known_model,
+    read_iopcode,
+)
 from grawji.core import (
     CameraSession,
     ForeignRafError,
@@ -100,6 +104,7 @@ class MainWindow(Adw.ApplicationWindow):
     exif_group = Gtk.Template.Child()
     filmstrip_slot = Gtk.Template.Child()
     foldertree_slot = Gtk.Template.Child()
+    toast_overlay = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, the composite widgets and the controllers."""
@@ -111,6 +116,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._raf_path: Path | None = None
         self._current_folder: str | None = None
+        self._notified_models: set[str] = set()
         self._exif_rows: list[Any] = []
         self._render_pending_id = 0
         self._load_pending_id = 0
@@ -385,6 +391,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.recipe_panel.apply_capabilities(
                 capabilities_for(profile, model=model)
             )
+            self._notify_unverified(model)
         if profile is not None and self._settings.load_recipe_from_image:
             self.recipe_panel.set_active(
                 recipe_from_profile(profile), "From image"
@@ -396,6 +403,39 @@ class MainWindow(Adw.ApplicationWindow):
                 self._set_busy(busy=False, status="Ready.")
                 return
         self._render_preview()
+
+    def _notify_unverified(self, model: str | None) -> None:
+        """Toast once per session when the body is not in the table.
+
+        An unknown model gets the conservative baseline, so controls the
+        body may well support stay hidden. Say so instead of looking
+        broken, and invite the report that gets the body added.
+        """
+        if model is None or is_known_model(model):
+            return
+        if model in self._notified_models:
+            return
+        self._notified_models.add(model)
+        toast = Adw.Toast.new(
+            f"The {model} is not in grawji's capability table yet - "
+            "showing the safe baseline. Please report your body!"
+        )
+        toast.set_timeout(0)  # stays until dismissed, it is actionable
+        self.toast_overlay.add_toast(toast)
+
+    def open_raf(self, path: str) -> None:
+        """Open a RAF from outside (file manager or command line).
+
+        Scans the file's folder into the filmstrip and selects it,
+        driving the normal selection pipeline.
+        """
+        folder = str(Path(path).parent)
+        self._scan_folder(folder)
+        self._foldertree.reveal_path(folder)
+        if not self._filmstrip.select_path(path):
+            self.preview_view.set_status(
+                f"{Path(path).name} is not in the filmstrip."
+            )
 
     def _read_iopcode(self) -> int | None:
         """The open profile's IOPCode (for FP export), or None."""
