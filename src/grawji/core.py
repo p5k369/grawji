@@ -25,10 +25,12 @@ import usb.core
 from rawji.fuji_enums import (
     FUJIFILM_USB_VENDOR_ID,
     ChromeEffect,
+    ColorChromeBlue,
     ColorSpace,
     GrainEffect,
     GrainEffectSize,
     ev_to_int,
+    grain_effect_code,
     int_to_ev,
     validate_color_temp,
     validate_wb_shift,
@@ -59,17 +61,8 @@ _PARAM_OFFSETS = {
 # The film-simulation byte sits at its own parameter offset in rawji's layout.
 OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 
-# Film-simulation codes at @541. rawji's enum is correct up to Eterna (16),
-# but its EternaBleach=17 is wrong and it lacks the newer sims entirely.
-# Hardware-verified on the X-E5 (render signatures, plus the camera's own
-# profile carrying 20 for a RAF whose EXIF says REALA ACE):
-#   17=Classic Neg, 18=Eterna Bleach Bypass, 19=Nostalgic Neg, 20=Reala Ace.
 # The engine renders any out-of-range code as Provia.
-# todo: fix that in rawji
 FILM_SIM_CODES: dict[str, int] = {e.name: int(e) for e in rawji.FilmSimulation}
-FILM_SIM_CODES.update(
-    {"ClassicNeg": 17, "EternaBleach": 18, "NostalgicNeg": 19, "RealaAce": 20}
-)
 _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 
 # Params that use the value*10 tone encoding. rawji's TONE_PARAMS already
@@ -201,13 +194,13 @@ def _clamp_clarity(value: int) -> int:
 
 def _grain_code(effect: str, size: str) -> int:
     """Combine grain effect and size into the single @545 profile code."""
-    if effect == "Off":
-        return int(GrainEffect.Off)
-    base = _enum_value(GrainEffect, effect, "grain effect")
-    large = _enum_value(GrainEffectSize, size, "grain size") == int(
-        GrainEffectSize.Large
-    )
-    return base + (2 if large else 0)
+    try:
+        return int(
+            grain_effect_code(GrainEffect[effect], GrainEffectSize[size])
+        )
+    except KeyError as e:
+        msg = f"unknown grain effect/size: {effect}/{size}"
+        raise ValueError(msg) from e
 
 
 def _grain_effect_name(code: int, fallback: str) -> str:
@@ -262,7 +255,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
             ChromeEffect, recipe.smooth_skin, "smooth skin"
         ),
         "ColorChromeBlue": _enum_value(
-            ChromeEffect, recipe.color_chrome_blue, "color chrome blue"
+            ColorChromeBlue, recipe.color_chrome_blue, "color chrome blue"
         ),
         "Clarity": _clamp_clarity(recipe.clarity),
         "HighlightTone": recipe.highlights,
@@ -388,7 +381,7 @@ def recipe_from_profile(base: bytes) -> Recipe:
             defaults.color_chrome,
         ),
         color_chrome_blue=_enum_name(
-            ChromeEffect,
+            ColorChromeBlue,
             signed("ColorChromeBlue", 1),
             defaults.color_chrome_blue,
         ),
