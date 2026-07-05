@@ -172,13 +172,15 @@ class MainWindow(Adw.ApplicationWindow):
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
 
+        self._recipe_library = RecipeLibrary(recipes_path())
         self._library = RecipeLibraryController(
             parent=self,
-            library=RecipeLibrary(recipes_path()),
+            library=self._recipe_library,
             panel=self.recipe_panel,
             on_render=self._render_if_open,
             on_status=self.preview_view.set_status,
             get_iopcode=self._read_iopcode,
+            on_baseline_changed=self._on_baseline_changed,
         )
         self._batch = BatchController(
             parent=self,
@@ -258,6 +260,16 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._export_selection_action.set_enabled(False)
         self.add_action(self._export_selection_action)
+
+        # Compare is available only once a recipe is marked as baseline.
+        self._compare_action = Gio.SimpleAction.new_stateful(
+            "toggle-compare", None, GLib.Variant.new_boolean(False)
+        )
+        self._compare_action.connect("change-state", self._on_toggle_compare)
+        self._compare_action.set_enabled(
+            self._recipe_library.baseline is not None
+        )
+        self.add_action(self._compare_action)
 
     @staticmethod
     def _activate(callback: Callable[[], None], *_args: object) -> None:
@@ -420,6 +432,7 @@ class MainWindow(Adw.ApplicationWindow):
                 capabilities_for(profile, model=model)
             )
             self._notify_unverified(model)
+        render_working = True
         if profile is not None and self._settings.load_recipe_from_image:
             self.recipe_panel.set_active(
                 recipe_from_profile(profile), "From image"
@@ -429,8 +442,12 @@ class MainWindow(Adw.ApplicationWindow):
             # slow conversion round-trip until the user actually edits.
             if self.preview_view.has_embedded_jpeg:
                 self._set_busy(busy=False, status="Ready.")
-                return
-        self._render_preview()
+                render_working = False
+        if render_working:
+            self._render_preview()
+        # Comparing carries across images: refresh the baseline for this one.
+        if self.preview_view.comparing:
+            self._render_baseline(self._generation)
 
     def _notify_unverified(self, model: str | None) -> None:
         """Toast once per session when the body is not in the table.
@@ -478,6 +495,57 @@ class MainWindow(Adw.ApplicationWindow):
         """The open profile's IOPCode (for FP export), or None."""
         profile = self._session.profile
         return read_iopcode(profile) if profile is not None else None
+
+    def _on_baseline_changed(self) -> None:
+        """React to the marked baseline changing in the recipe manager."""
+        has_baseline = self._recipe_library.baseline is not None
+        self._compare_action.set_enabled(has_baseline)
+        if not has_baseline:
+            self._compare_action.set_state(GLib.Variant.new_boolean(False))
+            self.preview_view.set_compare(on=False)
+        elif self.preview_view.comparing:
+            self._render_baseline(self._generation)  # baseline recipe changed
+
+    def _on_toggle_compare(self, action: Any, value: Any) -> None:
+        """Start or stop the baseline split-compare view."""
+        if value.get_boolean():
+            if (
+                self._recipe_library.baseline_recipe() is None
+                or not self._session.is_open
+            ):
+                return  # nothing to compare, leave the toggle off
+            action.set_state(value)
+            self._render_baseline(self._generation)
+        else:
+            action.set_state(value)
+            self.preview_view.set_compare(on=False)
+
+    def _render_baseline(self, generation: int) -> None:
+        """Render the marked baseline recipe for the current image."""
+        baseline = self._recipe_library.baseline_recipe()
+        if baseline is None:
+            return
+        # Rendering the baseline is a camera round-trip; show progress so
+        # the wait before the split appears is not a dead moment.
+        self._set_busy(busy=True, status="Preparing comparison…")
+        self._worker.submit(
+            partial(self._session.render, baseline, full_resolution=False),
+            on_done=partial(self._on_baseline_rendered, generation),
+            on_error=self._on_error,
+        )
+
+    def _on_baseline_rendered(self, generation: int, jpeg: bytes) -> None:
+        """Feed the baseline render into the split view."""
+        if generation != self._generation:
+            return  # a newer selection has superseded this baseline
+        if not self._compare_action.get_state().get_boolean():
+            # Compare was toggled off while this baseline was rendering,
+            # dropping it keeps the split and the button state in sync.
+            self._set_busy(busy=False, status="Ready.")
+            return
+        self.preview_view.set_compare_baseline(jpeg)
+        self.preview_view.set_compare(on=True)
+        self._set_busy(busy=False, status="Comparing with baseline.")
 
     def _on_recipe_changed(self, _panel: Any) -> None:
         """Re-render (debounced) after a recipe edit."""
