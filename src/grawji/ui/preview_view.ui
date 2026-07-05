@@ -71,6 +71,17 @@
           </object>
         </child>
         <child>
+          <object class="GtkToggleButton" id="compare_button">
+            <property name="icon-name">object-flip-horizontal-symbolic</property>
+            <property name="tooltip-text">Compare with baseline (star a recipe in Manage Recipes)</property>
+            <property name="action-name">win.toggle-compare</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+        <child>
           <object class="GtkButton">
             <property name="icon-name">zoom-fit-best-symbolic</property>
             <property name="tooltip-text">Fit to window (Ctrl+0)</property>

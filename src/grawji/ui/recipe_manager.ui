@@ -4,8 +4,8 @@
   <requires lib="libadwaita" version="1.0"/>
   <template class="GrawjiRecipeManagerDialog" parent="AdwDialog">
     <property name="title">Manage recipes</property>
-    <property name="content-width">440</property>
-    <property name="content-height">480</property>
+    <property name="content-width">460</property>
+    <property name="content-height">520</property>
     <property name="child">
       <object class="AdwToolbarView">
         <child type="top">
@@ -13,9 +13,13 @@
             <child type="start">
               <object class="GtkButton" id="import_button">
                 <property name="label">Import…</property>
-                <style>
-                  <class name="suggested-action"/>
-                </style>
+                <property name="tooltip-text">Import an X RAW Studio recipe</property>
+              </object>
+            </child>
+            <child type="end">
+              <object class="GtkButton" id="new_folder_button">
+                <property name="icon-name">folder-new-symbolic</property>
+                <property name="tooltip-text">New folder</property>
               </object>
             </child>
           </object>
@@ -30,14 +34,7 @@
                     <property name="hscrollbar-policy">never</property>
                     <property name="vexpand">true</property>
                     <property name="child">
-                      <object class="GtkListView" id="recipe_list">
-                        <property name="valign">start</property>
-                        <property name="margin-top">6</property>
-                        <property name="margin-bottom">6</property>
-                        <style>
-                          <class name="rich-list"/>
-                        </style>
-                      </object>
+                      <object class="AdwPreferencesPage" id="content"/>
                     </property>
                   </object>
                 </property>

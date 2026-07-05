@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 import rawji
-from gi.repository import Adw, GObject, Gtk
+from gi.repository import Adw, Gio, GLib, GObject, Gtk
 from rawji.fuji_enums import (
     FP_TONE_MAX,
     FP_TONE_MIN,
@@ -69,7 +69,7 @@ class RecipePanel(Adw.PreferencesPage):
     rows on ~grawji.capabilities.Capabilities and tracks which saved
     recipe (or source) the controls came from, showing "(modified)" once
     they diverge. It emits "changed" on any user edit and "apply-recipe"
-    with a name chosen from the saved-recipes combo.
+    with a name chosen from the folder-nested recipe picker.
     """
 
     __gtype_name__ = "GrawjiRecipePanel"
@@ -80,6 +80,7 @@ class RecipePanel(Adw.PreferencesPage):
     }
 
     recipe_row = Gtk.Template.Child()
+    recipe_button = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
@@ -90,10 +91,15 @@ class RecipePanel(Adw.PreferencesPage):
         self._caps: Capabilities | None = None
         self._film_sims: list[str] = list(_FILM_SIMULATIONS)
         self._suppress_signals = False
-        self._suppress_combo_signal = False
         self._recipe_names: list[str] = []
         self._applied_recipe = Recipe()
         self._active_label = "Default"
+
+        self._apply_actions = Gio.SimpleActionGroup()
+        apply_action = Gio.SimpleAction.new("apply", GLib.VariantType.new("s"))
+        apply_action.connect("activate", self._on_apply_action)
+        self._apply_actions.add_action(apply_action)
+        self.insert_action_group("recipe", self._apply_actions)
 
         self._build_rows()
         self._connect_signals()
@@ -214,7 +220,6 @@ class RecipePanel(Adw.PreferencesPage):
 
     def _connect_signals(self) -> None:
         """Route every row's edits into the panel's changed signal."""
-        self.recipe_row.connect("notify::selected", self._on_recipe_selected)
         for row in self._combo_rows:
             row.connect("notify::selected", self._on_edited)
         for slider in self._slider_rows:
@@ -328,30 +333,46 @@ class RecipePanel(Adw.PreferencesPage):
         self._set_film_simulations(list(caps.film_simulations))
         self._update_grain_size_visibility()
 
-    def set_recipe_names(self, names: list[str]) -> None:
-        """Refresh the recipe apply-combo from the saved recipes."""
-        self._recipe_names = list(names)
-        self._suppress_combo_signal = True
-        try:
-            self.recipe_row.set_model(
-                Gtk.StringList.new(["—", *self._recipe_names])
-            )
-            self.recipe_row.set_selected(0)
-        finally:
-            self._suppress_combo_signal = False
+    def set_recipe_menu(
+        self,
+        ungrouped: list[str],
+        folders: list[tuple[str, list[str]]],
+    ) -> None:
+        """Populate the recipe picker as a nested menu.
+
+        ungrouped recipes sit at the top, each folder becomes a submenu
+        that opens from its own entry. Selecting an item applies it.
+        """
+        self._recipe_names = [
+            *ungrouped,
+            *(name for _folder, names in folders for name in names),
+        ]
+        menu = Gio.Menu()
+        top = Gio.Menu()
+        top.append_item(self._apply_item("—", ""))
+        for name in ungrouped:
+            top.append_item(self._apply_item(name, name))
+        menu.append_section(None, top)
+        for folder, names in folders:
+            submenu = Gio.Menu()
+            for name in names:
+                submenu.append_item(self._apply_item(name, name))
+            menu.append_submenu(folder, submenu)
+        self.recipe_button.set_menu_model(menu)
+
+    @staticmethod
+    def _apply_item(label: str, name: str) -> Gio.MenuItem:
+        """A menu item that applies the recipe named name when chosen."""
+        item = Gio.MenuItem.new(label, None)
+        item.set_action_and_target_value(
+            "recipe.apply", GLib.Variant.new_string(name)
+        )
+        return item
 
     def sync_combo(self, label: str) -> None:
-        """Point the apply-combo at label (or "—" if not a recipe)."""
-        index = (
-            self._recipe_names.index(label) + 1
-            if label in self._recipe_names
-            else 0
-        )
-        self._suppress_combo_signal = True
-        try:
-            self.recipe_row.set_selected(index)
-        finally:
-            self._suppress_combo_signal = False
+        """Show label on the picker button (or "—" if not a recipe)."""
+        shown = label if label in self._recipe_names else "—"
+        self.recipe_button.set_label(shown)
 
     def set_controls_sensitive(self, enabled: bool) -> None:
         """Enable or disable every edit control (not the apply-combo)."""
@@ -379,13 +400,11 @@ class RecipePanel(Adw.PreferencesPage):
         finally:
             self._suppress_signals = False
 
-    def _on_recipe_selected(self, *_args: object) -> None:
-        """Announce the recipe chosen in the apply-combo."""
-        if self._suppress_combo_signal:
-            return
-        index = self.recipe_row.get_selected()
-        if index > 0:
-            self.emit("apply-recipe", self._recipe_names[index - 1])
+    def _on_apply_action(self, _action: Any, target: Any) -> None:
+        """Apply the recipe chosen from the picker menu."""
+        name = target.get_string()
+        if name:
+            self.emit("apply-recipe", name)
 
     def _on_edited(self, *_args: object) -> None:
         """Update the indicator and emit changed on a user edit."""

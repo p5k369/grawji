@@ -16,7 +16,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
-from grawji.recipes import RecipeLibrary
+from grawji.recipes import UNGROUPED, RecipeLibrary
 from grawji.views.recipe_panel import RecipePanel
 
 _UI = (
@@ -26,198 +26,300 @@ _UI = (
 )
 
 
-class _RecipeItem(GObject.Object):
-    """A recipe name in the list model (name is a GObject property)."""
-
-    __gtype_name__ = "GrawjiRecipeItem"
-
-    name = GObject.Property(type=str, default="")
-
-    def __init__(self, name: str) -> None:
-        """Wrap a recipe name for the list store."""
-        super().__init__()
-        self.name = name
-
-
 @Gtk.Template(string=_UI)
 class RecipeManagerDialog(Adw.Dialog):
-    """Reorder (live drag and drop), delete, import and export recipes."""
+    """Manage saved recipes: folders, baseline, rename, export, delete."""
 
     __gtype_name__ = "GrawjiRecipeManagerDialog"
 
     import_button = Gtk.Template.Child()
-    recipe_list = Gtk.Template.Child()
+    new_folder_button = Gtk.Template.Child()
+    content = Gtk.Template.Child()
     stack = Gtk.Template.Child()
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
-        list_recipes: Callable[[], list[str]],
-        on_reorder: Callable[[list[str]], None],
-        on_delete: Callable[[str], None],
-        on_rename: Callable[[str, str], None],
+        library: RecipeLibrary,
         on_import: Callable[[], None],
         on_export: Callable[[str], None],
+        on_delete: Callable[[str], None],
+        on_rename: Callable[[str, str], None],
+        on_move: Callable[[str, str], None],
+        on_set_baseline: Callable[[str | None], None],
+        on_place_recipe: Callable[[str, str, str | None], None],
+        on_create_folder: Callable[[str], None],
+        on_rename_folder: Callable[[str, str], None],
+        on_delete_folder: Callable[[str], None],
+        on_reorder_folder: Callable[[str, bool], None],
     ) -> None:
-        """Wire the dialog to its data source and intent callbacks.
-
-        Args:
-            list_recipes: Returns the saved recipe names, in display order.
-            on_reorder: Called with the full new order after a drag-drop.
-            on_delete: Called with a name to delete that recipe.
-            on_rename: Called with (old_name, new_name) to rename a recipe.
-            on_import: Called to start importing a recipe.
-            on_export: Called with a name to export that recipe.
-        """
+        """Wire the dialog to the library (read) and intent callbacks."""
         super().__init__()
-        self._list_recipes = list_recipes
-        self._on_reorder = on_reorder
-        self._on_delete = on_delete
-        self._on_rename = on_rename
+        self._library = library
         self._on_import = on_import
         self._on_export = on_export
-        self._drag_item: _RecipeItem | None = None
-
-        self._store = Gio.ListStore.new(_RecipeItem)
-        factory = Gtk.SignalListItemFactory()
-        factory.connect("setup", self._on_setup)
-        factory.connect("bind", self._on_bind)
-        self.recipe_list.set_model(Gtk.NoSelection(model=self._store))
-        self.recipe_list.set_factory(factory)
+        self._on_delete = on_delete
+        self._on_rename = on_rename
+        self._on_move = on_move
+        self._on_set_baseline = on_set_baseline
+        self._on_place_recipe = on_place_recipe
+        self._on_create_folder = on_create_folder
+        self._on_rename_folder = on_rename_folder
+        self._on_delete_folder = on_delete_folder
+        self._on_reorder_folder = on_reorder_folder
+        self._dragged: str | None = None
+        self._groups: list[Adw.PreferencesGroup] = []
 
         self.import_button.connect("clicked", lambda *_a: self._on_import())
+        self.new_folder_button.connect("clicked", self._on_new_folder)
         self.refresh()
 
     def refresh(self) -> None:
-        """Rebuild the list model from the current saved recipes."""
-        names = self._list_recipes()
-        self._store.remove_all()
+        """Rebuild the grouped view from the current library state."""
+        for group in self._groups:
+            self.content.remove(group)
+        self._groups = []
+
+        has_recipes = bool(self._library.names)
+        self.stack.set_visible_child_name("list" if has_recipes else "empty")
+        if not has_recipes:
+            return
+
+        ungrouped = self._library.names_in(UNGROUPED)
+        if ungrouped:
+            self._add_group(UNGROUPED, "Recipes", ungrouped)
+        for folder in self._library.folders():
+            self._add_group(folder, folder, self._library.names_in(folder))
+
+    def _add_group(self, folder: str, title: str, names: list[str]) -> None:
+        """Add a titled folder section holding the given recipe rows."""
+        group = Adw.PreferencesGroup(title=GLib.markup_escape_text(title))
+        if folder != UNGROUPED:
+            group.set_header_suffix(self._folder_header(folder))
         for name in names:
-            self._store.append(_RecipeItem(name))
-        self.stack.set_visible_child_name("list" if names else "empty")
+            group.add(self._recipe_row(name))
+        # Dropping a recipe onto the section's empty area moves it here.
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect("drop", self._on_group_drop, folder)
+        group.add_controller(drop)
+        self.content.add(group)
+        self._groups.append(group)
 
-    def _on_setup(self, _factory: Any, item: Gtk.ListItem) -> None:
-        """Build a recipe row: drag handle, name, export and delete."""
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        handle = Gtk.Image.new_from_icon_name("list-drag-handle-symbolic")
-        handle.add_css_class("dim-label")
-        label = Gtk.Label(xalign=0.0, hexpand=True)
-        rename = self._icon_button("document-edit-symbolic", "Rename…")
-        rename.connect("clicked", self._on_row_rename, item)
-        export = self._icon_button("document-save-symbolic", "Export…")
-        export.connect("clicked", self._on_row_export, item)
-        delete = self._icon_button("user-trash-symbolic", "Delete")
-        delete.add_css_class("destructive-action")
-        delete.connect("clicked", self._on_row_delete, item)
-        for child in (handle, label, rename, export, delete):
-            box.append(child)
-        box.label = label
-        item.set_child(box)
-        self._add_drag_and_drop(box, item)
+    def _recipe_row(self, name: str) -> Adw.ActionRow:
+        """Build one recipe row: a baseline star and an overflow menu."""
+        row = Adw.ActionRow()
+        row.set_use_markup(False)
+        row.set_title(name)
 
-    @staticmethod
-    def _on_bind(_factory: Any, item: Gtk.ListItem) -> None:
-        """Show the bound recipe's name in the row."""
-        item.get_child().label.set_text(item.get_item().name)
+        star = Gtk.ToggleButton(valign=Gtk.Align.CENTER)
+        star.set_icon_name("starred-symbolic")
+        star.set_tooltip_text("Use as compare baseline")
+        star.add_css_class("flat")
+        star.set_active(self._library.baseline == name)
+        star.connect("toggled", self._on_star_toggled, name)
+        row.add_prefix(star)
 
-    def _add_drag_and_drop(self, box: Gtk.Widget, item: Gtk.ListItem) -> None:
-        """Make the row draggable and a live drop point for reordering."""
+        menu = Gtk.MenuButton(
+            icon_name="view-more-symbolic", valign=Gtk.Align.CENTER
+        )
+        menu.set_tooltip_text("Recipe actions")
+        menu.add_css_class("flat")
+        menu.set_popover(self._row_popover(name))
+        row.add_suffix(menu)
+
         source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
-        source.connect("prepare", self._on_drag_prepare, item)
-        source.connect("drag-begin", self._on_drag_begin)
-        source.connect("drag-end", self._on_drag_end)
-        box.add_controller(source)
-        drop = Gtk.DropTarget.new(_RecipeItem, Gdk.DragAction.MOVE)
-        drop.connect("enter", self._on_drop_enter, item)
-        drop.connect("drop", self._on_drop)
-        box.add_controller(drop)
+        source.connect("prepare", self._on_recipe_drag, name)
+        row.add_controller(source)
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect("drop", self._on_recipe_drop, name)
+        row.add_controller(drop)
+        return row
 
-    def _on_drag_prepare(
-        self, _source: Any, _x: float, _y: float, item: Gtk.ListItem
-    ) -> Gdk.ContentProvider:
-        """Remember the dragged recipe and carry it as the payload."""
-        self._drag_item = item.get_item()
-        return Gdk.ContentProvider.new_for_value(self._drag_item)
-
-    @staticmethod
-    def _on_drag_begin(_source: Any, drag: Any) -> None:
-        """Suppress the drag icon: the row itself moves live in the list."""
-        Gtk.DragIcon.get_for_drag(drag).set_child(Gtk.Box())
-
-    def _on_drag_end(self, _source: Any, _drag: Any, _delete: bool) -> None:
-        """Clear the drag state when the drag finishes."""
-        self._drag_item = None
-
-    def _on_drop_enter(
-        self, _target: Any, _x: float, _y: float, item: Gtk.ListItem
-    ) -> Gdk.DragAction:
-        """Live-move the dragged recipe to the row being hovered."""
-        self._move_dragged_to(item.get_position())
-        return Gdk.DragAction.MOVE
-
-    def _on_drop(
-        self, _target: Any, _value: Any, _x: float, _y: float
-    ) -> bool:
-        """Commit the reordered list when the recipe is dropped."""
-        order = [
-            self._store.get_item(i).name
-            for i in range(self._store.get_n_items())
+    def _row_popover(self, name: str) -> Gtk.Popover:
+        """The overflow menu for a recipe: move, rename, export, delete."""
+        folder = self._library.folder_of(name)
+        popover, box = self._popover()
+        destinations = [
+            f for f in [UNGROUPED, *self._library.folders()] if f != folder
         ]
-        self._drag_item = None
-        self._on_reorder(order)
+        for dest in destinations:
+            label = (
+                "Move to Ungrouped"
+                if dest == UNGROUPED
+                else (f"Move to {dest}")
+            )
+            self._entry(box, popover, label, self._mover(name, dest))
+        if destinations:
+            self._separator(box)
+        self._entry(box, popover, "Rename…", lambda: self._rename(name))
+        self._entry(box, popover, "Export…", lambda: self._on_export(name))
+        self._entry(
+            box,
+            popover,
+            "Delete",
+            lambda: self._on_delete(name),
+            destructive=True,
+        )
+        return popover
+
+    def _folder_header(self, folder: str) -> Gtk.Widget:
+        """A folder header menu: reorder (up/down), rename, delete."""
+        folders = self._library.folders()
+        index = folders.index(folder)
+        menu = Gtk.MenuButton(
+            icon_name="view-more-symbolic", valign=Gtk.Align.CENTER
+        )
+        menu.add_css_class("flat")
+        popover, box = self._popover()
+        if index > 0:
+            self._entry(
+                box,
+                popover,
+                "Move Up",
+                lambda: self._on_reorder_folder(folder, True),
+            )
+        if index < len(folders) - 1:
+            self._entry(
+                box,
+                popover,
+                "Move Down",
+                lambda: self._on_reorder_folder(folder, False),
+            )
+        self._separator(box)
+        self._entry(
+            box,
+            popover,
+            "Rename Folder…",
+            lambda: self._on_rename_folder_clicked(None, folder),
+        )
+        self._entry(
+            box,
+            popover,
+            "Delete Folder",
+            lambda: self._on_delete_folder(folder),
+            destructive=True,
+        )
+        menu.set_popover(popover)
+        return menu
+
+    def _on_recipe_drag(
+        self, _source: Any, _x: float, _y: float, name: str
+    ) -> Gdk.ContentProvider:
+        """Begin dragging a recipe row."""
+        self._dragged = name
+        return Gdk.ContentProvider.new_for_value(name)
+
+    def _on_recipe_drop(
+        self, _target: Any, _value: Any, _x: float, _y: float, target: str
+    ) -> bool:
+        """Drop a recipe before target, adopting target's folder."""
+        if self._dragged is not None and self._dragged != target:
+            self._on_place_recipe(
+                self._dragged, self._library.folder_of(target), target
+            )
+        self._dragged = None
         return True
 
-    def _move_dragged_to(self, dest: int) -> None:
-        """Move the in-flight dragged item to position dest in the store."""
-        if self._drag_item is None:
-            return
-        found, src = self._store.find(self._drag_item)
-        if not found or src == dest:
-            return
-        self._store.remove(src)
-        dest = min(dest, self._store.get_n_items())
-        self._store.insert(dest, self._drag_item)
-
-    def _on_row_export(self, _button: Any, item: Gtk.ListItem) -> None:
-        """Export the recipe of the clicked row."""
-        self._on_export(item.get_item().name)
-
-    def _on_row_delete(self, _button: Any, item: Gtk.ListItem) -> None:
-        """Delete the recipe of the clicked row."""
-        self._on_delete(item.get_item().name)
-
-    def _on_row_rename(self, _button: Any, item: Gtk.ListItem) -> None:
-        """Prompt for a new name and rename the clicked recipe."""
-        old = item.get_item().name
-        entry = Gtk.Entry(text=old)
-        dialog = Adw.AlertDialog(heading="Rename recipe", body="New name:")
-        dialog.set_extra_child(entry)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("rename", "Rename")
-        dialog.set_default_response("rename")
-        dialog.set_response_appearance(
-            "rename", Adw.ResponseAppearance.SUGGESTED
-        )
-        dialog.connect("response", self._on_rename_response, old, entry)
-        dialog.present(self)
-
-    def _on_rename_response(
-        self, _dialog: Any, response: str, old: str, entry: Gtk.Entry
-    ) -> None:
-        """Apply the rename when the dialog is confirmed."""
-        if response != "rename":
-            return
-        new = entry.get_text().strip()
-        if new and new != old:
-            self._on_rename(old, new)
+    def _on_group_drop(
+        self, _target: Any, _value: Any, _x: float, _y: float, folder: str
+    ) -> bool:
+        """Drop a recipe onto a folder's area to append it there."""
+        if self._dragged is not None:
+            self._on_place_recipe(self._dragged, folder, None)
+            self._dragged = None
+            return True
+        return False
 
     @staticmethod
-    def _icon_button(icon: str, tooltip: str) -> Gtk.Button:
-        """Create a flat, vertically-centred icon button."""
-        button = Gtk.Button(icon_name=icon, valign=Gtk.Align.CENTER)
+    def _popover() -> tuple[Gtk.Popover, Gtk.Box]:
+        """A popover holding a vertical button box."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        popover = Gtk.Popover()
+        popover.set_child(box)
+        return popover, box
+
+    @staticmethod
+    def _separator(box: Gtk.Box) -> None:
+        """Append a thin separator to a popover box."""
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+    @staticmethod
+    def _entry(
+        box: Gtk.Box,
+        popover: Gtk.Popover,
+        label: str,
+        handler: Callable[[], None],
+        *,
+        destructive: bool = False,
+    ) -> None:
+        """Append a flat button that closes the popover then runs handler."""
+        button = Gtk.Button(label=label)
+        button.set_halign(Gtk.Align.FILL)
+        button.get_first_child().set_halign(Gtk.Align.START)
         button.add_css_class("flat")
-        button.set_tooltip_text(tooltip)
-        return button
+        if destructive:
+            button.add_css_class("destructive-action")
+
+        def on_clicked(*_a: Any) -> None:
+            popover.popdown()
+            handler()
+
+        button.connect("clicked", on_clicked)
+        box.append(button)
+
+    def _mover(self, name: str, folder: str) -> Callable[[], None]:
+        """A handler that moves a recipe into a folder."""
+        return lambda: self._on_move(name, folder)
+
+    def _on_star_toggled(self, button: Gtk.ToggleButton, name: str) -> None:
+        """Set or clear the compare baseline from a row's star."""
+        self._on_set_baseline(name if button.get_active() else None)
+
+    def _rename(self, name: str) -> None:
+        """Prompt for a new recipe name and rename."""
+        self._prompt(
+            "Rename recipe",
+            "New name",
+            name,
+            lambda new: self._on_rename(name, new),
+        )
+
+    def _on_rename_folder_clicked(self, _button: Any, folder: str) -> None:
+        """Prompt for a new folder name and rename it."""
+        self._prompt(
+            "Rename folder",
+            "New name",
+            folder,
+            lambda new: self._on_rename_folder(folder, new),
+        )
+
+    def _on_new_folder(self, _button: Any) -> None:
+        """Prompt for a folder name and create it."""
+        self._prompt("New folder", "Folder name", "", self._on_create_folder)
+
+    def _prompt(
+        self,
+        heading: str,
+        body: str,
+        preset: str,
+        done: Callable[[str], None],
+    ) -> None:
+        """Show a one-entry text dialog; call done with the new value."""
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        entry = Gtk.Entry(text=preset)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("ok", "OK")
+        dialog.set_default_response("ok")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(_d: Any, response: str) -> None:
+            value = entry.get_text().strip()
+            if response == "ok" and value and value != preset:
+                done(value)
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
 
 class RecipeLibraryController:
@@ -228,7 +330,7 @@ class RecipeLibraryController:
     saved-recipe combo in sync with every library change.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - pure wiring, all keyword-only
         self,
         *,
         parent: Gtk.Widget,
@@ -237,6 +339,7 @@ class RecipeLibraryController:
         on_render: Callable[[], None],
         on_status: Callable[[str], None],
         get_iopcode: Callable[[], int | None],
+        on_baseline_changed: Callable[[], None] = lambda: None,
     ) -> None:
         """Wire the controller.
 
@@ -248,6 +351,8 @@ class RecipeLibraryController:
             on_status: Sets the window's status line.
             get_iopcode: The open profile's IOPCode for FP export, or
                 None when no image is open.
+            on_baseline_changed: Called when the compare baseline is set
+                or cleared, so the window can update the compare state.
         """
         self._parent = parent
         self._library = library
@@ -255,18 +360,25 @@ class RecipeLibraryController:
         self._on_render = on_render
         self._on_status = on_status
         self._get_iopcode = get_iopcode
+        self._on_baseline_changed = on_baseline_changed
         self._manager: RecipeManagerDialog | None = None
-        panel.set_recipe_names(library.names)
+        self._refresh()
 
     def manage(self) -> None:
         """Open the recipe manager modal."""
         self._manager = RecipeManagerDialog(
-            list_recipes=lambda: self._library.names,
-            on_reorder=self._reorder,
-            on_delete=self._delete,
-            on_rename=self._rename,
+            library=self._library,
             on_import=self.import_fp,
             on_export=self.export_fp,
+            on_delete=self._delete,
+            on_rename=self._rename,
+            on_move=self._move,
+            on_set_baseline=self._set_baseline,
+            on_place_recipe=self._place_recipe,
+            on_create_folder=self._create_folder,
+            on_rename_folder=self._rename_folder,
+            on_delete_folder=self._delete_folder,
+            on_reorder_folder=self._reorder_folder,
         )
         self._manager.connect("closed", self._on_manager_closed)
         self._manager.present(self._parent)
@@ -313,8 +425,17 @@ class RecipeLibraryController:
         )
 
     def _refresh(self) -> None:
-        """Mirror the library into the panel combo and an open manager."""
-        self._panel.set_recipe_names(self._library.names)
+        """Mirror the library into the panel picker and an open manager.
+
+        The picker lists ungrouped recipes at the top, then one submenu
+        per folder that opens from its own entry.
+        """
+        ungrouped = self._library.names_in(UNGROUPED)
+        folders = [
+            (folder, self._library.names_in(folder))
+            for folder in self._library.folders()
+        ]
+        self._panel.set_recipe_menu(ungrouped, folders)
         if self._manager is not None:
             self._manager.refresh()
 
@@ -338,9 +459,42 @@ class RecipeLibraryController:
             if renamed is not None:
                 self._panel.set_active(renamed, new)
 
-    def _reorder(self, order: list[str]) -> None:
-        """Persist a new recipe order (from the manager's drag and drop)."""
-        if self._library.reorder(order):
+    def _move(self, name: str, folder: str) -> None:
+        """Move a recipe into a folder and refresh."""
+        if self._library.move(name, folder):
+            self._refresh()
+
+    def _place_recipe(
+        self, name: str, folder: str, before: str | None
+    ) -> None:
+        """Place a dragged recipe into folder before another, and refresh."""
+        if self._library.place_recipe(name, folder, before):
+            self._refresh()
+
+    def _reorder_folder(self, folder: str, up: bool) -> None:
+        """Nudge a folder up or down and refresh."""
+        if self._library.reorder_folder(folder, up=up):
+            self._refresh()
+
+    def _set_baseline(self, name: str | None) -> None:
+        """Mark (or clear) the compare baseline and notify the window."""
+        if self._library.set_baseline(name):
+            self._refresh()
+            self._on_baseline_changed()
+
+    def _create_folder(self, name: str) -> None:
+        """Create a folder and refresh."""
+        if self._library.create_folder(name):
+            self._refresh()
+
+    def _rename_folder(self, old: str, new: str) -> None:
+        """Rename a folder and refresh."""
+        if self._library.rename_folder(old, new):
+            self._refresh()
+
+    def _delete_folder(self, name: str) -> None:
+        """Delete a folder (its recipes go ungrouped) and refresh."""
+        if self._library.delete_folder(name):
             self._refresh()
 
     def _prompt_save(
