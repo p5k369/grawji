@@ -6,9 +6,11 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("gi")
+gi = pytest.importorskip("gi")
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, GObject
+from gi.repository import Adw, GLib, GObject, Gtk
 
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
@@ -79,19 +81,22 @@ def _manager(tmp_path: Any) -> Any:
 def test_recipe_manager_escapes_ampersand_names(tmp_path: Any) -> None:
     """Folder and recipe names with '&' render literally, not as markup.
 
-    A folder group title is always Pango markup, so it must be escaped
-    ("B&W" -> "B&amp;W"). A recipe row disables markup instead and keeps
-    the raw title. Regressions here made folders like "B&W" render blank.
+    A folder group title is always Pango markup, so it must be escaped.
+    A recipe row disables markup instead and keeps the raw title. We check
+    the rendered label text a user actually sees, not the stored title,
+    since libadwaita versions differ on how the title round-trips. A
+    regression that fails to escape "&" breaks Pango markup and the header
+    stops rendering that text at all.
     """
     dialog = _manager(tmp_path)
-    widgets = walk(dialog.get_child()) if dialog.get_child() else []
+    root = dialog.get_child()
+    widgets = walk(root) if root else []
 
-    groups = [w for w in widgets if isinstance(w, Adw.PreferencesGroup)]
-    folder_group = next(
-        (g for g in groups if g.get_title() == "B&amp;W"), None
-    )
-    assert folder_group is not None, "folder title must be markup-escaped"
+    label_texts = {w.get_text() for w in widgets if isinstance(w, Gtk.Label)}
+    assert "B&W" in label_texts, "folder header must render '&' literally"
+    assert "R&D" in label_texts, "recipe row must render '&' literally"
 
+    # The recipe row keeps its raw title with markup disabled.
     rows = [w for w in widgets if isinstance(w, Adw.ActionRow)]
     recipe_row = next((r for r in rows if r.get_title() == "R&D"), None)
     assert recipe_row is not None, "recipe row title must be raw text"
