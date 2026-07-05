@@ -23,6 +23,8 @@ dev = [
   "pytest",
   "pytest-cov",
   "pytest-github-actions-annotate-failures",
+  # Runs the GUI smoke tests under a virtual X display
+  "pytest-xvfb",
   "pre-commit",
   # IDE type stubs for PyGObject (Gtk/Adw/GExiv2/...). Improves editor code
   # insight; not used by mypy here (the system gi shadows the stub package).
