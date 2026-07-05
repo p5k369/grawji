@@ -66,9 +66,20 @@ class BatchExportDialog(Adw.Dialog):
         """Lock the dialog open and hand the options back to the caller."""
         self.set_can_close(False)  # only Cancel leaves a running export.
         self.stack.set_visible_child_name("progress")
+        self._fit_current_page()
         self._on_start(
             self.overwrite_row.get_active(), self.foreign_row.get_active()
         )
+
+    def _fit_current_page(self) -> None:
+        """Shrink the dialog to the visible page's height."""
+        child = self.stack.get_visible_child()
+        if child is None:
+            return
+        _, natural, _, _ = child.measure(
+            Gtk.Orientation.VERTICAL, self.get_content_width()
+        )
+        self.set_content_height(natural)
 
     def _on_cancel_clicked(self, _button: Any) -> None:
         """Ask the caller to stop; the batch ends after the current image."""
@@ -88,3 +99,4 @@ class BatchExportDialog(Adw.Dialog):
         self.set_can_close(True)
         self.summary_label.set_text(summary)
         self.stack.set_visible_child_name("summary")
+        self._fit_current_page()

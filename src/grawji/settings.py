@@ -54,6 +54,8 @@ class Settings:
             "dark" forces that scheme.
         show_histogram: Whether the histogram overlay is shown on the
             preview.
+        last_export_dir: Folder of the most recent export.
+        the export dialogs open here. Empty means none.
     """
 
     load_recipe_from_image: bool = True
@@ -69,6 +71,7 @@ class Settings:
     bookmarks: list[str] = field(default_factory=list)
     color_scheme: str = "default"
     show_histogram: bool = False
+    last_export_dir: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

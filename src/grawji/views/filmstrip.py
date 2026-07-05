@@ -64,6 +64,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         *,
         on_select: Callable[[str], None],
         on_loading: Callable[[bool], None] | None = None,
+        on_selection_changed: Callable[[int], None] | None = None,
         dispatch: Dispatch = GLib.idle_add,
         thumb_height: int = 110,
     ) -> None:
@@ -71,21 +72,28 @@ class FilmStrip(Gtk.ScrolledWindow):
 
         Args:
             on_select: Called with the RAF path when a thumbnail is
-                clicked.
+                clicked in normal mode (to preview/edit it).
             on_loading: Called with True when thumbnail decoding starts and
                 False when it finishes, for an activity indicator elsewhere.
+            on_selection_changed: Called with the number of selected
+                thumbnails while in batch-select mode.
             dispatch: Schedules a callback on the GTK main loop.
             thumb_height: Thumbnail height in pixels.
         """
         super().__init__()
         self._on_select = on_select
         self._on_loading = on_loading
+        self._on_selection_changed = on_selection_changed
         self._dispatch = dispatch
         self._thumb_height = thumb_height
         self._scan_id = 0
         self._paths: list[str] = []
         self._buttons: list[Gtk.Button] = []
         self._current = -1
+        # Batch-select mode: while active, a click toggles a card's
+        # membership in the export set (shown raised) instead of opening it.
+        self._select_mode = False
+        self._selected: set[str] = set()
         self._cache_dir = cache_dir() / "thumbs"
         self._workers = max(1, (os.cpu_count() or 2) - 1)
         self._glide_tick: int | None = None
@@ -115,6 +123,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._scan_id += 1
         scan_id = self._scan_id
         self._clear()
+        if self._select_mode:
+            # A new folder invalidates any in-progress selection.
+            self._select_mode = False
+            self._selected.clear()
+            self._notify_selection()
         if folder != self._folder:
             self._folder = folder
             self._watch(folder)
@@ -221,10 +234,84 @@ class FilmStrip(Gtk.ScrolledWindow):
             adj.set_value(right - page)
 
     def _on_clicked(self, path: str, _button: Gtk.Button) -> None:
-        """Notify the listener that a thumbnail was clicked."""
+        """Handle a thumbnail click.
+
+        In batch-select mode a click toggles the card's membership in the
+        export set (shown raised); otherwise it opens the image.
+        """
+        if self._select_mode:
+            self._toggle_selected(path)
+            return
         if path in self._paths:
             self._set_current(self._paths.index(path))
         self._on_select(path)
+
+    def enter_select_mode(self) -> None:
+        """Begin batch-select: clicks toggle export selection.
+
+        The open-image highlight is hidden for the duration so the only
+        raised cards are the selected ones.
+        """
+        self._select_mode = True
+        self._selected.clear()
+        for button in self._buttons:
+            button.remove_css_class("thumb-selected")
+        self._apply_selection_style()
+        self._notify_selection()
+
+    def exit_select_mode(self) -> None:
+        """Leave batch-select mode and clear the selection.
+
+        Restores the open image's highlight, hidden while selecting.
+        """
+        self._select_mode = False
+        self._selected.clear()
+        self._apply_selection_style()
+        if 0 <= self._current < len(self._buttons):
+            self._buttons[self._current].add_css_class("thumb-selected")
+        self._notify_selection()
+
+    @property
+    def in_select_mode(self) -> bool:
+        """Whether batch-select mode is active."""
+        return self._select_mode
+
+    @property
+    def selected_paths(self) -> list[str]:
+        """The selected RAF paths, in display order."""
+        return [p for p in self._paths if p in self._selected]
+
+    def select_all(self) -> None:
+        """Select every thumbnail (batch-select mode only)."""
+        if not self._select_mode:
+            return
+        self._selected = set(self._paths)
+        self._apply_selection_style()
+        self._notify_selection()
+
+    def _toggle_selected(self, path: str) -> None:
+        """Add or remove one thumbnail from the export selection."""
+        if path not in self._paths:
+            return
+        if path in self._selected:
+            self._selected.discard(path)
+        else:
+            self._selected.add(path)
+        self._apply_selection_style()
+        self._notify_selection()
+
+    def _apply_selection_style(self) -> None:
+        """Raise the selected cards, lower the rest."""
+        for path, button in zip(self._paths, self._buttons, strict=False):
+            if path in self._selected:
+                button.add_css_class("thumb-marked")
+            else:
+                button.remove_css_class("thumb-marked")
+
+    def _notify_selection(self) -> None:
+        """Report the current selection size to the listener."""
+        if self._on_selection_changed is not None:
+            self._on_selection_changed(len(self._selected))
 
     def scroll_step(self, direction: int) -> None:
         """Scroll the strip by one thumbnail card, keeping the selection.
