@@ -35,8 +35,11 @@ subjects follow the conventional-commit style in `git log`.
 
 - Pure modules live at the package root and are mypy-strict and
   unit-tested. Mock the rawji boundary in tests.
-- GTK view glue lives in `grawji/views/` - verified by running the app,
-  not unit-tested, exempt from the strictest mypy rules.
+- GTK view glue lives in `grawji/views/`, exempt from the strictest mypy
+  rules. `gui`-marked smoke tests build the widgets under a virtual
+  display. Run them with `GDK_BACKEND=x11 pytest -m gui` (needs the `dev`
+  extra's `pytest-xvfb`). They skip without a display. Deeper behaviour is
+  verified by running the app.
 - Build static UI from the `.ui` templates in `src/grawji/ui/`, not
   imperatively in Python. I use
   [Cambalache](https://gitlab.gnome.org/jpu/cambalache)
