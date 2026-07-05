@@ -38,7 +38,12 @@ from grawji.settings import (
     settings_path,
 )
 from grawji.views import dialogs, imagemeta
-from grawji.views.export import BatchController, export_basename, write_jpeg
+from grawji.views.export import (
+    BatchController,
+    export_basename,
+    initial_folder,
+    write_jpeg,
+)
 from grawji.views.filmstrip import FilmStrip, FilmStripNav
 from grawji.views.foldertree import FolderTree
 from grawji.views.navigator import Navigator
@@ -67,9 +72,14 @@ button.thumb {
     margin-bottom: 0;
     transition: margin 120ms ease;
 }
-button.thumb.thumb-selected {
+button.thumb.thumb-selected,
+button.thumb.thumb-marked {
     margin-top: 0;
     margin-bottom: 16px;
+}
+/* A selected card (batch-select mode) also gets an accent ring. */
+button.thumb.thumb-marked {
+    box-shadow: inset 0 0 0 2px @accent_bg_color;
 }
 /* Soften the folder tree: slightly dimmed text and a gentler selection. */
 .folder-tree { color: alpha(currentColor, 0.85); font-weight: normal; }
@@ -105,6 +115,9 @@ class MainWindow(Adw.ApplicationWindow):
     filmstrip_slot = Gtk.Template.Child()
     foldertree_slot = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
+    select_bar = Gtk.Template.Child()
+    select_label = Gtk.Template.Child()
+    select_separator = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, the composite widgets and the controllers."""
@@ -140,6 +153,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self.recipe_panel.connect("changed", self._on_recipe_changed)
         self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
+        self.export_button.connect("clicked", self._on_export_clicked)
 
         self._navigator = Navigator(
             area=self.nav_overlay,
@@ -179,6 +193,7 @@ class MainWindow(Adw.ApplicationWindow):
             set_busy=self._set_busy,
             on_status=self.preview_view.set_status,
             on_error=self._on_error,
+            on_finished=self._end_select_mode,
         )
 
         self._install_actions()
@@ -201,6 +216,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("reset", self._reset_recipe, ("<Ctrl>r",)),
             ("preferences", self._on_preferences, ("<Ctrl>comma",)),
             ("batch-export", self._on_batch_export, ()),
+            ("select-all", self._select_all, ("<Ctrl>a",)),
+            ("cancel-selection", self._end_select_mode, ("Escape",)),
             ("manage-recipes", self._library.manage, ()),
             ("zoom-in", view.zoom_in, ("<Ctrl>plus", "<Ctrl>equal")),
             ("zoom-out", view.zoom_out, ("<Ctrl>minus",)),
@@ -231,6 +248,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.add_action(histogram)
         if app is not None:
             app.set_accels_for_action("win.toggle-histogram", ["h"])
+
+        # Enabled only once at least one image is selected in select mode.
+        self._export_selection_action = Gio.SimpleAction.new(
+            "export-selection", None
+        )
+        self._export_selection_action.connect(
+            "activate", partial(self._activate, self._export_selection)
+        )
+        self._export_selection_action.set_enabled(False)
+        self.add_action(self._export_selection_action)
 
     @staticmethod
     def _activate(callback: Callable[[], None], *_args: object) -> None:
@@ -269,6 +296,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._filmstrip = FilmStrip(
             on_select=self._on_raf_selected,
             on_loading=self._on_thumbs_loading,
+            on_selection_changed=self._on_selection_changed,
         )
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
         self._filmstrip.set_hexpand(True)
@@ -511,6 +539,9 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_initial_name(
             export_basename(self._raf_path or "grawji-export")
         )
+        start = initial_folder(self._settings.last_export_dir)
+        if start is not None:
+            dialog.set_initial_folder(start)
         dialog.save(self, None, self._on_export_response)
 
     def _on_export_response(self, dialog: Any, result: Any) -> None:
@@ -522,6 +553,8 @@ class MainWindow(Adw.ApplicationWindow):
         path = gfile.get_path()
         if path is None:
             return
+        self._settings.last_export_dir = str(Path(path).parent)
+        self._save_settings()
         self._set_busy(busy=True, status="Rendering full-resolution export…")
         self._worker.render(
             self.recipe_panel.get_recipe(),
@@ -545,8 +578,36 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_busy(busy=False, status=f"Exported to {path}")
 
     def _on_batch_export(self) -> None:
-        """Start the batch-export flow."""
-        complaint = self._batch.begin()
+        """Enter batch-select mode: pick images, then export them."""
+        if not self._filmstrip.paths:
+            self.preview_view.set_status("No images to export.")
+            return
+        self._filmstrip.enter_select_mode()
+        self.select_bar.set_reveal_child(True)
+        self.select_separator.set_visible(True)
+        self._update_export_button()
+
+    def _on_selection_changed(self, count: int) -> None:
+        """Reflect the batch selection in the bar label and export action."""
+        self.select_label.set_label(
+            "Select images to export" if count == 0 else f"{count} selected"
+        )
+        self._export_selection_action.set_enabled(count > 0)
+
+    def _select_all(self) -> None:
+        """Select every image (batch-select mode only)."""
+        self._filmstrip.select_all()
+
+    def _end_select_mode(self) -> None:
+        """Leave batch-select mode and hide the selection bar."""
+        self._filmstrip.exit_select_mode()
+        self.select_bar.set_reveal_child(False)
+        self.select_separator.set_visible(False)
+        self._update_export_button()
+
+    def _export_selection(self) -> None:
+        """Export the selected images; the bar stays until the run ends."""
+        complaint = self._batch.begin(self._filmstrip.selected_paths)
         if complaint is not None:
             self.preview_view.set_status(complaint)
 
@@ -576,8 +637,14 @@ class MainWindow(Adw.ApplicationWindow):
         # rapid changes - so the UI never locks up mid-render.
         enabled = self._session.is_open
         self.recipe_panel.set_controls_sensitive(enabled)
-        self.export_button.set_sensitive(enabled)
+        self._update_export_button()
         self.preview_view.set_status(status)
+
+    def _update_export_button(self) -> None:
+        """Enable the header Export only when it applies."""
+        self.export_button.set_sensitive(
+            self._session.is_open and not self._filmstrip.in_select_mode
+        )
 
     def _on_error(self, exc: Exception) -> None:
         """Surface a camera error in a dialog and reset the busy state."""

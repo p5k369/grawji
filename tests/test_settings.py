@@ -27,6 +27,7 @@ def test_round_trip(tmp_path):
             last_folder="/photos/raf",
             window_width=1400,
             window_height=900,
+            last_export_dir="/photos/export",
         ),
         path,
     )
@@ -37,6 +38,12 @@ def test_round_trip(tmp_path):
     assert loaded.last_folder == "/photos/raf"
     assert loaded.window_width == 1400
     assert loaded.window_height == 900
+    assert loaded.last_export_dir == "/photos/export"
+
+
+def test_last_export_dir_defaults_empty():
+    """last_export_dir starts empty so the dialog uses the system default."""
+    assert Settings().last_export_dir == ""
 
 
 def test_unknown_keys_ignored(tmp_path):

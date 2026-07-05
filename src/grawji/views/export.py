@@ -15,7 +15,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gio, GLib, Gtk
 
 from grawji.core import CameraSession, ForeignRafError
 from grawji.preview import CameraWorker
@@ -30,6 +30,16 @@ SetBusy = Callable[..., None]
 def export_basename(raf_path: Path | str) -> str:
     """Build an export filename from the RAF stem."""
     return f"{Path(raf_path).stem}.jpg"
+
+
+def initial_folder(path: str) -> Gio.File | None:
+    """A Gio.File for path if it is an existing directory, else None.
+
+    Used to open an export dialog at the last-used export folder.
+    """
+    if path and Path(path).is_dir():
+        return Gio.File.new_for_path(path)
+    return None
 
 
 def write_jpeg(
@@ -79,6 +89,7 @@ class BatchController:
         set_busy: SetBusy,
         on_status: Callable[[str], None],
         on_error: Callable[[Exception], None],
+        on_finished: Callable[[], None] | None = None,
     ) -> None:
         """Wire the controller to the window's session and callbacks.
 
@@ -87,7 +98,8 @@ class BatchController:
             worker: The camera worker the batch task runs on.
             session: The camera session the task drives directly.
             settings: Read and remember the overwrite choice.
-            get_paths: Returns the RAF paths to export.
+            get_paths: Returns the RAF paths to export when begin() is
+                called without an explicit list.
             get_recipe: Returns the recipe to render with.
             get_current_raf: Returns the currently open RAF (restored
                 after the batch), or None.
@@ -96,6 +108,8 @@ class BatchController:
             on_status: Sets the status line without the busy plumbing
                 (used for per-image progress).
             on_error: Receives a camera failure (on the main loop).
+            on_finished: Called after a run completes (not on camera
+                failure), e.g. to leave batch-select mode.
         """
         self._parent = parent
         self._worker = worker
@@ -107,19 +121,31 @@ class BatchController:
         self._set_busy = set_busy
         self._on_status = on_status
         self._on_error = on_error
+        self._on_finished = on_finished
         self._dialog: BatchExportDialog | None = None
         self._cancel: threading.Event | None = None
+        self._pending: list[str] = []
 
-    def begin(self) -> str | None:
+    def begin(self, paths: list[str] | None = None) -> str | None:
         """Start the flow with a folder pick; returns a status complaint.
+
+        Args:
+            paths: The RAFs to export. Defaults to the whole folder via
+                the get_paths callback when omitted.
 
         Returns None when the folder dialog was shown, or a message for
         the status line when there is nothing to export.
         """
-        if not self._get_paths():
-            return "No images to export."
+        resolved = list(paths) if paths is not None else self._get_paths()
+        if not resolved:
+            return "No images selected to export."
+        # Capture now, so the run is fixed even if the selection changes.
+        self._pending = resolved
         dialog = Gtk.FileDialog()
-        dialog.set_title("Batch export to folder")
+        dialog.set_title("Export to folder")
+        start = initial_folder(self._settings.last_export_dir)
+        if start is not None:
+            dialog.set_initial_folder(start)
         dialog.select_folder(self._parent, None, self._on_folder_response)
         return None
 
@@ -139,8 +165,9 @@ class BatchController:
         out_dir = gfile.get_path()
         if out_dir is None:
             return
+        self._settings.last_export_dir = out_dir  # persisted on window close
         self._dialog = BatchExportDialog(
-            count=len(self._get_paths()),
+            count=len(self._pending),
             overwrite=self._settings.batch_overwrite,
             on_start=partial(self._start, out_dir),
             on_cancel=self._on_cancel,
@@ -155,9 +182,9 @@ class BatchController:
     def _start(
         self, out_dir: str, overwrite: bool, skip_foreign: bool
     ) -> None:
-        """Render every RAF in the folder with the current recipe."""
+        """Render the pending RAFs with the current recipe."""
         self._settings.batch_overwrite = overwrite
-        paths = self._get_paths()
+        paths = self._pending
         recipe = self._get_recipe()
         total = len(paths)
         current = self._get_current_raf()
@@ -246,3 +273,5 @@ class BatchController:
         self._set_busy(busy=False, status=summary)
         if self._dialog is not None:
             self._dialog.finish(summary)
+        if self._on_finished is not None:
+            self._on_finished()
