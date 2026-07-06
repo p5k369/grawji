@@ -168,6 +168,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_select=self._scan_folder,
             bookmarks=self._settings.bookmarks,
             on_bookmarks_changed=self._on_bookmarks_changed,
+            on_expansion_changed=self._on_expanded_changed,
         )
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
@@ -204,10 +205,14 @@ class MainWindow(Adw.ApplicationWindow):
             _CAMERA_POLL_SECONDS, self._refresh_camera_status
         )
 
+        self._foldertree.restore_expanded(self._settings.expanded_folders)
         last = self._settings.last_folder
         if last and Path(last).is_dir():
             self._scan_folder(last)
             self._foldertree.reveal_path(last)
+            image = self._settings.last_image
+            if image and Path(image).is_file():
+                self._filmstrip.select_path(image)
 
     def _install_actions(self) -> None:
         """Install window actions used by the menu and keyboard shortcuts."""
@@ -343,6 +348,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._nav.update()
         self._generation += 1
         self._raf_path = Path(raf_path)
+        self._settings.last_image = raf_path
         self.set_title(f"grawji — {Path(raf_path).name}")
         self._set_busy(busy=True, status="Loading RAF…")
         if self._load_pending_id:
@@ -781,6 +787,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_bookmarks_changed(self, bookmarks: list[str]) -> None:
         """Persist the folder-tree bookmarks."""
         self._settings.bookmarks = bookmarks
+        self._save_settings()
+
+    def _on_expanded_changed(self, paths: list[str]) -> None:
+        """Persist the folder-tree expansion state."""
+        self._settings.expanded_folders = paths
         self._save_settings()
 
     def _on_settings_changed(self) -> None:

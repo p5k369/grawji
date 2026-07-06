@@ -48,6 +48,7 @@ class FolderTree(Gtk.ScrolledWindow):
         on_select: Callable[[str], None],
         bookmarks: list[str] | None = None,
         on_bookmarks_changed: Callable[[list[str]], None] | None = None,
+        on_expansion_changed: Callable[[list[str]], None] | None = None,
     ) -> None:
         """Create the tree.
 
@@ -56,11 +57,17 @@ class FolderTree(Gtk.ScrolledWindow):
             bookmarks: Folder paths pinned above the filesystem roots.
             on_bookmarks_changed: Called with the new bookmark list after
                 the user adds or removes one, so it can be persisted.
+            on_expansion_changed: Called (debounced) with the expanded
+                folder paths whenever the tree structure changes, so the
+                expansion state can be persisted.
         """
         super().__init__()
         self._on_select = on_select
         self._bookmarks = list(bookmarks or [])
         self._on_bookmarks_changed = on_bookmarks_changed
+        self._on_expansion_changed = on_expansion_changed
+        self._restoring = False
+        self._save_pending = False
         self._launcher: Any = None
         self.add_css_class("folder-tree")
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -87,6 +94,7 @@ class FolderTree(Gtk.ScrolledWindow):
             autoexpand=False,
             create_func=self._children_of,
         )
+        self._tree.connect("items-changed", self._on_tree_changed)
         self._selection = Gtk.SingleSelection(model=self._tree)
         self._selection.set_autoselect(False)
         self._selection.set_can_unselect(True)
@@ -138,6 +146,65 @@ class FolderTree(Gtk.ScrolledWindow):
             return False
         row.set_expanded(True)
         GLib.timeout_add(50, self._reveal_chain, chain, index + 1, 0)
+        return False
+
+    def expanded_folders(self) -> list[str]:
+        """Paths of every currently-expanded folder, shallowest first.
+
+        Only visible rows are walked, so the result is ancestor-closed:
+        a path is present only when all of its parents are expanded too.
+        """
+        out: list[str] = []
+        for i in range(self._tree.get_n_items()):
+            row = self._tree.get_item(i)
+            if row is None or not row.get_expanded():
+                continue
+            item = row.get_item()
+            path = item.file.get_path() if item is not None else None
+            if path:
+                out.append(path)
+        return out
+
+    def restore_expanded(self, paths: list[str]) -> None:
+        """Re-expand a saved set of folders (async, shallowest first)."""
+        ordered = sorted(set(paths), key=lambda p: len(Path(p).parts))
+        self._restoring = True
+        self._expand_next(ordered, 0, 0)
+
+    def _expand_next(self, paths: list[str], index: int, attempt: int) -> bool:
+        """Expand one saved folder, then schedule the next (async load)."""
+        if index >= len(paths):
+            self._restoring = False
+            return False
+        _position, row = self._find_row(Path(paths[index]))
+        if row is None:
+            if attempt < _REVEAL_MAX_ATTEMPTS:  # parent still loading
+                GLib.timeout_add(
+                    50, self._expand_next, paths, index, attempt + 1
+                )
+            else:  # not found, skip it and keep going
+                GLib.timeout_add(50, self._expand_next, paths, index + 1, 0)
+            return False
+        if row.is_expandable() and not row.get_expanded():
+            row.set_expanded(True)
+        GLib.timeout_add(50, self._expand_next, paths, index + 1, 0)
+        return False
+
+    def _on_tree_changed(self, *_a: Any) -> None:
+        """Persist the expansion set after the tree settles (debounced)."""
+        if self._restoring or self._on_expansion_changed is None:
+            return
+        if self._save_pending:
+            return
+        self._save_pending = True
+        GLib.timeout_add(400, self._flush_expansion)
+
+    def _flush_expansion(self) -> bool:
+        """Hand the current expansion set to the persistence callback."""
+        self._save_pending = False
+        if self._restoring or self._on_expansion_changed is None:
+            return False
+        self._on_expansion_changed(self.expanded_folders())
         return False
 
     def _on_row_activated(self, _list: Gtk.ListView, position: int) -> None:

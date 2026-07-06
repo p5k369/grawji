@@ -392,7 +392,7 @@ class RecipeLibraryController:
         recipe = self._library.get(name)
         if recipe is None:
             return
-        self._panel.set_recipe(recipe)
+        self._panel.set_active(recipe, name)
         self._on_render()
         self._on_status(f"Applied recipe “{name}”.")
 
