@@ -56,6 +56,10 @@ class Settings:
             preview.
         last_export_dir: Folder of the most recent export.
         the export dialogs open here. Empty means none.
+        expanded_folders: Folder-tree paths that were expanded, restored on
+            startup so the tree reopens as it was left.
+        last_image: Path of the image selected in the filmstrip, reselected
+            on startup when it is still present. Empty means none.
     """
 
     load_recipe_from_image: bool = True
@@ -72,6 +76,8 @@ class Settings:
     color_scheme: str = "default"
     show_histogram: bool = False
     last_export_dir: str = ""
+    expanded_folders: list[str] = field(default_factory=list)
+    last_image: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

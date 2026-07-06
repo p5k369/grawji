@@ -46,6 +46,27 @@ def test_last_export_dir_defaults_empty():
     assert Settings().last_export_dir == ""
 
 
+def test_view_state_round_trip(tmp_path):
+    """Expanded folders and the last image survive a save/load round-trip."""
+    path = tmp_path / "settings.json"
+    save_settings(
+        Settings(
+            expanded_folders=["/photos", "/photos/raf"],
+            last_image="/photos/raf/DSCF0001.RAF",
+        ),
+        path,
+    )
+    loaded = load_settings(path)
+    assert loaded.expanded_folders == ["/photos", "/photos/raf"]
+    assert loaded.last_image == "/photos/raf/DSCF0001.RAF"
+
+
+def test_view_state_defaults_empty():
+    """View-state fields start empty so a fresh install restores nothing."""
+    assert Settings().expanded_folders == []
+    assert Settings().last_image == ""
+
+
 def test_unknown_keys_ignored(tmp_path):
     """Unknown keys in the file are ignored."""
     path = tmp_path / "settings.json"

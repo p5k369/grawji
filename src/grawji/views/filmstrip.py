@@ -114,6 +114,12 @@ class FilmStrip(Gtk.ScrolledWindow):
         self.set_child(self._box)
         self.set_min_content_height(thumb_height + 52)
 
+        scroll = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.BOTH_AXES
+        )
+        scroll.connect("scroll", self._on_scroll)
+        self.add_controller(scroll)
+
     def scan(self, folder: str) -> None:
         """Populate the strip with the RAF files in folder, and watch it.
 
@@ -351,6 +357,13 @@ class FilmStrip(Gtk.ScrolledWindow):
         adj = self.get_hadjustment()
         top = adj.get_upper() - adj.get_page_size()
         adj.set_value(max(adj.get_lower(), min(top, adj.get_value() + delta)))
+
+    def _on_scroll(self, _controller: Any, dx: float, dy: float) -> bool:
+        """Pan the strip sideways from a plain wheel or trackpad swipe."""
+        delta = dx or dy
+        if delta:
+            self._scroll_by(delta * self._card_width())
+        return True
 
     def _card_width(self) -> float:
         """Width of one thumbnail card including the strip spacing."""
