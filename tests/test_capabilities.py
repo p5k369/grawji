@@ -56,6 +56,7 @@ def test_unknown_model_falls_back_to_xpro2_baseline():
         assert caps.has_clarity is False
         assert caps.has_smooth_skin is False
         assert caps.tone_half_step is False
+        assert caps.wb_temp_freeform is False
         assert "Acros" in caps.film_simulations
         assert "Eterna" not in caps.film_simulations
 
@@ -79,6 +80,7 @@ def test_xe5_tier_offers_everything():
     assert caps.has_clarity is True
     assert caps.has_smooth_skin is True
     assert caps.tone_half_step is True
+    assert caps.wb_temp_freeform is True
     assert "EternaBleach" in caps.film_simulations
 
 
