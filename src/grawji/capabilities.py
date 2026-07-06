@@ -86,6 +86,10 @@ class Capabilities:
         tone_max: Highest highlight/shadow tone the body honours.
         tone_half_step: Whether the body accepts 0.5 tone steps
             (hardware-verified on the XProcessor5 X-E5 only).
+        wb_temp_freeform: Whether WB colour temperature honours any Kelvin
+            value rather than only the 31 Fuji presets.
+            Pre-XProcessor5 bodies snap to the preset list,
+            so the UI offers only those there.
         has_grain_size: Whether grain size (Small/Large) is supported;
             it shares the grain slot at offset 545.
         has_color_chrome: Whether Color Chrome Effect (offset 549) works.
@@ -102,6 +106,7 @@ class Capabilities:
     tone_min: int = -2
     tone_max: int = 4
     tone_half_step: bool = False
+    wb_temp_freeform: bool = False
     has_grain_size: bool = False
     has_color_chrome: bool = False
     has_color_chrome_blue: bool = False
@@ -131,6 +136,7 @@ _GEN5 = replace(
     _GEN4_BLEACH,
     has_smooth_skin=True,
     tone_half_step=True,
+    wb_temp_freeform=True,
     film_simulations=_SIMS_NO_REALA,
 )
 _GEN5_REALA = replace(_GEN5, film_simulations=_SIMS_ALL)
@@ -203,6 +209,7 @@ def capabilities_for(profile: bytes, model: str | None = None) -> Capabilities:
     return replace(
         caps,
         tone_half_step=caps.tone_half_step and xproc5,
+        wb_temp_freeform=caps.wb_temp_freeform and xproc5,
         has_smooth_skin=(
             caps.has_smooth_skin and size >= _OFFSET_SMOOTH_SKIN + 4
         ),

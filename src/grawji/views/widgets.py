@@ -65,11 +65,14 @@ class SliderRow(Adw.ActionRow):
         self._value_chars = max(len(self._fmt(lower)), len(self._fmt(upper)))
         self._label.set_width_chars(self._value_chars)
 
-        suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        suffix.set_valign(Gtk.Align.CENTER)
-        suffix.append(self._scale)
-        suffix.append(self._label)
-        self.add_suffix(suffix)
+        self._suffix = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=2
+        )
+        self._suffix.set_valign(Gtk.Align.CENTER)
+        self._suffix.append(self._scale)
+        self._suffix.append(self._label)
+        self.add_suffix(self._suffix)
+        self._entry: Gtk.Entry | None = None
         self._adj.connect("value-changed", self._on_value_changed)
         self._update_label()
 
@@ -78,8 +81,11 @@ class SliderRow(Adw.ActionRow):
         self._update_label()
 
     def _update_label(self) -> None:
-        """Refresh the trailing value label with the snapped value."""
-        self._label.set_text(self._fmt(self.get_value()))
+        """Refresh the trailing value label (and the entry, if editable)."""
+        text = self._fmt(self.get_value())
+        self._label.set_text(text)
+        if self._entry is not None and not self._entry.has_focus():
+            self._entry.set_text(text)
 
     def get_value(self) -> float:
         """Return the current (snapped) slider value."""
@@ -122,6 +128,35 @@ class SliderRow(Adw.ActionRow):
     def set_value_chars(self, chars: int) -> None:
         """Override the value column width so rows can share one width."""
         self._label.set_width_chars(chars)
+
+    def set_editable(self, editable: bool) -> None:
+        """Swap the read-only value label for a typeable entry."""
+        if editable and self._entry is None:
+            self._entry = Gtk.Entry(
+                xalign=1.0,
+                width_chars=self._value_chars,
+                max_width_chars=self._value_chars,
+                input_purpose=Gtk.InputPurpose.DIGITS,
+            )
+            self._entry.connect("activate", lambda *_a: self._apply_entry())
+            focus = Gtk.EventControllerFocus()
+            focus.connect("leave", lambda *_a: self._apply_entry())
+            self._entry.add_controller(focus)
+            self._suffix.append(self._entry)
+        if self._entry is not None:
+            self._entry.set_visible(editable)
+        self._label.set_visible(not editable)
+        self._update_label()
+
+    def _apply_entry(self) -> None:
+        """Parse the entry text (digits only) and set the snapped value."""
+        if self._entry is None:
+            return
+        digits = "".join(c for c in self._entry.get_text() if c.isdigit())
+        if digits:
+            self.set_value(float(digits))
+        # Show the snapped/clamped result even while the entry is focused.
+        self._entry.set_text(self._fmt(self.get_value()))
 
 
 class WBShiftGrid(Gtk.DrawingArea):

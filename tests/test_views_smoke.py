@@ -114,6 +114,28 @@ def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:
     assert panel.recipe_button.get_label() == "R&D"
 
 
+def test_wb_temp_freeform_keeps_arbitrary_kelvin(tmp_path: Any) -> None:
+    """XProcessor5 keeps a non-preset Kelvin; older bodies snap to a preset."""
+    from dataclasses import replace
+
+    from grawji.capabilities import BASELINE
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+
+    # Preset mode: 5100K is not a preset, so it snaps away.
+    panel.apply_capabilities(BASELINE)
+    panel.set_recipe(Recipe(color_temp=5100))
+    assert panel.get_recipe().color_temp != 5100
+
+    # Freeform mode (XProcessor5): the exact Kelvin is preserved.
+    panel.apply_capabilities(replace(BASELINE, wb_temp_freeform=True))
+    panel.set_recipe(Recipe(color_temp=5100))
+    assert panel.get_recipe().color_temp == 5100
+
+
 def test_export_button_stays_wired(window: Any) -> None:
     """The Export button keeps a click handler."""
     signal_id = GObject.signal_lookup("clicked", type(window.export_button))

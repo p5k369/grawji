@@ -35,6 +35,9 @@ _GRAIN_SIZES = [e.name for e in GrainEffectSize]
 _CHROME = [e.name for e in ChromeEffect]
 _COLOR_SPACES = [member.name for member in ColorSpace]
 _WB_KELVIN_PRESETS = sorted(WB_KELVIN_PRESETS)
+_WB_TEMP_MIN = _WB_KELVIN_PRESETS[0]
+_WB_TEMP_MAX = _WB_KELVIN_PRESETS[-1]
+_WB_TEMP_STEP = 50
 
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
 _EV_EPSILON = 1e-9
@@ -148,6 +151,9 @@ class RecipePanel(Adw.PreferencesPage):
             step=1,
             fmt=lambda i: f"{_WB_KELVIN_PRESETS[round(i)]}K",
         )
+        # Preset-index picker by default; XProcessor5 bodies switch to a
+        # freeform Kelvin slider with a typeable field via apply_capabilities.
+        self._wb_temp_freeform = False
         self._wb_grid = WBShiftGrid()
         self._wb_shift_label = Gtk.Label(halign=Gtk.Align.CENTER)
         self._wb_shift_label.add_css_class("dim-label")
@@ -249,7 +255,7 @@ class RecipePanel(Adw.PreferencesPage):
             clarity=int(self._clarity_row.get_value()),
             wb_shift_r=red,
             wb_shift_b=blue,
-            color_temp=_WB_KELVIN_PRESETS[int(self._temp_row.get_value())],
+            color_temp=self._temp_kelvin(),
             color_space=_COLOR_SPACES[self.color_space_row.get_selected()],
         )
 
@@ -286,7 +292,7 @@ class RecipePanel(Adw.PreferencesPage):
             self._sharpness_row.set_value(recipe.sharpness)
             self._nr_row.set_value(recipe.noise_reduction)
             self._clarity_row.set_value(recipe.clarity)
-            self._temp_row.set_value(_nearest_kelvin_index(recipe.color_temp))
+            self._set_temp_row(recipe.color_temp)
             self._wb_grid.set_values(recipe.wb_shift_r, recipe.wb_shift_b)
             self._update_wb_shift_label()
             self.color_space_row.set_selected(
@@ -331,6 +337,7 @@ class RecipePanel(Adw.PreferencesPage):
         self.chrome_blue_row.set_visible(caps.has_color_chrome_blue)
         self.smooth_skin_row.set_visible(caps.has_smooth_skin)
         self._set_film_simulations(list(caps.film_simulations))
+        self._set_wb_temp_freeform(caps.wb_temp_freeform)
         self._update_grain_size_visibility()
 
     def set_recipe_menu(
@@ -433,6 +440,50 @@ class RecipePanel(Adw.PreferencesPage):
         """Show the colour-temp slider only when WB is Temperature."""
         wb = _WHITE_BALANCES[self.wb_row.get_selected()]
         self._temp_row.set_visible(wb == "Temperature")
+
+    def _temp_kelvin(self) -> int:
+        """Current colour temperature in Kelvin, for the active mode."""
+        value = self._temp_row.get_value()
+        if self._wb_temp_freeform:
+            return int(value)
+        return _WB_KELVIN_PRESETS[int(value)]
+
+    def _set_temp_row(self, kelvin: int) -> None:
+        """Load a Kelvin value into the temp row for the active mode."""
+        if self._wb_temp_freeform:
+            self._temp_row.set_value(kelvin)
+        else:
+            self._temp_row.set_value(_nearest_kelvin_index(kelvin))
+
+    def _set_wb_temp_freeform(self, freeform: bool) -> None:
+        """Switch the temp row between preset picker and free Kelvin.
+
+        XProcessor5 bodies honour any Kelvin, so the row becomes a
+        continuous slider with a typeable field; older bodies keep the
+        31-preset picker. The current temperature is preserved across
+        the switch.
+        """
+        if freeform == self._wb_temp_freeform:
+            return
+        kelvin = self._temp_kelvin()
+        self._suppress_signals = True
+        try:
+            self._wb_temp_freeform = freeform
+            if freeform:
+                self._temp_row.set_range(_WB_TEMP_MIN, _WB_TEMP_MAX)
+                self._temp_row.set_step(
+                    _WB_TEMP_STEP, fmt=lambda v: f"{round(v)}K"
+                )
+                self._temp_row.set_editable(True)
+            else:
+                self._temp_row.set_range(0, len(_WB_KELVIN_PRESETS) - 1)
+                self._temp_row.set_step(
+                    1, fmt=lambda i: f"{_WB_KELVIN_PRESETS[round(i)]}K"
+                )
+                self._temp_row.set_editable(False)
+            self._set_temp_row(kelvin)
+        finally:
+            self._suppress_signals = False
 
     def _on_grain_changed(self, *_args: object) -> None:
         """Hide the grain-size row when there is no grain to size."""
