@@ -12,6 +12,10 @@ jobs:
   tests:
     name: Run Python Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Lets the codecov upload authenticate via GitHub OIDC (no token).
+      id-token: write
     strategy:
       fail-fast: False
       matrix:
@@ -44,5 +48,5 @@ jobs:
       uses: codecov/codecov-action@v5
       with:
         fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
-        slug: p5k369/rawji
+        use_oidc: true
+        slug: p5k369/grawji
