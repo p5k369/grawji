@@ -1,0 +1,27 @@
+# Dependabot keeps the GitHub Actions pins and Python dependencies fresh.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    # One PR per week instead of one per action.
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    # The runtime deps are intentionally unpinned, so this mostly surfaces
+    # security advisories until something gains a version constraint.
+    groups:
+      python:
+        patterns:
+          - "*"
