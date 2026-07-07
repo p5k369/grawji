@@ -1,8 +1,8 @@
 exclude: ".*venv/.*|src/grawji/ui/.*|__init__.py"
 default_install_hook_types: [pre-commit, pre-push]
-# pre-commit.ci is free for public repos but needs a paid plan while the
-# repo is private. Re-enable this block (and install the pre-commit.ci
-# GitHub App) once the repo is public. Local hooks below work regardless.
+ci:
+  autofix_prs: false
+  skip: [mypy, pytest]
 repos:
   - repo: https://github.com/psf/black
     rev: 26.5.1
@@ -52,6 +52,7 @@ repos:
         types: [ python ]
         pass_filenames: false
         require_serial: true
+        stages: [pre-push]
 
       - id: pytest
         name: pytest

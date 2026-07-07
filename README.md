@@ -1,5 +1,13 @@
 # grawji
 
+[![Tests](https://github.com/p5k369/grawji/actions/workflows/test.yml/badge.svg)](https://github.com/p5k369/grawji/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/p5k369/grawji/graph/badge.svg)](https://codecov.io/gh/p5k369/grawji)
+[![pre-commit.ci status](https://results.pre-commit.ci/badge/github/p5k369/grawji/main.svg)](https://results.pre-commit.ci/latest/github/p5k369/grawji/main)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![License: GPL-3.0-or-later](https://img.shields.io/github/license/p5k369/grawji)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/p5k369/grawji)](https://github.com/p5k369/grawji/releases/latest)
+
+
 GTK4 frontend for [rawji](https://github.com/pinpox/rawji). Develop Fujifilm
 RAFs natively on Linux through the **real camera engine** (authentic film
 simulations, identical to X RAW STUDIO).
