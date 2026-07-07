@@ -58,6 +58,12 @@ _PARAM_OFFSETS = {
     name: PROFILE_PARAMS_OFFSET + index * 4 for index, name in _index_items
 }
 
+# todo(rawji#14): drop this shim once rawji's Monochromatic Color PR is
+#   merged and the pin updated.
+_MONO_COMPAT_INDEXES = {"BlackImageTone": 22, "MonochromaticColorRG": 25}
+for _name, _index in _MONO_COMPAT_INDEXES.items():
+    _PARAM_OFFSETS.setdefault(_name, PROFILE_PARAMS_OFFSET + _index * 4)
+
 # The film-simulation byte sits at its own parameter offset in rawji's layout.
 OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 
@@ -66,17 +72,26 @@ FILM_SIM_CODES: dict[str, int] = {e.name: int(e) for e in rawji.FilmSimulation}
 _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 
 # Params that use the value*10 tone encoding. rawji's TONE_PARAMS already
-# excludes NoiseReduction.
-_TONE_PARAMS = frozenset(TONE_PARAMS)
+_TONE_PARAMS = frozenset(TONE_PARAMS) | frozenset(_MONO_COMPAT_INDEXES)
 
 # Parameters that only exist on bodies with a long-enough profile (the
 # high-index effect slots). On shorter profiles (X100F 601 B, X-T3 605 B)
 # their offset overruns the profile, so they are skipped rather than fatal.
 _OPTIONAL_PARAMS = frozenset(
-    {"Clarity", "ColorChromeBlue", "SmoothSkinEffect"}
+    {
+        "Clarity",
+        "ColorChromeBlue",
+        "SmoothSkinEffect",
+        "BlackImageTone",
+        "MonochromaticColorRG",
+    }
 )
 
 _CLARITY_LIMIT = 5
+
+# Monochromatic Color axes apply only to these black-and-white sims.
+_MONO_SIM_PREFIXES = ("Acros", "Monochrome")
+_MONO_LIMIT = 18
 
 # Default wait_for_result timeout, in seconds.
 DEFAULT_TIMEOUT = 30
@@ -278,6 +293,13 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
         # Colour temperature only takes effect in Temperature mode.
         if recipe.white_balance == "Temperature":
             changes["WBColorTemp"] = validate_color_temp(recipe.color_temp)
+    # Monochromatic Color toning: only for B&W sims.
+    if recipe.film_simulation.startswith(_MONO_SIM_PREFIXES):
+        lim = _MONO_LIMIT
+        changes["BlackImageTone"] = max(-lim, min(lim, recipe.mono_warm_cool))
+        changes["MonochromaticColorRG"] = max(
+            -lim, min(lim, recipe.mono_magenta_green)
+        )
     return changes
 
 

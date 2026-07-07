@@ -44,6 +44,11 @@ class Recipe:
             2500 to 10000 (only applied when white_balance is
             "Temperature").
         color_space: Export colour space, "sRGB" or "AdobeRGB".
+        mono_warm_cool: Monochromatic Color warm-cool toning for B&W film
+            sims, camera units (negative cool, positive warm). Only applied
+            when the film simulation is Acros or Monochrome.
+        mono_magenta_green: Monochromatic Color magenta-green toning for B&W
+            film sims (negative magenta, positive green). XProcessor5 only.
     """
 
     film_simulation: str = "Provia"
@@ -65,6 +70,8 @@ class Recipe:
     wb_shift_b: int = 0
     color_temp: int = 5500
     color_space: str = "sRGB"
+    mono_warm_cool: int = 0
+    mono_magenta_green: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict suitable for JSON recipe storage."""

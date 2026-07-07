@@ -165,6 +165,8 @@ def test_wrong_root_raises() -> None:
             white_balance="Temperature",
             color_temp=5900,
             exposure=-1 / 3,
+            mono_warm_cool=6,
+            mono_magenta_green=-4,
         ),
     ],
 )
@@ -188,6 +190,17 @@ def test_round_trip(recipe: Recipe) -> None:
     assert parsed.wb_shift_r == recipe.wb_shift_r
     assert parsed.wb_shift_b == recipe.wb_shift_b
     assert parsed.color_space == recipe.color_space
+    assert parsed.mono_warm_cool == recipe.mono_warm_cool
+    assert parsed.mono_magenta_green == recipe.mono_magenta_green
+
+
+def test_mono_color_dropped_for_colour_sims() -> None:
+    velvia = Recipe(
+        film_simulation="Velvia", mono_warm_cool=8, mono_magenta_green=-8
+    )
+    parsed = parse_fp(serialize_fp(velvia))
+    assert parsed.mono_warm_cool == 0
+    assert parsed.mono_magenta_green == 0
 
 
 def test_color_temp_only_round_trips_in_temperature_mode() -> None:
