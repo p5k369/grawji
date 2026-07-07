@@ -16,7 +16,8 @@
     <ul>
       <li>Live preview through the camera's own conversion engine</li>
       <li>Full recipe control: film simulation, white balance, dynamic
-        range, tone, colour, sharpness, grain and noise reduction</li>
+        range, tone, colour, sharpness, grain, noise reduction, clarity,
+        Color Chrome and monochromatic colour toning</li>
       <li>Save, apply and import/export recipes in X RAW Studio's FP
         format</li>
       <li>Single and full-folder batch export at full resolution</li>
@@ -39,7 +40,6 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
-    <!-- Set the real date and drop type="development" when tagging. -->
-    <release version="0.2.0" type="development" date="2026-07-08"/>
+    <release version="0.2.0" date="2026-07-08"/>
   </releases>
 </component>
