@@ -34,8 +34,10 @@ OFF_HIGHLIGHTS = 573
 OFF_COLOR = 581
 OFF_NOISE_REDUCTION = 589
 OFF_COLOR_SPACE = 597
+OFF_MONO_WC = 601
 OFF_SMOOTH_SKIN = 605
 OFF_COLOR_CHROME_BLUE = 609
+OFF_MONO_MG = 613
 OFF_CLARITY = 617
 FULL_PROFILE = 632
 
@@ -201,6 +203,39 @@ def test_apply_recipe_encodes_half_step_tones():
     patched = apply_recipe(bytes(608), Recipe(highlights=0.5, shadows=-1.5))
     assert _u32(patched, OFF_HIGHLIGHTS) == 5
     assert _u32(patched, 577) == (1 << 32) - 15  # ShadowTone @577
+
+
+def test_apply_recipe_encodes_mono_toning_for_bw_sims():
+    """Monochromatic Color axes write *10 values at 601/613 on B&W sims."""
+    recipe = Recipe(
+        film_simulation="AcrosYe", mono_warm_cool=9, mono_magenta_green=-18
+    )
+    patched = apply_recipe(bytes(FULL_PROFILE), recipe)
+    assert _u32(patched, OFF_MONO_WC) == 90
+    assert _u32(patched, OFF_MONO_MG) == (1 << 32) - 180
+
+
+def test_apply_recipe_leaves_mono_slots_alone_on_color_sims():
+    """Color sims keep the slots' WB-reference values (dual-use slots)."""
+    base = bytearray(FULL_PROFILE)
+    struct.pack_into("<I", base, OFF_MONO_WC, 7)
+    struct.pack_into("<I", base, OFF_MONO_MG, 8)
+    recipe = Recipe(
+        film_simulation="Velvia", mono_warm_cool=9, mono_magenta_green=9
+    )
+    patched = apply_recipe(bytes(base), recipe)
+    assert _u32(patched, OFF_MONO_WC) == 7
+    assert _u32(patched, OFF_MONO_MG) == 8
+
+
+def test_apply_recipe_skips_mono_slots_on_short_profiles():
+    """A profile too short for the mono slots is not fatal (X-T3 has WC only)."""
+    recipe = Recipe(
+        film_simulation="AcrosYe", mono_warm_cool=9, mono_magenta_green=9
+    )
+    patched = apply_recipe(bytes(608), recipe)
+    assert _u32(patched, OFF_MONO_WC) == 90  # WC fits a 605-byte layout pad
+    assert len(patched) == 608
 
 
 def test_half_step_tones_round_trip():

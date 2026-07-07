@@ -25,7 +25,7 @@ from rawji.fuji_enums import (
 
 from grawji.capabilities import FILM_SIMULATIONS, Capabilities
 from grawji.recipe import Recipe
-from grawji.views.widgets import SliderRow, WBShiftGrid
+from grawji.views.widgets import MonoColorGrid, SliderRow, WBShiftGrid
 
 _FILM_SIMULATIONS = list(FILM_SIMULATIONS)
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
@@ -184,6 +184,9 @@ class RecipePanel(Adw.PreferencesPage):
             "Noise reduction", lower=-4, upper=4, fmt=ifmt
         )
         self._clarity_row = SliderRow("Clarity", lower=-5, upper=5, fmt=ifmt)
+        # Monochromatic Color toning (B&W sims). Range widened per body in
+        # apply_capabilities; hidden until a B&W sim is selected.
+        self._build_mono_controls(ifmt)
         self._slider_rows = (
             self._exposure_row,
             self._highlights_row,
@@ -193,6 +196,7 @@ class RecipePanel(Adw.PreferencesPage):
             self._nr_row,
             self._clarity_row,
             self._temp_row,
+            self._mono_wc_row,
         )
         value_chars = max(row.value_chars for row in self._slider_rows)
         for row in self._slider_rows:
@@ -202,6 +206,8 @@ class RecipePanel(Adw.PreferencesPage):
         # range, then exposure leading the tonal block.
         for row in (
             self.film_row,
+            self._mono_wc_row,
+            self._mono_grid_row,
             self.grain_row,
             self.grain_size_row,
             self.chrome_row,
@@ -223,6 +229,24 @@ class RecipePanel(Adw.PreferencesPage):
             self.recipe_group.add(row)
         self._update_temp_visibility()
         self._update_grain_size_visibility()
+        self._update_mono_visibility()
+
+    def _build_mono_controls(self, ifmt: Callable[[float], str]) -> None:
+        """Build the Monochromatic Color controls (WC slider and MG grid)."""
+        self._mono_wc_row = SliderRow("Mono WC", lower=-9, upper=9, fmt=ifmt)
+        self._mono_two_axis = False
+        self._mono_grid = MonoColorGrid()
+        self._mono_label = Gtk.Label(halign=Gtk.Align.CENTER)
+        self._mono_label.add_css_class("dim-label")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.append(self._mono_grid)
+        box.append(self._mono_label)
+        self._mono_grid_row = Adw.ActionRow(title="Mono color")
+        self._mono_grid_row.add_suffix(box)
+        self._update_mono_label()
 
     def _connect_signals(self) -> None:
         """Route every row's edits into the panel's changed signal."""
@@ -233,6 +257,8 @@ class RecipePanel(Adw.PreferencesPage):
         self._wb_grid.connect_changed(self._on_wb_shift_changed)
         self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
         self.grain_row.connect("notify::selected", self._on_grain_changed)
+        self.film_row.connect("notify::selected", self._update_mono_visibility)
+        self._mono_grid.connect_changed(self._on_mono_grid_changed)
 
     def get_recipe(self) -> Recipe:
         """Read the current selector values into a Recipe."""
@@ -257,6 +283,8 @@ class RecipePanel(Adw.PreferencesPage):
             wb_shift_b=blue,
             color_temp=self._temp_kelvin(),
             color_space=_COLOR_SPACES[self.color_space_row.get_selected()],
+            mono_warm_cool=self._mono_values()[0],
+            mono_magenta_green=self._mono_values()[1],
         )
 
     def set_recipe(self, recipe: Recipe) -> None:
@@ -292,6 +320,11 @@ class RecipePanel(Adw.PreferencesPage):
             self._sharpness_row.set_value(recipe.sharpness)
             self._nr_row.set_value(recipe.noise_reduction)
             self._clarity_row.set_value(recipe.clarity)
+            self._mono_wc_row.set_value(recipe.mono_warm_cool)
+            self._mono_grid.set_values(
+                recipe.mono_magenta_green, recipe.mono_warm_cool
+            )
+            self._update_mono_label()
             self._set_temp_row(recipe.color_temp)
             self._wb_grid.set_values(recipe.wb_shift_r, recipe.wb_shift_b)
             self._update_wb_shift_label()
@@ -302,6 +335,7 @@ class RecipePanel(Adw.PreferencesPage):
             self._suppress_signals = False
         self._update_temp_visibility()
         self._update_grain_size_visibility()
+        self._update_mono_visibility()
 
     def set_active(self, recipe: Recipe, label: str) -> None:
         """Load a recipe and mark it active (for the recipe indicator)."""
@@ -338,7 +372,12 @@ class RecipePanel(Adw.PreferencesPage):
         self.smooth_skin_row.set_visible(caps.has_smooth_skin)
         self._set_film_simulations(list(caps.film_simulations))
         self._set_wb_temp_freeform(caps.wb_temp_freeform)
+        self._mono_two_axis = caps.has_mono_mg
+        if caps.mono_max:
+            self._mono_wc_row.set_range(-caps.mono_max, caps.mono_max)
+            self._mono_grid.set_range(caps.mono_max)
         self._update_grain_size_visibility()
+        self._update_mono_visibility()
 
     def set_recipe_menu(
         self,
@@ -389,8 +428,9 @@ class RecipePanel(Adw.PreferencesPage):
             self._update_temp_visibility()
 
     def set_wb_grid_tint(self, colored: bool) -> None:
-        """Tint the WB shift grid cells, or not (user preference)."""
+        """Tint the WB shift and Mono color grid cells (user preference)."""
         self._wb_grid.set_colored(colored)
+        self._mono_grid.set_colored(colored)
 
     def _set_film_simulations(self, sims: list[str]) -> None:
         """Offer only the given film simulations, keeping the selection."""
@@ -440,6 +480,40 @@ class RecipePanel(Adw.PreferencesPage):
         """Show the colour-temp slider only when WB is Temperature."""
         wb = _WHITE_BALANCES[self.wb_row.get_selected()]
         self._temp_row.set_visible(wb == "Temperature")
+
+    def _mono_values(self) -> tuple[int, int]:
+        """Current (warm-cool, magenta-green), from the grid or WC slider.
+
+        The grid's x axis is magenta-green and its y axis is warm-cool.
+        """
+        if self._mono_two_axis:
+            mg, wc = self._mono_grid.get_values()
+            return wc, mg
+        return int(self._mono_wc_row.get_value()), 0
+
+    def _on_mono_grid_changed(self, _wc: int, _mg: int) -> None:
+        """Handle a Monochromatic Color grid edit."""
+        self._update_mono_label()
+        self._on_edited()
+
+    def _update_mono_label(self) -> None:
+        """Show the grid marker's warm-cool / magenta-green position."""
+        mg, wc = self._mono_grid.get_values()
+        self._mono_label.set_text(f"WC {wc:+d}  MG {mg:+d}")
+
+    def _update_mono_visibility(self, *_args: object) -> None:
+        """Show Monochromatic Color only for B&W sims the body supports.
+
+        These slots hold WB-preset reference values for color sims, so the
+        toning is meaningful only on Acros/Monochrome.
+        """
+        caps = self._caps
+        sim = self._film_sims[self.film_row.get_selected()]
+        is_bw = sim.startswith(("Acros", "Monochrome"))
+        two_axis = is_bw and bool(caps and caps.has_mono_mg)
+        wc_only = is_bw and bool(caps and caps.has_mono_wc) and not two_axis
+        self._mono_grid_row.set_visible(two_axis)
+        self._mono_wc_row.set_visible(wc_only)
 
     def _temp_kelvin(self) -> int:
         """Current colour temperature in Kelvin, for the active mode."""

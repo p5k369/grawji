@@ -29,8 +29,10 @@ __all__ = [
 
 # High-index effect slots (513 + index * 4). They only exist on long enough
 # profiles; older bodies (X100F 601 B, X-T3 605 B) stop before them.
+_OFFSET_MONO_WC = PROFILE_PARAMS_OFFSET + 22 * 4
 _OFFSET_SMOOTH_SKIN = PROFILE_PARAMS_OFFSET + 23 * 4
 _OFFSET_COLOR_CHROME_BLUE = PROFILE_PARAMS_OFFSET + 24 * 4
+_OFFSET_MONO_MG = PROFILE_PARAMS_OFFSET + 25 * 4
 _OFFSET_CLARITY = PROFILE_PARAMS_OFFSET + 26 * 4
 
 # Every film simulation grawji can write (grawji.core maps the names to
@@ -97,6 +99,12 @@ class Capabilities:
         has_color_chrome_blue: Whether Color Chrome FX Blue (609) works.
         has_clarity: Whether Clarity (offset 617) works.
         has_smooth_skin: Whether Smooth Skin Effect (offset 605) works.
+        has_mono_wc: Whether Monochromatic Color warm-cool (offset 601)
+            works. Gen4 and later (hardware-verified on the X-T3).
+        has_mono_mg: Whether Monochromatic Color magenta-green (offset 613)
+            works. XProcessor5 only (hardware-verified on the X-E5).
+        mono_max: The +/- range of each Monochromatic Color axis in camera
+            units (9 on gen4, 18 on XProcessor5; 0 = unsupported).
         film_simulations: The film simulations the body offers, from
             rawji's enum vocabulary.
 
@@ -112,6 +120,9 @@ class Capabilities:
     has_color_chrome_blue: bool = False
     has_clarity: bool = False
     has_smooth_skin: bool = False
+    has_mono_wc: bool = False
+    has_mono_mg: bool = False
+    mono_max: int = 0
     film_simulations: tuple[str, ...] = _SIMS_GEN3
 
 
@@ -122,13 +133,18 @@ BASELINE = Capabilities()
 # processor generations cleanly, which is why the table is per body, not per
 # processor.
 _GEN4_EARLY = Capabilities(
-    has_color_chrome=True, film_simulations=_SIMS_ETERNA
+    has_color_chrome=True,
+    has_mono_wc=True,
+    mono_max=9,
+    film_simulations=_SIMS_ETERNA,
 )
 _GEN4_LATE = Capabilities(
     has_grain_size=True,
     has_color_chrome=True,
     has_color_chrome_blue=True,
     has_clarity=True,
+    has_mono_wc=True,
+    mono_max=9,
     film_simulations=_SIMS_CLASSIC_NEG,
 )
 _GEN4_BLEACH = replace(_GEN4_LATE, film_simulations=_SIMS_BLEACH)
@@ -137,6 +153,8 @@ _GEN5 = replace(
     has_smooth_skin=True,
     tone_half_step=True,
     wb_temp_freeform=True,
+    has_mono_mg=True,
+    mono_max=18,
     film_simulations=_SIMS_NO_REALA,
 )
 _GEN5_REALA = replace(_GEN5, film_simulations=_SIMS_ALL)
@@ -218,4 +236,8 @@ def capabilities_for(profile: bytes, model: str | None = None) -> Capabilities:
             and size >= _OFFSET_COLOR_CHROME_BLUE + 4
         ),
         has_clarity=caps.has_clarity and size >= _OFFSET_CLARITY + 4,
+        has_mono_wc=caps.has_mono_wc and size >= _OFFSET_MONO_WC + 4,
+        has_mono_mg=(
+            caps.has_mono_mg and xproc5 and size >= _OFFSET_MONO_MG + 4
+        ),
     )

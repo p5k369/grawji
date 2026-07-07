@@ -173,6 +173,7 @@ class WBShiftGrid(Gtk.DrawingArea):
     def __init__(self) -> None:
         """Create the grid widget."""
         super().__init__()
+        self._range = self._RANGE
         self._r = 0
         self._b = 0
         self._colored = False
@@ -193,8 +194,13 @@ class WBShiftGrid(Gtk.DrawingArea):
         self._colored = colored
         self.queue_draw()
 
-    @staticmethod
-    def _cell_rgb(r: float, b: float) -> tuple[float, float, float]:
+    def set_range(self, half: int) -> None:
+        """Set the +/- range each axis spans (re-clamps and redraws)."""
+        self._range = max(1, int(half))
+        self.set_values(self._r, self._b)
+        self.queue_draw()
+
+    def _cell_rgb(self, r: float, b: float) -> tuple[float, float, float]:
         """Opponent-colour tint for a shift: +R red, +B blue, and inverses."""
         base, amp = 0.5, 0.22
         red = base + amp * (r - b)
@@ -209,8 +215,8 @@ class WBShiftGrid(Gtk.DrawingArea):
 
     def set_values(self, red: int, blue: int) -> None:
         """Set the marker position without invoking the change callback."""
-        self._r = max(-self._RANGE, min(self._RANGE, int(red)))
-        self._b = max(-self._RANGE, min(self._RANGE, int(blue)))
+        self._r = max(-self._range, min(self._range, int(red)))
+        self._b = max(-self._range, min(self._range, int(blue)))
         self.queue_draw()
 
     def connect_changed(self, callback: Callable[[int, int], None]) -> None:
@@ -231,7 +237,7 @@ class WBShiftGrid(Gtk.DrawingArea):
         )
         size = max(size, 1.0)
         ox = (self.get_width() - size) / 2
-        return ox, margin, size, size / (2 * self._RANGE)
+        return ox, margin, size, size / (2 * self._range)
 
     def _on_pressed(
         self, _g: Gtk.GestureClick, _n: int, x: float, y: float
@@ -250,10 +256,10 @@ class WBShiftGrid(Gtk.DrawingArea):
         ox, oy, size, _ = self._geometry()
         frac_x = (x - ox) / size
         frac_y = (y - oy) / size
-        red = round((frac_x * 2 - 1) * self._RANGE)
-        blue = round((1 - frac_y * 2) * self._RANGE)
-        red = max(-self._RANGE, min(self._RANGE, red))
-        blue = max(-self._RANGE, min(self._RANGE, blue))
+        red = round((frac_x * 2 - 1) * self._range)
+        blue = round((1 - frac_y * 2) * self._range)
+        red = max(-self._range, min(self._range, red))
+        blue = max(-self._range, min(self._range, blue))
         if (red, blue) != (self._r, self._b):
             self._r, self._b = red, blue
             self.queue_draw()
@@ -262,7 +268,7 @@ class WBShiftGrid(Gtk.DrawingArea):
 
     def _fill_cells(self, cx: Any, ox: float, oy: float, step: float) -> None:
         """Tint every grid cell with its opponent-colour shift preview."""
-        cells = 2 * self._RANGE
+        cells = 2 * self._range
         for col in range(cells):
             r = ((col + 0.5) / cells) * 2 - 1
             for row in range(cells):
@@ -288,7 +294,7 @@ class WBShiftGrid(Gtk.DrawingArea):
             line = (color.red, color.green, color.blue)
         cx.set_line_width(1.0)
         cx.set_source_rgba(*line, 0.2)
-        for i in range(2 * self._RANGE + 1):
+        for i in range(2 * self._range + 1):
             pos = i * step
             cx.move_to(ox, oy + pos)
             cx.line_to(ox + size, oy + pos)
@@ -306,8 +312,8 @@ class WBShiftGrid(Gtk.DrawingArea):
         cx.line_to(mid_x, oy + size)
         cx.stroke()
 
-        px = ox + (self._r / self._RANGE / 2 + 0.5) * size
-        py = oy + (0.5 - self._b / self._RANGE / 2) * size
+        px = ox + (self._r / self._range / 2 + 0.5) * size
+        py = oy + (0.5 - self._b / self._range / 2) * size
         if self._colored:
             cx.set_source_rgb(1.0, 1.0, 1.0)
             cx.arc(px, py, 5.5, 0, 6.2832)
@@ -319,6 +325,27 @@ class WBShiftGrid(Gtk.DrawingArea):
             cx.set_source_rgba(color.red, color.green, color.blue, 0.95)
             cx.arc(px, py, 5.0, 0, 6.2832)
             cx.fill()
+
+
+class MonoColorGrid(WBShiftGrid):
+    """The Monochromatic Color toning grid for black-and-white sims.
+
+    Horizontal axis is magenta-green (right = green), vertical is warm-cool
+    (up = warm, so cool/minus is down), matching the in-camera grid. The x
+    value is magenta-green and y is warm-cool. Same click/drag/snap grid as
+    the WB shift, with a warm-cool / magenta-green tint and its own range.
+    """
+
+    _RANGE = 18
+
+    def _cell_rgb(self, x: float, y: float) -> tuple[float, float, float]:
+        """Tint a cell: x green(+)/magenta(-), y warm(+)/cool(-)."""
+        base, amp = 0.5, 0.22
+        red = base + amp * (y * 0.7 - x)
+        green = base + amp * x
+        blue = base + amp * (-y * 0.7 - x)
+        clamp = lambda v: max(0.0, min(1.0, v))  # noqa: E731
+        return clamp(red), clamp(green), clamp(blue)
 
 
 class Histogram(Gtk.DrawingArea):

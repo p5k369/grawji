@@ -16,6 +16,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 
 _ATTRS = "standard::display-name,standard::type,standard::is-hidden"
 _REVEAL_MAX_ATTEMPTS = 20
+_ANY_PARENT = object()
 
 
 class _FolderItem(GObject.Object):
@@ -109,43 +110,18 @@ class FolderTree(Gtk.ScrolledWindow):
         self.set_child(listview)
 
     def reveal_path(self, target: str) -> None:
-        """Expand the tree to target and select it (if it still exists).
+        """Select target once it becomes visible, expanding nothing new."""
+        self._select_when_visible(Path(target), 0)
 
-        Walks from the relevant root down to the folder, expanding each
-        level and waiting briefly for its (async) children to load.
-        """
-        target_path = Path(target)
-        try:
-            target_path.relative_to(Path.home())
-            root = Path.home()
-        except ValueError:
-            root = Path("/")
-        chain: list[Path] = []
-        node = target_path
-        while True:
-            chain.append(node)
-            if node in (root, node.parent):
-                break
-            node = node.parent
-        chain.reverse()
-        self._reveal_chain(chain, 0, 0)
-
-    def _reveal_chain(
-        self, chain: list[Path], index: int, attempt: int
-    ) -> bool:
-        """Expand one level of chain, then schedule the next (async)."""
-        position, row = self._find_row(chain[index])
-        if row is None:
-            if attempt < _REVEAL_MAX_ATTEMPTS:  # children still loading
-                GLib.timeout_add(
-                    50, self._reveal_chain, chain, index, attempt + 1
-                )
-            return False
-        if index == len(chain) - 1:
+    def _select_when_visible(self, target: Path, attempt: int) -> bool:
+        """Select target's row, retrying while restore_expanded reopens it."""
+        position, row = self._find_row(target)
+        if row is not None:
             self._selection.set_selected(position)
-            return False
-        row.set_expanded(True)
-        GLib.timeout_add(50, self._reveal_chain, chain, index + 1, 0)
+        elif attempt < _REVEAL_MAX_ATTEMPTS:  # restore still expanding
+            GLib.timeout_add(
+                50, self._select_when_visible, target, attempt + 1
+            )
         return False
 
     def expanded_folders(self) -> list[str]:
@@ -167,27 +143,35 @@ class FolderTree(Gtk.ScrolledWindow):
 
     def restore_expanded(self, paths: list[str]) -> None:
         """Re-expand a saved set of folders (async, shallowest first)."""
-        ordered = sorted(set(paths), key=lambda p: len(Path(p).parts))
+        saved = set(paths)
+        ordered = sorted(saved, key=lambda p: len(Path(p).parts))
         self._restoring = True
-        self._expand_next(ordered, 0, 0)
+        self._expand_next(ordered, saved, 0, 0)
 
-    def _expand_next(self, paths: list[str], index: int, attempt: int) -> bool:
+    def _expand_next(
+        self, paths: list[str], saved: set[str], index: int, attempt: int
+    ) -> bool:
         """Expand one saved folder, then schedule the next (async load)."""
         if index >= len(paths):
             self._restoring = False
             return False
-        _position, row = self._find_row(Path(paths[index]))
+        path = Path(paths[index])
+        parent = str(path.parent)
+        under = parent if parent != paths[index] and parent in saved else None
+        _position, row = self._find_row(path, parent=under)
         if row is None:
             if attempt < _REVEAL_MAX_ATTEMPTS:  # parent still loading
                 GLib.timeout_add(
-                    50, self._expand_next, paths, index, attempt + 1
+                    50, self._expand_next, paths, saved, index, attempt + 1
                 )
             else:  # not found, skip it and keep going
-                GLib.timeout_add(50, self._expand_next, paths, index + 1, 0)
+                GLib.timeout_add(
+                    50, self._expand_next, paths, saved, index + 1, 0
+                )
             return False
         if row.is_expandable() and not row.get_expanded():
             row.set_expanded(True)
-        GLib.timeout_add(50, self._expand_next, paths, index + 1, 0)
+        GLib.timeout_add(50, self._expand_next, paths, saved, index + 1, 0)
         return False
 
     def _on_tree_changed(self, *_a: Any) -> None:
@@ -213,13 +197,21 @@ class FolderTree(Gtk.ScrolledWindow):
         if row is not None and row.is_expandable():
             row.set_expanded(not row.get_expanded())
 
-    def _find_row(self, path: Path) -> tuple[int, Any]:
+    def _find_row(
+        self, path: Path, *, parent: Any = _ANY_PARENT
+    ) -> tuple[int, Any]:
         """Return the (index, TreeListRow) for path in the flattened tree."""
         wanted = str(path)
         for i in range(self._tree.get_n_items()):
             row = self._tree.get_item(i)
             item = row.get_item()
-            if item is not None and item.file.get_path() == wanted:
+            if item is None or item.file.get_path() != wanted:
+                continue
+            if parent is _ANY_PARENT:
+                return i, row
+            pr = row.get_parent()
+            pp = pr.get_item().file.get_path() if pr is not None else None
+            if pp == parent:
                 return i, row
         return -1, None
 

@@ -191,10 +191,12 @@ def parse_fp(text: str) -> Recipe:
     except ValueError:
         color_temp = 0
 
+    film_sim = _FILM_SIM.get(
+        fields.get("FilmSimulation", ""), defaults.film_simulation
+    )
+    is_bw = film_sim.startswith(("Acros", "Monochrome"))
     return Recipe(
-        film_simulation=_FILM_SIM.get(
-            fields.get("FilmSimulation", ""), defaults.film_simulation
-        ),
+        film_simulation=film_sim,
         white_balance=_WHITE_BALANCE.get(
             fields.get("WhiteBalance", ""), defaults.white_balance
         ),
@@ -228,6 +230,8 @@ def parse_fp(text: str) -> Recipe:
         color_space=_COLOR_SPACE.get(
             fields.get("ColorSpace", ""), defaults.color_space
         ),
+        mono_warm_cool=integer("BlackImageTone") if is_bw else 0,
+        mono_magenta_green=(integer("MonochromaticColor_RG") if is_bw else 0),
     )
 
 
@@ -264,10 +268,12 @@ def serialize_fp(
         The FP file contents as a string (UTF-8, with an XML declaration).
     """
     is_temp = recipe.white_balance == "Temperature"
+    # Monochromatic Color toning is written only for B&W sims.
+    is_bw = recipe.film_simulation.startswith(("Acros", "Monochrome"))
     code = iopcode if iopcode is not None else _DEFAULT_IOPCODE
     # PropertyGroup children in X RAW Studio's order. A None value is written
-    # as an empty element, which is how X RAW Studio records an unset effect;
-    # the effects grawji does not model stay neutral that way.
+    # as an empty element, which is how X RAW Studio records an unset effect.
+    # The effects grawji does not model stay neutral that way.
     fields: list[tuple[str, str | None]] = [
         ("SerialNumber", None),
         ("TetherRAWConditonCode", None),
@@ -288,8 +294,11 @@ def serialize_fp(
             "FilmSimulation",
             _FILM_SIM_OUT.get(recipe.film_simulation, "Provia"),
         ),
-        ("BlackImageTone", "0"),
-        ("MonochromaticColor_RG", "0"),
+        ("BlackImageTone", str(recipe.mono_warm_cool) if is_bw else "0"),
+        (
+            "MonochromaticColor_RG",
+            str(recipe.mono_magenta_green) if is_bw else "0",
+        ),
         ("GrainEffect", _GRAIN_OUT.get(recipe.grain, "OFF")),
         ("GrainEffectSize", _GRAIN_SIZE_OUT.get(recipe.grain_size, "SMALL")),
         ("ChromeEffect", _CHROME_OUT.get(recipe.color_chrome, "OFF")),

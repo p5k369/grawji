@@ -114,6 +114,42 @@ def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:
     assert panel.recipe_button.get_label() == "R&D"
 
 
+def test_mono_color_rows_gate_on_bw_and_capability(tmp_path: Any) -> None:
+    """Monochromatic Color rows show only for B&W sims the body supports."""
+    from grawji.capabilities import Capabilities
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+
+    panel.apply_capabilities(
+        Capabilities(has_mono_wc=True, has_mono_mg=True, mono_max=18)
+    )
+    panel.set_recipe(
+        Recipe(
+            film_simulation="Acros", mono_warm_cool=12, mono_magenta_green=-6
+        )
+    )
+    assert panel._mono_grid_row.get_visible()
+    assert not panel._mono_wc_row.get_visible()
+    assert panel.get_recipe().mono_warm_cool == 12
+    assert panel.get_recipe().mono_magenta_green == -6
+
+    # A colour sim hides the grid.
+    panel.set_recipe(Recipe(film_simulation="Velvia"))
+    assert not panel._mono_grid_row.get_visible()
+    assert not panel._mono_wc_row.get_visible()
+
+    # A warm-cool-only body shows the slider, not the grid.
+    panel.apply_capabilities(Capabilities(has_mono_wc=True, mono_max=9))
+    panel.set_recipe(Recipe(film_simulation="Monochrome", mono_warm_cool=5))
+    assert panel._mono_wc_row.get_visible()
+    assert not panel._mono_grid_row.get_visible()
+    assert panel.get_recipe().mono_warm_cool == 5
+    assert panel.get_recipe().mono_magenta_green == 0
+
+
 def test_wb_temp_freeform_keeps_arbitrary_kelvin(tmp_path: Any) -> None:
     """XProcessor5 keeps a non-preset Kelvin; older bodies snap to a preset."""
     from dataclasses import replace

@@ -660,7 +660,7 @@ class FilmStripNav:
 
     def _nav_button(self, icon: str, tooltip: str, delta: int) -> Gtk.Button:
         """Create a filmstrip scroll button: tap one card, hold to glide."""
-        button = Gtk.Button(icon_name=icon, vexpand=True)
+        button = Gtk.Button(icon_name=icon)
         button.add_css_class("flat")
         button.set_tooltip_text(tooltip)
         state: dict[str, int | None] = {"hold": None}
