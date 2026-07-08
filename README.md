@@ -91,9 +91,6 @@ flatpak install --user grawji.flatpak
 flatpak run io.github.p5k369.grawji
 ```
 
-Flathub submission is planned; once it lands this becomes a single
-`flatpak install flathub io.github.p5k369.grawji`.
-
 </details>
 
 ### From source
@@ -148,9 +145,8 @@ editor type hints for GTK and libadwaita.
 
 To build the Flatpak (needs `flatpak-builder` and the GNOME 50 runtime/SDK),
 `make flatpak` builds and installs it. `make flatpak-bundle` writes a
-single-file `grawji.flatpak`. The manifest is `flatpak/io.github.p5k369.grawji.yaml`.
-For a Flathub submission its pip dependencies must be pinned with
-flatpak-pip-generator and the `--share=network` build args dropped.
+single-file `grawji.flatpak`. The manifest is `flatpak/io.github.p5k369.grawji.yaml`,
+it builds fully offline (the build backend is vendored as pinned wheels).
 
 ## Credits
 
