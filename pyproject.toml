@@ -12,7 +12,8 @@ license = "GPL-3.0-or-later"
 authors = [{ name = "Patrick Zwerschke" }]
 dependencies = [
   "PyGObject",
-  "rawji",
+  # rawji is not on PyPI and does not bump versions
+  "rawji @ git+https://github.com/pinpox/rawji@5549fdb93028549c2bab8abe963f1a91c50b5368",
 ]
 
 [project.optional-dependencies]

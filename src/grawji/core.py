@@ -58,12 +58,6 @@ _PARAM_OFFSETS = {
     name: PROFILE_PARAMS_OFFSET + index * 4 for index, name in _index_items
 }
 
-# todo(rawji#14): drop this shim once rawji's Monochromatic Color PR is
-#   merged and the pin updated.
-_MONO_COMPAT_INDEXES = {"BlackImageTone": 22, "MonochromaticColorRG": 25}
-for _name, _index in _MONO_COMPAT_INDEXES.items():
-    _PARAM_OFFSETS.setdefault(_name, PROFILE_PARAMS_OFFSET + _index * 4)
-
 # The film-simulation byte sits at its own parameter offset in rawji's layout.
 OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 
@@ -71,8 +65,8 @@ OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 FILM_SIM_CODES: dict[str, int] = {e.name: int(e) for e in rawji.FilmSimulation}
 _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 
-# Params that use the value*10 tone encoding. rawji's TONE_PARAMS already
-_TONE_PARAMS = frozenset(TONE_PARAMS) | frozenset(_MONO_COMPAT_INDEXES)
+# Params that use the value*10 tone encoding.
+_TONE_PARAMS = frozenset(TONE_PARAMS)
 
 # Parameters that only exist on bodies with a long-enough profile (the
 # high-index effect slots). On shorter profiles (X100F 601 B, X-T3 605 B)

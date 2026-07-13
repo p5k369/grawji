@@ -7,10 +7,17 @@ from rawji.fuji_profile import create_profile_simple
 
 from grawji.capabilities import (
     BASELINE,
+    FILM_SIMULATIONS,
     capabilities_for,
     is_xprocessor5,
     read_iopcode,
 )
+from grawji.core import FILM_SIM_CODES
+
+
+def test_film_simulations_match_rawjis_enum():
+    """The hand-ordered film-sim tuple covers rawji's enum completely."""
+    assert set(FILM_SIMULATIONS) == set(FILM_SIM_CODES)
 
 
 def _profile_with_iopcode(iopcode: str) -> bytes:
