@@ -35,6 +35,9 @@ dev = [
 [project.scripts]
 grawji = "grawji.__main__:main"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/grawji"]
 exclude = ["**/*.cmb", "**/*.cmb.bak"]
