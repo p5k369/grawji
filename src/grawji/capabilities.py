@@ -3,7 +3,7 @@
 The feature table below encodes docs/feature-matrix.md: every body with
 USB RAW conversion, keyed by its EXIF model name. An unknown or missing
 model falls back to the X-Pro2 baseline, the minimum feature set every
-USB-capable body honours. The live profile can only narrow a table row,
+USB-capable body honors. The live profile can only narrow a table row,
 never widen it.
 """
 
@@ -35,9 +35,10 @@ _OFFSET_COLOR_CHROME_BLUE = PROFILE_PARAMS_OFFSET + 24 * 4
 _OFFSET_MONO_MG = PROFILE_PARAMS_OFFSET + 25 * 4
 _OFFSET_CLARITY = PROFILE_PARAMS_OFFSET + 26 * 4
 
-# Every film simulation grawji can write (grawji.core maps the names to
-# profile codes, including the ones rawji's enum lacks), in the camera's
-# own menu order.
+# Every film simulation grawji can write, in the camera's own IQ-menu
+# order. rawji's FilmSimulation enum carries no ordering, so the tuple is
+# maintained by hand; test_film_simulations_match_rawjis_enum keeps the
+# names in sync with the enum.
 FILM_SIMULATIONS = (
     "Provia",
     "Velvia",

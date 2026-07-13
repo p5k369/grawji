@@ -75,7 +75,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/pinpox/rawji.git
-        commit: 11eec8baf48be356c3693c42b5fc966157b7f84a
+        commit: 5549fdb93028549c2bab8abe963f1a91c50b5368
 
   - name: python3-hatchling
     buildsystem: simple

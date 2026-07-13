@@ -10,7 +10,7 @@ PYTHON ?= python3
 VENV := .venv
 PIP := $(VENV)/bin/pip
 PY := $(VENV)/bin/python
-RAWJI ?= rawji@git+https://github.com/pinpox/rawji
+RAWJI ?=
 APP_ID := io.github.p5k369.grawji
 MANIFEST := flatpak/$(APP_ID).yaml
 
@@ -21,12 +21,12 @@ $(VENV):
 	$(PIP) install --upgrade pip
 
 install: $(VENV)
-	$(PIP) install $(RAWJI)
+	$(if $(RAWJI),$(PIP) install $(RAWJI))
 	$(PIP) install -e .
 	@echo "Done. Put the camera in USB RAW CONV. mode, then: make run"
 
 dev: $(VENV)
-	$(PIP) install $(RAWJI)
+	$(if $(RAWJI),$(PIP) install $(RAWJI))
 	$(PIP) install -e ".[dev]"
 	$(VENV)/bin/pre-commit install
 	@echo "Dev environment ready."
