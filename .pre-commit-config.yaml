@@ -4,7 +4,7 @@ ci:
   autofix_prs: false
   skip: [mypy, pytest]
 repos:
-  - repo: https://github.com/psf/black
+  - repo: https://github.com/psf/black-pre-commit-mirror
     rev: 26.5.1
     hooks:
       - id: black
@@ -12,7 +12,7 @@ repos:
         language_version: python3
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -28,7 +28,7 @@ repos:
         args: [ --branch, main ]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.14
+    rev: v0.15.21
     hooks:
       - id: ruff-check
         name: ruff
