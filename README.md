@@ -52,8 +52,8 @@ render-many** workflow:
 
 ## Install
 
-Two ways to get grawji: the **[Flatpak](#flatpak)** (bundled, one command, for
-everyone) or **[from source](#from-source)**
+Three ways to get grawji: the **[Flatpak](#flatpak)** (bundled, one command,
+for everyone), **[Nix](#nix)** (flake), or **[from source](#from-source)**.
 
 First, put the camera in RAW-conversion USB mode, otherwise it enumerates as
 a card reader and rawji cannot talk to it:
@@ -90,6 +90,19 @@ flatpak run io.github.p5k369.grawji
 ```
 
 </details>
+
+### Nix
+
+The repo is a flake. With `nix` and flakes enabled, run it straight from
+GitHub, no clone required:
+
+```sh
+nix run github:p5k369/grawji
+```
+
+`nix build github:p5k369/grawji` produces `./result/bin/grawji`. The flake
+exposes `packages.<system>.{grawji,rawji}`, so you can also add grawji as an
+input to your own flake.
 
 ### From source
 

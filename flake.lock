@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1784356753,
+        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "rawji-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784294947,
+        "narHash": "sha256-z/Z1dFcJ+mnOt6LXVZ2W2SvsexImrE32dNBAG1Rq+ec=",
+        "owner": "pinpox",
+        "repo": "rawji",
+        "rev": "2219c46e594ff6e3794081995da967f34ca0ae47",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pinpox",
+        "repo": "rawji",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "rawji-src": "rawji-src"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
