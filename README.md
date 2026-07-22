@@ -52,21 +52,20 @@ render-many** workflow:
 
 ## Install
 
-Three ways to get grawji: the **[Flatpak](#flatpak)** (bundled, one command,
-for everyone), **[Nix](#nix)** (flake), or **[from source](#from-source)**.
-
 First, put the camera in RAW-conversion USB mode, otherwise it enumerates as
 a card reader and rawji cannot talk to it:
 
 > **Set Up** → **Connection Setting** → **USB Mode** → **USB RAW CONV./BACKUP RESTORE**
 
-### Flatpak
-
-Bundles everything (GTK4, libadwaita, the EXIF and USB stacks, rawji and
-grawji), only the shared GNOME runtime comes from the network.
+| How | Install | Notes                                                                                    |
+| --- | --- |------------------------------------------------------------------------------------------|
+| **Flatpak** | `flatpak install --user grawji.flatpak` | bundle from [Releases](https://github.com/p5k369/grawji/releases), everything included   |
+| **Nix** | `nix run github:p5k369/grawji` | flake, no clone needed. `nix build` gives `./result/bin/grawji`                          |
+| **Gentoo** | `emerge media-gfx/grawji` | in [GURU](https://wiki.gentoo.org/wiki/Project:GURU), `~amd64`, pulls `dev-python/rawji` |
+| **Source** | `make install` | system GTK4/PyGObject first, see below                                                   |
 
 <details>
-<summary><b>Step-by-step</b></summary>
+<summary><b>Flatpak, step-by-step</b></summary>
 
 **1. Set up Flatpak and Flathub** (most distros ship Flatpak):
 
@@ -91,26 +90,26 @@ flatpak run io.github.p5k369.grawji
 
 </details>
 
-### Nix
+<details>
+<summary><b>Gentoo, step-by-step</b></summary>
 
-The repo is a flake. With `nix` and flakes enabled, run it straight from
-GitHub, no clone required:
+Enable the overlay and accept the `~amd64` keywords once:
 
 ```sh
-nix run github:p5k369/grawji
+eselect repository enable guru
+emerge --sync guru
+echo "media-gfx/grawji ~amd64
+dev-python/rawji ~amd64" >> /etc/portage/package.accept_keywords/grawji
+emerge -av media-gfx/grawji
 ```
 
-`nix build github:p5k369/grawji` produces `./result/bin/grawji`. The flake
-exposes `packages.<system>.{grawji,rawji}`, so you can also add grawji as an
-input to your own flake.
+</details>
 
-### From source
+<details>
+<summary><b>From source, step-by-step</b></summary>
 
 GTK4 and PyGObject come from your distribution, not pip: install the system
 packages, then `make install`.
-
-<details>
-<summary><b>Step-by-step</b></summary>
 
 **1. System packages** (GTK4, libadwaita, PyGObject, the GExiv2 EXIF reader,
 and the USB stack). Names vary by distro:

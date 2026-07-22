@@ -158,6 +158,7 @@ omit = [
   "**/__main__.py",
   "src/grawji/views/**",
   "src/grawji/ui/**",
+  "src/grawji/logsetup.py",
 ]
 
 [tool.coverage.report]
