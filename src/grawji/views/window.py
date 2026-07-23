@@ -20,7 +20,9 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from grawji import camera_info, raf
 from grawji.capabilities import (
+    Capabilities,
     capabilities_for,
+    capabilities_for_model,
     is_known_model,
     read_iopcode,
 )
@@ -182,6 +184,10 @@ class MainWindow(Adw.ApplicationWindow):
             on_status=self.preview_view.set_status,
             get_iopcode=self._read_iopcode,
             on_baseline_changed=self._on_baseline_changed,
+            get_capabilities=self._current_capabilities,
+            get_model=camera_info.detect_camera,
+            load_bank_names=self._load_bank_names,
+            run_transfer=self._run_bank_transfer,
         )
         self._batch = BatchController(
             parent=self,
@@ -198,7 +204,6 @@ class MainWindow(Adw.ApplicationWindow):
             on_error=self._on_error,
             on_finished=self._end_select_mode,
         )
-
         self._install_actions()
         self._refresh_camera_status()
         GLib.timeout_add_seconds(
@@ -768,6 +773,60 @@ class MainWindow(Adw.ApplicationWindow):
         with contextlib.suppress(GLib.Error):
             dialog.choose_finish(result)
         self._error_showing = False
+
+    def _current_capabilities(self) -> Capabilities:
+        """Capabilities of the connected body for recipe compatibility."""
+        profile = self._session.profile
+        model = camera_info.detect_camera()
+        if profile is not None:
+            raf_model = (
+                imagemeta.camera_model(str(self._raf_path))
+                if self._raf_path is not None
+                else None
+            )
+            return capabilities_for(profile, model=raf_model or model)
+        return capabilities_for_model(model)
+
+    def _load_bank_names(self, on_loaded: Callable[[list[str]], None]) -> None:
+        """Read current bank names on a worker thread."""
+
+        def work() -> None:
+            try:
+                names = self._session.read_bank_names()
+            except Exception:
+                names = []
+            GLib.idle_add(on_loaded, names)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _run_bank_transfer(
+        self,
+        recipes: dict[Any, Any],
+        names: dict[Any, Any],
+        on_done: Callable[[str], None],
+        on_error: Callable[[str], None],
+    ) -> None:
+        """Transfer recipes to the camera's banks on a worker thread."""
+
+        def work() -> None:
+            try:
+                result = self._session.transfer_bank_recipes(recipes, names)
+            except Exception as exc:
+                GLib.idle_add(on_error, f"Bank transfer failed: {exc}")
+                return
+            banks = ", ".join(f"C{i + 1}" for i in result.slots)
+            message = (
+                f"Wrote recipes to {banks} on the {result.model}. "
+                "The live preview session was closed."
+            )
+            if result.dropped:
+                unusable = sorted(
+                    {f for fields in result.dropped.values() for f in fields}
+                )
+                message += " Dropped unsupported: " + ", ".join(unusable) + "."
+            GLib.idle_add(on_done, message)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""

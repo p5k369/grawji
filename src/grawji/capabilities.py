@@ -22,6 +22,7 @@ __all__ = [
     "FILM_SIMULATIONS",
     "Capabilities",
     "capabilities_for",
+    "capabilities_for_model",
     "is_known_model",
     "is_xprocessor5",
     "read_iopcode",
@@ -215,6 +216,12 @@ def is_known_model(model: str | None) -> bool:
     newer than the table.
     """
     return model is not None and _normalize(model) in _MODEL_CAPABILITIES
+
+
+def capabilities_for_model(model: str | None) -> Capabilities:
+    """Return a body's tier capabilities from its model alone."""
+    caps = _MODEL_CAPABILITIES.get(_normalize(model)) if model else None
+    return caps if caps is not None else BASELINE
 
 
 def capabilities_for(profile: bytes, model: str | None = None) -> Capabilities:

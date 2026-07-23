@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -12,8 +13,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
+from grawji import compatibility as compat
 from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary
@@ -25,6 +27,52 @@ _UI = (
     .read_text(encoding="utf-8")
 )
 
+# Every supported body has seven C1-C7 custom banks.
+_BANK_COUNT = 7
+# Camera-family hero
+_HERO_PX = 44
+_HERO_ART_RATIO = 88 / 128
+_HERO_SUPERSAMPLE = 4
+
+
+def _family(model: str | None) -> str | None:
+    """Map a model string to a packaged camera-family icon stem."""
+    if not model:
+        return None
+    key = "".join(c for c in model.upper() if c.isalnum())
+    if key.startswith("X100"):
+        return "x100"
+    if key.startswith(("XE", "XPRO", "XM")):
+        return "x-e"
+    if key.startswith(("XT", "XH", "XS", "GFX")):
+        return "x-t"
+    return None
+
+
+def _family_paintable(model: str | None) -> Gdk.Texture | None:
+    """A camera-family texture for the model, or None."""
+    family = _family(model)
+    if family is None:
+        return None
+    try:
+        svg = (
+            resources.files("grawji")
+            .joinpath("ui", "icons", f"{family}.svg")
+            .read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    width = _HERO_PX * _HERO_SUPERSAMPLE
+    height = round(width * _HERO_ART_RATIO)
+    loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+    loader.set_size(width, height)
+    loader.write(svg.encode("utf-8"))
+    loader.close()
+    pixbuf = loader.get_pixbuf()
+    if pixbuf is None:
+        return None
+    return Gdk.Texture.new_for_pixbuf(pixbuf)
+
 
 @Gtk.Template(string=_UI)
 class RecipeManagerDialog(Adw.Dialog):
@@ -32,10 +80,17 @@ class RecipeManagerDialog(Adw.Dialog):
 
     __gtype_name__ = "GrawjiRecipeManagerDialog"
 
+    toasts = Gtk.Template.Child()
     import_button = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
+    transfer_button = Gtk.Template.Child()
     content = Gtk.Template.Child()
     stack = Gtk.Template.Child()
+    camera_image = Gtk.Template.Child()
+    camera_header = Gtk.Template.Child()
+    camera_stack = Gtk.Template.Child()
+    camera_banks = Gtk.Template.Child()
+    camera_none_page = Gtk.Template.Child()
 
     def __init__(  # noqa: PLR0913
         self,
@@ -52,10 +107,20 @@ class RecipeManagerDialog(Adw.Dialog):
         on_rename_folder: Callable[[str, str], None],
         on_delete_folder: Callable[[str], None],
         on_reorder_folder: Callable[[str, bool], None],
+        get_capabilities: Callable[[], Any] | None = None,
+        get_model: Callable[[], str | None] | None = None,
+        load_bank_names: (
+            Callable[[Callable[[list[str]], None]], None] | None
+        ) = None,
+        on_transfer: (
+            Callable[[dict[int, str], dict[int, str]], None] | None
+        ) = None,
     ) -> None:
         """Wire the dialog to the library (read) and intent callbacks."""
         super().__init__()
         self._library = library
+        self._get_capabilities = get_capabilities
+        self._caps = get_capabilities() if get_capabilities else None
         self._on_import = on_import
         self._on_export = on_export
         self._on_delete = on_delete
@@ -67,12 +132,20 @@ class RecipeManagerDialog(Adw.Dialog):
         self._on_rename_folder = on_rename_folder
         self._on_delete_folder = on_delete_folder
         self._on_reorder_folder = on_reorder_folder
+        self._get_model = get_model
+        self._load_bank_names = load_bank_names
+        self._on_transfer = on_transfer
         self._dragged: str | None = None
         self._groups: list[Adw.PreferencesGroup] = []
+        self._banks: list[dict[str, Any]] = []
+        self._bank_recipe: dict[int, str] = {}
+        self._toast: Adw.Toast | None = None
 
         self.import_button.connect("clicked", lambda *_a: self._on_import())
         self.new_folder_button.connect("clicked", self._on_new_folder)
+        self.transfer_button.connect("clicked", self._on_transfer_clicked)
         self.refresh()
+        self._build_camera_pane()
 
     def refresh(self) -> None:
         """Rebuild the grouped view from the current library state."""
@@ -110,6 +183,14 @@ class RecipeManagerDialog(Adw.Dialog):
         row = Adw.ActionRow()
         row.set_use_markup(False)
         row.set_title(name)
+        recipe = self._library.get(name)
+        if recipe is not None and recipe.origin_body:
+            row.set_subtitle(f"from {recipe.origin_body}")
+
+        if recipe is not None and self._caps is not None:
+            badge = self._fit_badge(recipe)
+            if badge is not None:
+                row.add_suffix(badge)
 
         star = Gtk.ToggleButton(valign=Gtk.Align.CENTER)
         star.set_icon_name("starred-symbolic")
@@ -129,11 +210,176 @@ class RecipeManagerDialog(Adw.Dialog):
 
         source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
         source.connect("prepare", self._on_recipe_drag, name)
+        source.connect("drag-begin", self._on_drag_begin, name)
         row.add_controller(source)
         drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
         drop.connect("drop", self._on_recipe_drop, name)
         row.add_controller(drop)
         return row
+
+    def _fit_badge(self, recipe: Recipe) -> Gtk.Widget | None:
+        """A compatibility chip for the connected body, or None if full fit."""
+        if self._caps is None:
+            return None
+        verdict = compat.evaluate(recipe, self._caps)
+        if verdict.level == compat.FULL:
+            return None
+        if verdict.level == compat.UNAVAILABLE:
+            label, css = "sim N/A", "error"
+        else:
+            label, css = f"{len(verdict.issues)} dropped", "warning"
+        chip = Gtk.Label(label=label, valign=Gtk.Align.CENTER)
+        chip.add_css_class("caption")
+        chip.add_css_class(css)
+        chip.set_tooltip_text("\n".join(verdict.issues))
+        return chip
+
+    def _build_camera_pane(self) -> None:
+        """Show the connected body's banks, or a placeholder."""
+        model = self._get_model() if self._get_model else None
+        can_write = bool(model) and self._on_transfer is not None
+        self.transfer_button.set_sensitive(can_write)
+        if not can_write:
+            self.camera_stack.set_visible_child_name("none")
+            return
+
+        self.camera_stack.set_visible_child_name("banks")
+        self.camera_header.set_label(f"{model} · custom banks")
+        texture = _family_paintable(model)
+        if texture is not None:
+            self.camera_image.set_from_paintable(texture)
+        for slot in range(_BANK_COUNT):
+            self.camera_banks.append(self._build_bank_card(slot))
+        if self._load_bank_names is not None:
+            self._load_bank_names(self.set_bank_names)
+
+    def _build_bank_card(self, slot: int) -> Gtk.Widget:
+        """A drop-target card for bank C{slot+1} with a rename affordance."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.add_css_class("card")
+        inner = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=12,
+            margin_end=12,
+        )
+        card.append(inner)
+
+        header = Gtk.Box(spacing=8)
+        title = Gtk.Label(label=f"C{slot + 1}", xalign=0)
+        title.add_css_class("heading")
+        header.append(title)
+        name_label = Gtk.Label(xalign=0, hexpand=True)
+        name_label.add_css_class("dim-label")
+        header.append(name_label)
+        edit = Gtk.Button(
+            icon_name="document-edit-symbolic", valign=Gtk.Align.CENTER
+        )
+        edit.add_css_class("flat")
+        edit.set_tooltip_text("Rename this bank")
+        edit.connect("clicked", self._on_rename_bank, slot)
+        header.append(edit)
+        inner.append(header)
+
+        assigned = Gtk.Label(label="Drop a recipe here", xalign=0)
+        assigned.add_css_class("dim-label")
+        assigned.set_wrap(True)
+        inner.append(assigned)
+
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect("drop", self._on_bank_drop, slot)
+        card.add_controller(drop)
+
+        self._banks.append(
+            {
+                "name_row": header,
+                "name_label": name_label,
+                "assigned": assigned,
+                "loaded": "",
+            }
+        )
+        return card
+
+    def _on_bank_drop(
+        self, _target: Any, value: Any, _x: float, _y: float, slot: int
+    ) -> bool:
+        """Assign the dropped recipe to bank slot."""
+        name = value if isinstance(value, str) else self._dragged
+        if not name or self._library.get(name) is None:
+            return False
+        self._bank_recipe[slot] = name
+        label = self._banks[slot]["assigned"]
+        recipe = self._library.get(name)
+        note = ""
+        if recipe is not None and self._caps is not None:
+            verdict = compat.evaluate(recipe, self._caps)
+            if verdict.level == compat.UNAVAILABLE:
+                note = "  (film sim N/A here)"
+            elif verdict.level == compat.DEGRADED:
+                note = f"  ({len(verdict.issues)} dropped)"
+        label.set_label(f"→ {name}{note}")
+        label.remove_css_class("dim-label")
+        self._dragged = None
+        return True
+
+    def _on_rename_bank(self, _button: Any, slot: int) -> None:
+        """Prompt for a new name for bank slot."""
+        label = self._banks[slot]["name_label"]
+        self._prompt(
+            f"Rename bank C{slot + 1}",
+            "New name",
+            label.get_text(),
+            label.set_label,
+        )
+
+    def set_bank_names(self, names: list[str]) -> None:
+        """Reveal each bank's name row and fill it from the camera."""
+        if not names:
+            return
+        for bank, name in zip(self._banks, names, strict=False):
+            bank["name_row"].set_visible(True)
+            bank["name_label"].set_label(name)
+            bank["loaded"] = name
+
+    def _names_by_slot(self) -> dict[int, str]:
+        """Bank names the user CHANGED from the loaded ones."""
+        out: dict[int, str] = {}
+        for slot, bank in enumerate(self._banks):
+            if not bank["name_row"].get_visible():
+                continue
+            text = bank["name_label"].get_text().strip()
+            if text and text != bank["loaded"]:
+                out[slot] = text
+        return out
+
+    def set_busy(self, busy: bool) -> None:
+        """Disable Transfer while a transfer runs."""
+        self.transfer_button.set_sensitive(not busy)
+
+    def show_toast(self, message: str) -> None:
+        """Show an in-dialog toast, replacing any previous one."""
+        if self._toast is not None:
+            self._toast.dismiss()
+        self._toast = Adw.Toast.new(message)
+        self.toasts.add_toast(self._toast)
+
+    def on_transfer_finished(self) -> None:
+        """Refresh the bank pane after a transfer (reload names, clear)."""
+        self._bank_recipe.clear()
+        for bank in self._banks:
+            bank["assigned"].set_label("Drop a recipe here")
+            bank["assigned"].add_css_class("dim-label")
+        if self._load_bank_names is not None:
+            self._load_bank_names(self.set_bank_names)
+
+    def _on_transfer_clicked(self, _button: Any) -> None:
+        """Hand the bank assignments and renames to the controller."""
+        if self._on_transfer is None:
+            return
+        if self._bank_recipe or self._names_by_slot():
+            self._on_transfer(dict(self._bank_recipe), self._names_by_slot())
 
     def _row_popover(self, name: str) -> Gtk.Popover:
         """The overflow menu for a recipe: move, rename, export, delete."""
@@ -208,6 +454,23 @@ class RecipeManagerDialog(Adw.Dialog):
         """Begin dragging a recipe row."""
         self._dragged = name
         return Gdk.ContentProvider.new_for_value(name)
+
+    def _on_drag_begin(self, _source: Any, drag: Any, name: str) -> None:
+        """Attach a compact recipe chip as the drag icon."""
+        chip = Gtk.Box()
+        chip.add_css_class("card")
+        label = Gtk.Label(
+            label=name,
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=14,
+            margin_end=14,
+        )
+        label.add_css_class("heading")
+        chip.append(label)
+        icon = Gtk.DragIcon.get_for_drag(drag)
+        icon.set_child(chip)
+        drag.set_hotspot(-8, -8)
 
     def _on_recipe_drop(
         self, _target: Any, _value: Any, _x: float, _y: float, target: str
@@ -340,6 +603,12 @@ class RecipeLibraryController:
         on_status: Callable[[str], None],
         get_iopcode: Callable[[], int | None],
         on_baseline_changed: Callable[[], None] = lambda: None,
+        get_capabilities: Callable[[], Any] | None = None,
+        get_model: Callable[[], str | None] | None = None,
+        load_bank_names: (
+            Callable[[Callable[[list[str]], None]], None] | None
+        ) = None,
+        run_transfer: Callable[..., None] | None = None,
     ) -> None:
         """Wire the controller.
 
@@ -353,6 +622,14 @@ class RecipeLibraryController:
                 None when no image is open.
             on_baseline_changed: Called when the compare baseline is set
                 or cleared, so the window can update the compare state.
+            get_capabilities: Returns the connected body's Capabilities for
+                recipe-compatibility badges, or None to disable them.
+            get_model: Returns the connected body's model, used to tag a
+                saved recipe's origin and drive the camera-bank pane.
+            load_bank_names: Reads current bank names off the main thread
+                (calls its callback with them), or None.
+            run_transfer: Performs the USB bank transfer off the main
+                thread (recipes, names, on_done, on_error), or None.
         """
         self._parent = parent
         self._library = library
@@ -361,6 +638,10 @@ class RecipeLibraryController:
         self._on_status = on_status
         self._get_iopcode = get_iopcode
         self._on_baseline_changed = on_baseline_changed
+        self._get_capabilities = get_capabilities
+        self._get_model = get_model
+        self._load_bank_names = load_bank_names
+        self._run_transfer = run_transfer
         self._manager: RecipeManagerDialog | None = None
         self._refresh()
 
@@ -379,9 +660,50 @@ class RecipeLibraryController:
             on_rename_folder=self._rename_folder,
             on_delete_folder=self._delete_folder,
             on_reorder_folder=self._reorder_folder,
+            get_capabilities=self._get_capabilities,
+            get_model=self._get_model,
+            load_bank_names=self._load_bank_names,
+            on_transfer=self._transfer_banks,
         )
         self._manager.connect("closed", self._on_manager_closed)
         self._manager.present(self._parent)
+
+    def _transfer_banks(
+        self, assignments: dict[int, str], names: dict[int, str]
+    ) -> None:
+        """Resolve dropped recipe names and run the USB bank transfer."""
+        if self._run_transfer is None:
+            return
+        recipes: dict[int, Recipe] = {}
+        for slot, name in assignments.items():
+            recipe = self._library.get(name)
+            if recipe is not None:
+                recipes[slot] = recipe
+        if not recipes and not names:
+            return
+        msg = f"Transferring {len(recipes)} recipe(s) to the camera…"
+        if self._manager is not None:
+            self._manager.set_busy(True)
+            self._manager.show_toast(msg)
+        self._on_status(msg)
+        self._run_transfer(
+            recipes, names, self._on_bank_done, self._on_bank_fail
+        )
+
+    def _on_bank_done(self, message: str) -> None:
+        """Report a finished bank transfer, refresh and re-enable Transfer."""
+        self._on_status(message)
+        if self._manager is not None:
+            self._manager.set_busy(False)
+            self._manager.on_transfer_finished()
+            self._manager.show_toast(message)
+
+    def _on_bank_fail(self, message: str) -> None:
+        """Report a failed bank transfer and re-enable Transfer."""
+        self._on_status(message)
+        if self._manager is not None:
+            self._manager.set_busy(False)
+            self._manager.show_toast(message)
 
     def save_current(self) -> None:
         """Ask for a name and save the panel's controls as a recipe."""
@@ -394,7 +716,18 @@ class RecipeLibraryController:
             return
         self._panel.set_active(recipe, name)
         self._on_render()
-        self._on_status(f"Applied recipe “{name}”.")
+        self._on_status(f"Applied recipe “{name}”.{self._fit_note(recipe)}")
+
+    def _fit_note(self, recipe: Recipe) -> str:
+        """A short compatibility note for the connected body, or ""."""
+        if self._get_capabilities is None:
+            return ""
+        verdict = compat.evaluate(recipe, self._get_capabilities())
+        if verdict.level == compat.UNAVAILABLE:
+            return f" Warning: {verdict.issues[0]}."
+        if verdict.level == compat.DEGRADED:
+            return f" On this body: {'; '.join(verdict.issues)}."
+        return ""
 
     def import_fp(self) -> None:
         """Pick an X RAW Studio FP file and import its recipe."""
@@ -538,6 +871,10 @@ class RecipeLibraryController:
         name = entry.get_text().strip()
         if not name:
             return
+        if not recipe.origin_body and self._get_model is not None:
+            model = self._get_model()
+            if model:
+                recipe = replace(recipe, origin_body=model)
         self._library.add(name, recipe)
         self._refresh()
         self._panel.set_active(recipe, name)

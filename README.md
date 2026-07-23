@@ -35,6 +35,10 @@ export.
   parameters it supports. Effects it does not model are left neutral.
 - **Filmstrip** browser with EXIF info for the selected RAF.
 - **Export** single images or batch-export a whole folder at full resolution.
+- **Experimental**: write recipes into the camera's C1-C7 preset banks over
+  USB. Verified on the X100F and X-T3. X-Pro2, X-T2, X-T20, X-E3 and X-T30
+  should share the layout. Newer bodies are refused, their settings blob is
+  not mapped yet.
 - Keyboard shortcuts, pan/zoom with a darktable-style background, and a
   remembered window size and last folder.
 
@@ -52,8 +56,7 @@ render-many** workflow:
 
 ## Install
 
-First, put the camera in RAW-conversion USB mode, otherwise it enumerates as
-a card reader and rawji cannot talk to it:
+First, put the camera in RAW-conversion USB mode, otherwise rawji cannot talk to it:
 
 > **Set Up** → **Connection Setting** → **USB Mode** → **USB RAW CONV./BACKUP RESTORE**
 
