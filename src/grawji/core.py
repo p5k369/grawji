@@ -45,6 +45,7 @@ from rawji.fuji_profile import (
     encode_tone_value,
 )
 
+from grawji import camera_backup
 from grawji.recipe import Recipe
 
 # rawji parameter name -> byte offset in the native profile, derived from
@@ -548,6 +549,44 @@ class CameraSession:
             self._camera.set_profile(profile)
             self._camera.trigger_conversion(full_resolution=full_resolution)
             return cast("bytes", self._camera.wait_for_result(self._timeout))
+
+    def transfer_bank_recipes(
+        self,
+        assignments: dict[int, Recipe],
+        names: dict[int, str] | None = None,
+    ) -> Any:
+        """Write recipes into the camera's custom banks over USB."""
+        with self._lock:
+            self._close_locked()
+            return camera_backup.transfer_recipes(
+                self._connect_backup,
+                self._safe_disconnect,
+                assignments,
+                names=names,
+            )
+
+    def read_bank_names(self) -> list[str]:
+        """Return the connected body's current bank names, or [] if none."""
+        with self._lock:
+            self._close_locked()
+            return camera_backup.read_bank_names(
+                self._connect_backup, self._safe_disconnect
+            )
+
+    def _connect_backup(self) -> Any:
+        """Connect a fresh camera for one backup phase, with one retry."""
+        for attempt in (1, 2):
+            camera = self._camera_factory()
+            with contextlib.suppress(Exception):
+                if camera.connect():
+                    return camera
+            self._safe_disconnect(camera)
+            if attempt == 1:
+                self._usb_reset()
+        raise CameraError(
+            "could not connect (is the camera in USB RAW "
+            "CONV./BACKUP RESTORE mode?)"
+        )
 
     def close(self) -> None:
         """Disconnect and reset the session (idempotent)."""

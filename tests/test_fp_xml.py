@@ -33,6 +33,7 @@ KODACHROME_FP1 = """<?xml version="1.0" encoding="utf-8"?>
 
 
 def test_parses_real_sample() -> None:
+    """The real Kodachrome 64 FP1 sample parses field for field."""
     recipe = parse_fp(KODACHROME_FP1)
     assert recipe.film_simulation == "ClassicChrome"
     assert recipe.grain == "Strong"
@@ -60,6 +61,7 @@ def test_parses_real_sample() -> None:
     ],
 )
 def test_exposure_tokens(token: str, expected: float) -> None:
+    """Exposure tokens (P/M thirds notation) decode to EV floats."""
     recipe = _with(f"<ExposureBias>{token}</ExposureBias>")
     assert recipe.exposure == pytest.approx(expected)
 
@@ -79,6 +81,7 @@ def test_exposure_tokens(token: str, expected: float) -> None:
     ],
 )
 def test_film_simulation_vocabulary(token: str, expected: str) -> None:
+    """FP film-sim tokens map to grawji's simulation names."""
     recipe = _with(f"<FilmSimulation>{token}</FilmSimulation>")
     assert recipe.film_simulation == expected
 
@@ -88,16 +91,19 @@ def test_film_simulation_vocabulary(token: str, expected: str) -> None:
     [("OFF", "Off"), ("WEAK", "Weak"), ("STRONG", "Strong")],
 )
 def test_color_chrome_vocabulary(token: str, expected: str) -> None:
+    """ChromeEffect tokens map to Off/Weak/Strong."""
     recipe = _with(f"<ChromeEffect>{token}</ChromeEffect>")
     assert recipe.color_chrome == expected
 
 
 def test_color_chrome_serializes_to_chrome_effect() -> None:
+    """Color Chrome serializes to the FP ChromeEffect tag."""
     out = serialize_fp(Recipe(color_chrome="Strong"))
     assert "<ChromeEffect>STRONG</ChromeEffect>" in out
 
 
 def test_invalid_white_balance_means_as_shot() -> None:
+    """Unknown WB tokens fall back to AsShot; known aliases map."""
     assert _with("<WhiteBalance>INVALID</WhiteBalance>").white_balance == (
         "AsShot"
     )
@@ -107,31 +113,37 @@ def test_invalid_white_balance_means_as_shot() -> None:
 
 
 def test_color_temp_strips_kelvin_suffix() -> None:
+    """A trailing K on the colour temperature is stripped."""
     assert _with("<WBColorTemp>5900K</WBColorTemp>").color_temp == 5900
 
 
 def test_zero_color_temp_keeps_default() -> None:
+    """A 0K colour temperature keeps the recipe default."""
     assert _with("<WBColorTemp>0K</WBColorTemp>").color_temp == (
         Recipe().color_temp
     )
 
 
 def test_unknown_tokens_keep_defaults() -> None:
+    """Unknown enum tokens keep the recipe's defaults."""
     recipe = _with("<FilmSimulation>SomethingNew</FilmSimulation>")
     assert recipe.film_simulation == Recipe().film_simulation
 
 
 def test_byte_order_mark_is_tolerated() -> None:
+    """A UTF-8 BOM before the XML prolog is tolerated."""
     recipe = parse_fp("﻿" + KODACHROME_FP1)
     assert recipe.film_simulation == "ClassicChrome"
 
 
 def test_malformed_xml_raises() -> None:
+    """Broken XML raises a clear ValueError."""
     with pytest.raises(ValueError, match="malformed XML"):
         parse_fp("<ConversionProfile><not closed")
 
 
 def test_wrong_root_raises() -> None:
+    """A non-ConversionProfile root raises."""
     with pytest.raises(ValueError, match="ConversionProfile"):
         parse_fp("<Something/>")
 
@@ -171,6 +183,7 @@ def test_wrong_root_raises() -> None:
     ],
 )
 def test_round_trip(recipe: Recipe) -> None:
+    """serialize_fp then parse_fp preserves every recipe field."""
     parsed = parse_fp(serialize_fp(recipe))
     assert parsed.film_simulation == recipe.film_simulation
     assert parsed.white_balance == recipe.white_balance
@@ -195,6 +208,7 @@ def test_round_trip(recipe: Recipe) -> None:
 
 
 def test_mono_color_dropped_for_colour_sims() -> None:
+    """Mono toning is not written for colour film sims."""
     velvia = Recipe(
         film_simulation="Velvia", mono_warm_cool=8, mono_magenta_green=-8
     )
@@ -204,6 +218,7 @@ def test_mono_color_dropped_for_colour_sims() -> None:
 
 
 def test_color_temp_only_round_trips_in_temperature_mode() -> None:
+    """Kelvin survives the round trip only in Temperature mode."""
     # Outside Temperature mode the kelvin is written as "0K" and dropped.
     daylight = Recipe(white_balance="Daylight", color_temp=5900)
     assert parse_fp(serialize_fp(daylight)).color_temp == Recipe().color_temp
@@ -212,12 +227,14 @@ def test_color_temp_only_round_trips_in_temperature_mode() -> None:
 
 
 def test_iopcode_is_eight_hex_digits() -> None:
+    """The IOPCode serializes as eight uppercase hex digits."""
     assert "<IOPCode>FF159501</IOPCode>" in serialize_fp(
         Recipe(), iopcode=0xFF159501
     )
 
 
 def test_new_film_sims_round_trip() -> None:
+    """The newer film sims survive a serialize/parse round trip."""
     for name in ("ClassicNeg", "NostalgicNeg", "RealaAce", "EternaBleach"):
         out = serialize_fp(Recipe(film_simulation=name))
         assert parse_fp(out).film_simulation == name

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- X-E family: slim rangefinder body in graphite. GPL. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 88" width="256" height="176">
+  <defs>
+    <linearGradient id="graphite" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4d555e"/>
+      <stop offset="1" stop-color="#333a41"/>
+    </linearGradient>
+    <linearGradient id="dialDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#666e77"/>
+      <stop offset="1" stop-color="#454c53"/>
+    </linearGradient>
+    <linearGradient id="leatherE" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#292f35"/>
+      <stop offset="1" stop-color="#1e2328"/>
+    </linearGradient>
+    <linearGradient id="barrel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#40474f"/>
+      <stop offset="1" stop-color="#20252b"/>
+    </linearGradient>
+    <radialGradient id="glassE" cx="0.38" cy="0.35" r="0.9">
+      <stop offset="0" stop-color="#8fa9de"/>
+      <stop offset="0.45" stop-color="#3d5f9e"/>
+      <stop offset="1" stop-color="#101c33"/>
+    </radialGradient>
+  </defs>
+  <rect x="6" y="30" width="5" height="7" rx="2" fill="#8f969e"/>
+  <rect x="117" y="30" width="5" height="7" rx="2" fill="#8f969e"/>
+  <rect x="16" y="21" width="13" height="8" rx="2" fill="url(#dialDark)" stroke="#20242a" stroke-width="1"/>
+  <rect x="33" y="21" width="13" height="8" rx="2" fill="url(#dialDark)" stroke="#20242a" stroke-width="1"/>
+  <path d="M 10 29 Q 10 27 12 27 H 40 C 46 27 46 20 52 20 H 116 Q 118 20 118 22 V 80 A 4 4 0 0 1 114 84 H 14 A 4 4 0 0 1 10 80 Z"
+        fill="url(#graphite)" stroke="#1e2328" stroke-width="1.2"/>
+  <path d="M 54 22.5 H 113" stroke="#6b747d" stroke-width="1.4" stroke-linecap="round" stroke-opacity="0.7"/>
+  <circle cx="110.5" cy="27.5" r="3.1" fill="#dde6bf" stroke="#171a1e" stroke-width="0.8"/>
+  <rect x="10" y="36" width="108" height="40" fill="url(#leatherE)"/>
+  <circle cx="75" cy="56.5" r="23" fill="url(#barrel)" stroke="#171a1f" stroke-width="1.2"/>
+  <circle cx="75" cy="56.5" r="20.5" fill="none" stroke="#a9b0b7" stroke-width="1.8"/>
+  <circle cx="75" cy="56.5" r="16" fill="#16191d"/>
+  <circle cx="75" cy="56.5" r="12" fill="url(#glassE)"/>
+  <circle cx="70.5" cy="52" r="2.8" fill="#ffffff" fill-opacity="0.65"/>
+  <circle cx="75" cy="36.3" r="1.8" fill="#e0442e"/>
+</svg>

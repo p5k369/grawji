@@ -81,7 +81,7 @@ ignore = []
 "__init__.py" = ["D104"]
 "scripts/**" = ["D103", "T201"]
 "src/grawji/views/*.py" = ["E402"]
-"tests/**" = ["D100", "D101", "D102", "D103", "D104", "D107", "PLR2004", "S", "ARG", "ANN", "E402", "E501", "F401", "PLC0415"]
+"tests/**" = ["PLR2004", "S", "ARG", "ANN", "E402", "E501", "F401", "PLC0415"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"

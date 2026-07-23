@@ -49,6 +49,9 @@ class Recipe:
             when the film simulation is Acros or Monochrome.
         mono_magenta_green: Monochromatic Color magenta-green toning for B&W
             film sims (negative magenta, positive green). XProcessor5 only.
+        origin_body: Model the recipe was authored on (e.g. "X-T3"), or ""
+            if unknown. Captured when saved with a body connected, used only
+            to badge/group recipes, never affects rendering.
     """
 
     film_simulation: str = "Provia"
@@ -72,6 +75,7 @@ class Recipe:
     color_space: str = "sRGB"
     mono_warm_cool: int = 0
     mono_magenta_green: int = 0
+    origin_body: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict suitable for JSON recipe storage."""
