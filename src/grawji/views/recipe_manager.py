@@ -64,11 +64,16 @@ def _family_paintable(model: str | None) -> Gdk.Texture | None:
         return None
     width = _HERO_PX * _HERO_SUPERSAMPLE
     height = round(width * _HERO_ART_RATIO)
-    loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
-    loader.set_size(width, height)
-    loader.write(svg.encode("utf-8"))
-    loader.close()
-    pixbuf = loader.get_pixbuf()
+    try:
+        loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
+        loader.set_size(width, height)
+        loader.write(svg.encode("utf-8"))
+        loader.close()
+        pixbuf = loader.get_pixbuf()
+    except GLib.GError:
+        # No SVG pixbuf loader (librsvg) on this system. the generic
+        # camera icon fallback stays in place.
+        return None
     if pixbuf is None:
         return None
     return Gdk.Texture.new_for_pixbuf(pixbuf)
