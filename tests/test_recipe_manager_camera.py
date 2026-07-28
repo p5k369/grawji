@@ -69,13 +69,16 @@ def test_drop_assigns_recipe_and_transfer_collects(tmp_path: Any) -> None:
     dialog = _dialog(
         tmp_path,
         model="X-T3",
-        on_transfer=lambda a, n: captured.update(recipes=a, names=n),
+        on_transfer=lambda a, n, fs: captured.update(
+            recipes=a, names=n, fs=fs
+        ),
     )
     assert dialog._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0) is True
     assert dialog._on_bank_drop(None, "Acros look", 0.0, 0.0, 3) is True
     pump()
     dialog._on_transfer_clicked(None)
     assert captured["recipes"] == {0: "Velvia look", 3: "Acros look"}
+    assert captured["fs"] == {}
 
 
 def test_drop_rejects_unknown_recipe(tmp_path: Any) -> None:
@@ -99,7 +102,9 @@ def test_bank_rename_is_collected(tmp_path: Any) -> None:
     dialog = _dialog(
         tmp_path,
         model="X-T3",
-        on_transfer=lambda a, n: captured.update(recipes=a, names=n),
+        on_transfer=lambda a, n, fs: captured.update(
+            recipes=a, names=n, fs=fs
+        ),
     )
     dialog.set_bank_names(["STD", "PORTRA", "", "", "", "", ""])
     dialog._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
@@ -115,3 +120,56 @@ def test_name_row_visible_on_every_body(tmp_path: Any) -> None:
     for model in ("X-T3", "X100F"):
         dialog = _dialog(tmp_path, model=model)
         assert all(b["name_row"].get_visible() for b in dialog._banks)
+
+
+def test_fs_cards_only_on_bodies_with_an_fs_layout(tmp_path: Any) -> None:
+    """FS dial cards appear on the X-E5 but not on the X-T3."""
+    xe5 = _dialog(tmp_path, model="X-E5")
+    assert len(xe5._banks) == 7
+    assert len(xe5._fs_cards) == 3  # FS1-FS3
+    xt3 = _dialog(tmp_path, model="X-T3")
+    assert xt3._fs_cards == []
+
+
+def test_fs_drop_and_transfer_collects_separately(tmp_path: Any) -> None:
+    """FS drops land in their own channel, apart from the C banks."""
+    captured: dict[str, Any] = {}
+    dialog = _dialog(
+        tmp_path,
+        model="X-E5",
+        on_transfer=lambda a, n, fs: captured.update(
+            recipes=a, names=n, fs=fs
+        ),
+    )
+    assert dialog._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0) is True
+    assert dialog._on_fs_drop(None, "Acros look", 0.0, 0.0, 2) is True
+    pump()
+    dialog._on_transfer_clicked(None)
+    assert captured["recipes"] == {0: "Velvia look"}
+    assert captured["fs"] == {2: "Acros look"}
+
+
+def test_fs_only_transfer_is_collected(tmp_path: Any) -> None:
+    """A transfer with only FS assignments still fires."""
+    captured: dict[str, Any] = {}
+    dialog = _dialog(
+        tmp_path,
+        model="X-E5",
+        on_transfer=lambda a, n, fs: captured.update(
+            recipes=a, names=n, fs=fs
+        ),
+    )
+    dialog._on_fs_drop(None, "Velvia look", 0.0, 0.0, 0)
+    pump()
+    dialog._on_transfer_clicked(None)
+    assert captured["fs"] == {0: "Velvia look"}
+    assert captured["recipes"] == {}
+
+
+def test_transfer_finished_clears_fs_assignments(tmp_path: Any) -> None:
+    """A finished transfer resets FS assignments too."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog._on_fs_drop(None, "Velvia look", 0.0, 0.0, 1)
+    assert dialog._fs_recipe == {1: "Velvia look"}
+    dialog.on_transfer_finished()
+    assert dialog._fs_recipe == {}

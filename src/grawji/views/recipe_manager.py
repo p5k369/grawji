@@ -16,6 +16,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
 from grawji import compatibility as compat
+from grawji import fs_recipe
 from grawji.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary
@@ -118,7 +119,8 @@ class RecipeManagerDialog(Adw.Dialog):
             Callable[[Callable[[list[str]], None]], None] | None
         ) = None,
         on_transfer: (
-            Callable[[dict[int, str], dict[int, str]], None] | None
+            Callable[[dict[int, str], dict[int, str], dict[int, str]], None]
+            | None
         ) = None,
     ) -> None:
         """Wire the dialog to the library (read) and intent callbacks."""
@@ -144,6 +146,8 @@ class RecipeManagerDialog(Adw.Dialog):
         self._groups: list[Adw.PreferencesGroup] = []
         self._banks: list[dict[str, Any]] = []
         self._bank_recipe: dict[int, str] = {}
+        self._fs_cards: list[dict[str, Any]] = []
+        self._fs_recipe: dict[int, str] = {}
         self._toast: Adw.Toast | None = None
 
         self.import_button.connect("clicked", lambda *_a: self._on_import())
@@ -253,10 +257,31 @@ class RecipeManagerDialog(Adw.Dialog):
         texture = _family_paintable(model)
         if texture is not None:
             self.camera_image.set_from_paintable(texture)
+        self.camera_banks.append(self._section_heading("Custom banks"))
         for slot in range(_BANK_COUNT):
             self.camera_banks.append(self._build_bank_card(slot))
+        self._build_fs_section(model)
         if self._load_bank_names is not None:
             self._load_bank_names(self.set_bank_names)
+
+    def _build_fs_section(self, model: str | None) -> None:
+        """Add FS1-FSn dial-position cards if this body has an FS layout."""
+        layout = fs_recipe.layout_for(model)
+        if layout is None:
+            return
+        self.camera_banks.append(
+            self._section_heading("Film-simulation dial (FS)")
+        )
+        for slot in range(layout.num_slots):
+            self.camera_banks.append(self._build_fs_card(slot))
+
+    def _section_heading(self, text: str) -> Gtk.Widget:
+        """A small heading that separates the bank and FS card groups."""
+        label = Gtk.Label(label=text, xalign=0)
+        label.add_css_class("heading")
+        label.add_css_class("dim-label")
+        label.set_margin_top(6)
+        return label
 
     def _build_bank_card(self, slot: int) -> Gtk.Widget:
         """A drop-target card for bank C{slot+1} with a rename affordance."""
@@ -307,6 +332,52 @@ class RecipeManagerDialog(Adw.Dialog):
         )
         return card
 
+    def _build_fs_card(self, slot: int) -> Gtk.Widget:
+        """A drop-target card for an FS dial position (no rename).
+
+        FS positions are physical dial presets, not user-named banks, so
+        the card carries only its fixed FS label and a drop area.
+        """
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.add_css_class("card")
+        inner = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+            margin_top=12,
+            margin_bottom=12,
+            margin_start=12,
+            margin_end=12,
+        )
+        card.append(inner)
+
+        title = Gtk.Label(label=f"FS{slot + 1}", xalign=0)
+        title.add_css_class("heading")
+        inner.append(title)
+
+        assigned = Gtk.Label(label="Drop a recipe here", xalign=0)
+        assigned.add_css_class("dim-label")
+        assigned.set_wrap(True)
+        inner.append(assigned)
+
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect("drop", self._on_fs_drop, slot)
+        card.add_controller(drop)
+
+        self._fs_cards.append({"assigned": assigned})
+        return card
+
+    def _compat_note(self, name: str) -> str:
+        """A short compatibility suffix for a recipe on this body."""
+        recipe = self._library.get(name)
+        if recipe is None or self._caps is None:
+            return ""
+        verdict = compat.evaluate(recipe, self._caps)
+        if verdict.level == compat.UNAVAILABLE:
+            return "  (film sim N/A here)"
+        if verdict.level == compat.DEGRADED:
+            return f"  ({len(verdict.issues)} dropped)"
+        return ""
+
     def _on_bank_drop(
         self, _target: Any, value: Any, _x: float, _y: float, slot: int
     ) -> bool:
@@ -316,15 +387,21 @@ class RecipeManagerDialog(Adw.Dialog):
             return False
         self._bank_recipe[slot] = name
         label = self._banks[slot]["assigned"]
-        recipe = self._library.get(name)
-        note = ""
-        if recipe is not None and self._caps is not None:
-            verdict = compat.evaluate(recipe, self._caps)
-            if verdict.level == compat.UNAVAILABLE:
-                note = "  (film sim N/A here)"
-            elif verdict.level == compat.DEGRADED:
-                note = f"  ({len(verdict.issues)} dropped)"
-        label.set_label(f"→ {name}{note}")
+        label.set_label(f"→ {name}{self._compat_note(name)}")
+        label.remove_css_class("dim-label")
+        self._dragged = None
+        return True
+
+    def _on_fs_drop(
+        self, _target: Any, value: Any, _x: float, _y: float, slot: int
+    ) -> bool:
+        """Assign the dropped recipe to FS dial position slot."""
+        name = value if isinstance(value, str) else self._dragged
+        if not name or self._library.get(name) is None:
+            return False
+        self._fs_recipe[slot] = name
+        label = self._fs_cards[slot]["assigned"]
+        label.set_label(f"→ {name}{self._compat_note(name)}")
         label.remove_css_class("dim-label")
         self._dragged = None
         return True
@@ -373,18 +450,23 @@ class RecipeManagerDialog(Adw.Dialog):
     def on_transfer_finished(self) -> None:
         """Refresh the bank pane after a transfer (reload names, clear)."""
         self._bank_recipe.clear()
-        for bank in self._banks:
-            bank["assigned"].set_label("Drop a recipe here")
-            bank["assigned"].add_css_class("dim-label")
+        self._fs_recipe.clear()
+        for card in (*self._banks, *self._fs_cards):
+            card["assigned"].set_label("Drop a recipe here")
+            card["assigned"].add_css_class("dim-label")
         if self._load_bank_names is not None:
             self._load_bank_names(self.set_bank_names)
 
     def _on_transfer_clicked(self, _button: Any) -> None:
-        """Hand the bank assignments and renames to the controller."""
+        """Hand the bank/FS assignments and renames to the controller."""
         if self._on_transfer is None:
             return
-        if self._bank_recipe or self._names_by_slot():
-            self._on_transfer(dict(self._bank_recipe), self._names_by_slot())
+        if self._bank_recipe or self._fs_recipe or self._names_by_slot():
+            self._on_transfer(
+                dict(self._bank_recipe),
+                self._names_by_slot(),
+                dict(self._fs_recipe),
+            )
 
     def _row_popover(self, name: str) -> Gtk.Popover:
         """The overflow menu for a recipe: move, rename, export, delete."""
@@ -634,7 +716,8 @@ class RecipeLibraryController:
             load_bank_names: Reads current bank names off the main thread
                 (calls its callback with them), or None.
             run_transfer: Performs the USB bank transfer off the main
-                thread (recipes, names, on_done, on_error), or None.
+                thread (recipes, names, fs_recipes, on_done, on_error),
+                or None.
         """
         self._parent = parent
         self._library = library
@@ -674,25 +757,35 @@ class RecipeLibraryController:
         self._manager.present(self._parent)
 
     def _transfer_banks(
-        self, assignments: dict[int, str], names: dict[int, str]
+        self,
+        assignments: dict[int, str],
+        names: dict[int, str],
+        fs_assignments: dict[int, str],
     ) -> None:
         """Resolve dropped recipe names and run the USB bank transfer."""
         if self._run_transfer is None:
             return
-        recipes: dict[int, Recipe] = {}
-        for slot, name in assignments.items():
-            recipe = self._library.get(name)
-            if recipe is not None:
-                recipes[slot] = recipe
-        if not recipes and not names:
+
+        def resolve(named: dict[int, str]) -> dict[int, Recipe]:
+            out: dict[int, Recipe] = {}
+            for slot, name in named.items():
+                recipe = self._library.get(name)
+                if recipe is not None:
+                    out[slot] = recipe
+            return out
+
+        recipes = resolve(assignments)
+        fs_recipes = resolve(fs_assignments)
+        if not recipes and not names and not fs_recipes:
             return
-        msg = f"Transferring {len(recipes)} recipe(s) to the camera…"
+        count = len(recipes) + len(fs_recipes)
+        msg = f"Transferring {count} recipe(s) to the camera…"
         if self._manager is not None:
             self._manager.set_busy(True)
             self._manager.show_toast(msg)
         self._on_status(msg)
         self._run_transfer(
-            recipes, names, self._on_bank_done, self._on_bank_fail
+            recipes, names, fs_recipes, self._on_bank_done, self._on_bank_fail
         )
 
     def _on_bank_done(self, message: str) -> None:

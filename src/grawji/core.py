@@ -565,6 +565,16 @@ class CameraSession:
                 names=names,
             )
 
+    def transfer_fs_recipes(self, assignments: dict[int, Recipe]) -> Any:
+        """Write recipes into the body's FS1-FSn dial positions over USB."""
+        with self._lock:
+            self._close_locked()
+            return camera_backup.transfer_fs_recipes(
+                self._connect_backup,
+                self._safe_disconnect,
+                assignments,
+            )
+
     def read_bank_names(self) -> list[str]:
         """Return the connected body's current bank names, or [] if none."""
         with self._lock:
