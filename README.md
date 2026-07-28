@@ -35,10 +35,12 @@ export.
   parameters it supports. Effects it does not model are left neutral.
 - **Filmstrip** browser with EXIF info for the selected RAF.
 - **Export** single images or batch-export a whole folder at full resolution.
-- **Experimental**: write recipes into the camera's C1-C7 preset banks over
-  USB. Verified on the X100F and X-T3. X-Pro2, X-T2, X-T20, X-E3 and X-T30
-  should share the layout. Newer bodies are refused, their settings blob is
-  not mapped yet.
+- **Experimental**: write recipes into the camera's C1-C7 custom banks
+  over USB, on X-Processor 5 bodies and on the X100F/X-T3 generation, and
+  into the X-E5's FS1-FS3 film-simulation dial positions. Verified on
+  X-Processor 5 and X100F/X-T3 hardware. Every write is read back and
+  checked. Values a body cannot store are reported as dropped instead of
+  written wrong.
 - Keyboard shortcuts, pan/zoom with a darktable-style background, and a
   remembered window size and last folder.
 
