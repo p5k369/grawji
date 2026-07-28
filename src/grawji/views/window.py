@@ -803,27 +803,45 @@ class MainWindow(Adw.ApplicationWindow):
         self,
         recipes: dict[Any, Any],
         names: dict[Any, Any],
+        fs_recipes: dict[Any, Any],
         on_done: Callable[[str], None],
         on_error: Callable[[str], None],
     ) -> None:
-        """Transfer recipes to the camera's banks on a worker thread."""
+        """Transfer recipes to the camera's banks and FS dial on a worker."""
 
         def work() -> None:
+            written: list[str] = []
+            dropped: set[str] = set()
+            model = ""
             try:
-                result = self._session.transfer_bank_recipes(recipes, names)
+                if recipes or names:
+                    result = self._session.transfer_bank_recipes(
+                        recipes, names
+                    )
+                    model = result.model or model
+                    written += [f"C{i + 1}" for i in result.slots]
+                    dropped |= {
+                        f for fs in result.dropped.values() for f in fs
+                    }
+                if fs_recipes:
+                    result = self._session.transfer_fs_recipes(fs_recipes)
+                    model = result.model or model
+                    written += [f"FS{i + 1}" for i in result.slots]
+                    dropped |= {
+                        f for fs in result.dropped.values() for f in fs
+                    }
             except Exception as exc:
                 GLib.idle_add(on_error, f"Bank transfer failed: {exc}")
                 return
-            banks = ", ".join(f"C{i + 1}" for i in result.slots)
+            slots = ", ".join(written)
             message = (
-                f"Wrote recipes to {banks} on the {result.model}. "
+                f"Wrote recipes to {slots} on the {model}. "
                 "The live preview session was closed."
             )
-            if result.dropped:
-                unusable = sorted(
-                    {f for fields in result.dropped.values() for f in fields}
+            if dropped:
+                message += (
+                    " Dropped unsupported: " + ", ".join(sorted(dropped)) + "."
                 )
-                message += " Dropped unsupported: " + ", ".join(unusable) + "."
             GLib.idle_add(on_done, message)
 
         threading.Thread(target=work, daemon=True).start()

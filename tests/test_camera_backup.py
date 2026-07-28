@@ -9,8 +9,10 @@ from grawji.camera_backup import (
     BackupTransferError,
     classify_readback,
     model_from_blob,
+    transfer_fs_recipes,
     transfer_recipes,
 )
+from grawji.fs_recipe import _XE5
 from grawji.recipe import Recipe
 
 _GET_OBJECT_INFO = 0x1008
@@ -133,7 +135,7 @@ def test_transfer_raises_on_silent_no_op():
 
 def test_transfer_rejects_unsupported_body():
     """A body without a verified layout is refused before writing."""
-    cam = FakeCamera(_make_blob("X-E5", 70524))
+    cam = FakeCamera(_make_blob("X100V", 40000))
     with pytest.raises(BackupTransferError, match="no verified bank layout"):
         _run(cam, {0: Recipe()})
 
@@ -155,6 +157,66 @@ def test_empty_assignments_raise():
     cam = FakeCamera(_make_blob("X100F", 5660))
     with pytest.raises(BackupTransferError, match="no bank"):
         _run(cam, {})
+
+
+def _run_fs(cam, assignments):
+    """Drive transfer_fs_recipes with a fake camera reused for every phase."""
+    return transfer_fs_recipes(
+        lambda: cam, lambda _c: None, assignments, run_setup=False
+    )
+
+
+def test_fs_transfer_writes_and_verifies():
+    """An FS transfer patches the dial arrays and verifies them back."""
+    cam = FakeCamera(_make_blob("X-E5", 70524))
+    result = _run_fs(
+        cam,
+        {
+            2: Recipe(
+                film_simulation="Acros",
+                mono_warm_cool=-4,
+                mono_magenta_green=8,
+            )
+        },
+    )
+    assert result.model == "X-E5"
+    assert result.slots == (2,)
+    assert result.applied > 0
+    # FS3 film sim (0x16) and the two mono toning bytes (18 - value).
+    assert cam.blob[1997] == 0x16
+    assert cam.blob[34733] == 22
+    assert cam.blob[34739] == 10
+
+
+def test_fs_transfer_tolerates_camera_maintained_checksum():
+    """The camera re-stamping its checksum does not fail an FS transfer."""
+    cam = FakeCamera(_make_blob("X-E5", 70524), volatile={0x120: 0x99})
+    result = _run_fs(cam, {0: Recipe(film_simulation="Provia")})
+    assert result.applied > 0
+    assert cam.blob[_XE5.fields["film_sim"].offset] == 0x01
+
+
+def test_fs_transfer_raises_on_silent_no_op():
+    """A dial byte the camera silently keeps unchanged fails the transfer."""
+    off = _XE5.fields["film_sim"].offset
+    cam = FakeCamera(_make_blob("X-E5", 70524), ignore={off})
+    with pytest.raises(BackupTransferError, match="silently ignored"):
+        _run_fs(cam, {0: Recipe(film_simulation="Provia")})
+
+
+def test_fs_transfer_rejects_body_without_fs_layout():
+    """A body with no mapped FS dial layout is refused before writing."""
+    cam = FakeCamera(_make_blob("X-T3", 33404))
+    with pytest.raises(BackupTransferError, match="no mapped FS dial layout"):
+        _run_fs(cam, {0: Recipe()})
+    assert cam.restores == 0
+
+
+def test_fs_transfer_rejects_empty_assignments():
+    """An FS transfer with nothing to write is refused."""
+    cam = FakeCamera(_make_blob("X-E5", 70524))
+    with pytest.raises(BackupTransferError, match="no FS assignments"):
+        _run_fs(cam, {})
 
 
 def test_classify_readback_separates_ignored_from_maintained():
