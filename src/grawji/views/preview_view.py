@@ -30,6 +30,8 @@ _ROTATIONS = {
 
 # Zoom is multiplicative.
 ZOOM_STEP = 1.15
+# Zoom ceiling relative to the image's native pixels (800%)
+MAX_NATIVE_ZOOM = 8.0
 
 # Preview canvas backgrounds, cycled by the toolbar button (darktable-style).
 BACKGROUNDS = ["", "canvas-white", "canvas-gray", "canvas-black"]
@@ -150,6 +152,7 @@ class PreviewView(Gtk.Box):
     histogram_slot = Gtk.Template.Child()
     spinner = Gtk.Template.Child()
     status = Gtk.Template.Child()
+    zoom_label = Gtk.Template.Child()
     peek_button = Gtk.Template.Child()
     rotate_left = Gtk.Template.Child()
     rotate_right = Gtk.Template.Child()
@@ -179,6 +182,7 @@ class PreviewView(Gtk.Box):
         self._split: _SplitPaintable | None = None
         self._split_fraction = 0.5
         self._dragging_divider = False
+        self._shown_size: tuple[int, int] | None = None
 
         self.rotate_left.connect("clicked", lambda *_a: self.rotate(-90))
         self.rotate_right.connect("clicked", lambda *_a: self.rotate(90))
@@ -202,6 +206,12 @@ class PreviewView(Gtk.Box):
         pan.connect("drag-update", self._on_pan_update)
         pan.connect("drag-end", self._on_pan_end)
         self.scroll.add_controller(pan)
+
+        for adj in (
+            self.scroll.get_hadjustment(),
+            self.scroll.get_vadjustment(),
+        ):
+            adj.connect("changed", self._on_viewport_changed)
 
         peek = Gtk.GestureClick()
         peek.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -310,7 +320,9 @@ class PreviewView(Gtk.Box):
         self, value: float, anchor: tuple[float, float] | None = None
     ) -> None:
         """Set the preview zoom, keeping anchor fixed under the pointer."""
-        value = max(0.1, min(value, 8.0))
+        fit = self._fit_scale()
+        ceiling = max(1.0, MAX_NATIVE_ZOOM / fit) if fit else 8.0
+        value = max(0.1, min(value, ceiling))
         if value == self._zoom:
             return
         hadj = self.scroll.get_hadjustment()
@@ -325,6 +337,16 @@ class PreviewView(Gtk.Box):
         self._apply_zoom()
         self._anchor_scroll(hadj, fx, ax, self._content_w, vw)
         self._anchor_scroll(vadj, fy, ay, self._content_h, vh)
+
+    def _fit_scale(self) -> float | None:
+        """The fit-to-viewport scale of the current image, native = 1.0."""
+        if self._pixbuf is None:
+            return None
+        pw, ph = self._pixbuf.get_width(), self._pixbuf.get_height()
+        vw, vh = self.scroll.get_width(), self.scroll.get_height()
+        if pw <= 0 or ph <= 0 or vw <= 0 or vh <= 0:
+            return None
+        return min(vw / pw, vh / ph)
 
     def set_peek(self, *, peeking: bool) -> None:
         """Show the in-camera original while peeking, else the result."""
@@ -503,6 +525,24 @@ class PreviewView(Gtk.Box):
         self.set_zoom(self._zoom * factor, anchor=self._pointer)
         return True
 
+    def _on_viewport_changed(self, _adj: Any) -> None:
+        """Refresh the zoom readout when the viewport geometry changes."""
+        self._update_zoom_label()
+
+    def _update_zoom_label(self) -> None:
+        """Show the on-screen scale as a percentage of native pixels."""
+        if self._shown_size is None:
+            self.zoom_label.set_label("")
+            return
+        pw, ph = self._shown_size
+        if self._zoom == 1.0:
+            vw = self.scroll.get_width() or pw
+            vh = self.scroll.get_height() or ph
+            scale = min(vw / pw, vh / ph)
+        else:
+            scale = self._content_w / pw
+        self.zoom_label.set_label(f"{scale * 100:.0f}%")
+
     @staticmethod
     def _content_fraction(adj: Any, anchor: float) -> float:
         """Fraction of the content that currently sits under anchor."""
@@ -569,6 +609,8 @@ class PreviewView(Gtk.Box):
             if not comparing:
                 self._split = None
             self._content_w, self._content_h = vw, vh
+            self._shown_size = (pw, ph)
+            self._update_zoom_label()
             return
         fit = min(vw / pw, vh / ph)
         sw = max(1, int(pw * fit * self._zoom))
@@ -578,3 +620,5 @@ class PreviewView(Gtk.Box):
         self.picture.set_valign(Gtk.Align.CENTER)
         self.picture.set_paintable(paintable(sw, sh))
         self._content_w, self._content_h = sw, sh
+        self._shown_size = (pw, ph)
+        self._update_zoom_label()

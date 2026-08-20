@@ -125,6 +125,19 @@
             </style>
           </object>
         </child>
+        <child>
+          <object class="GtkLabel" id="zoom_label">
+            <property name="tooltip-text">Zoom (100% = 1:1 pixels)</property>
+            <property name="width-chars">4</property>
+            <property name="xalign">1</property>
+            <property name="valign">center</property>
+            <property name="margin-start">6</property>
+            <style>
+              <class name="dim-label"/>
+              <class name="numeric"/>
+            </style>
+          </object>
+        </child>
       </object>
     </child>
   </template>
