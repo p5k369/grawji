@@ -7,6 +7,9 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+FROM_IMAGE = "__from_image__"
+FROM_IMAGE_LABEL = "From image"
+
 
 def config_dir() -> Path:
     """Return grawji's config directory (honours XDG_CONFIG_HOME)."""
@@ -30,9 +33,9 @@ class Settings:
     """User-configurable application settings.
 
     Attributes:
-        load_recipe_from_image: When True, selecting an image loads
-            its own in-camera recipe into the controls. When False,
-            the current recipe is kept and applied to the new image.
+        open_recipe: The sticky recipe selection applied to each opened
+            image. FROM_IMAGE loads each image's own in-camera recipe.
+            Any other value is a saved recipe name applied to every image.
         sidebar_width: Width of the left side panel in pixels; drag the
             pane handle to 0 to collapse it (remembered across runs).
         canvas_background: Preview background CSS class ("" = themed).
@@ -62,7 +65,7 @@ class Settings:
             on startup when it is still present. Empty means none.
     """
 
-    load_recipe_from_image: bool = True
+    open_recipe: str = FROM_IMAGE
     sidebar_width: int = 240
     canvas_background: str = ""
     last_folder: str = ""

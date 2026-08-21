@@ -25,6 +25,7 @@ from rawji.fuji_enums import (
 
 from grawji.capabilities import FILM_SIMULATIONS, Capabilities
 from grawji.recipe import Recipe
+from grawji.settings import FROM_IMAGE, FROM_IMAGE_LABEL
 from grawji.views.widgets import MonoColorGrid, SliderRow, WBShiftGrid
 
 _FILM_SIMULATIONS = list(FILM_SIMULATIONS)
@@ -96,7 +97,8 @@ class RecipePanel(Adw.PreferencesPage):
         self._suppress_signals = False
         self._recipe_names: list[str] = []
         self._applied_recipe = Recipe()
-        self._active_label = "Default"
+        self._active_label = FROM_IMAGE_LABEL
+        self.recipe_button.set_label(FROM_IMAGE_LABEL)
 
         self._apply_actions = Gio.SimpleActionGroup()
         apply_action = Gio.SimpleAction.new("apply", GLib.VariantType.new("s"))
@@ -394,8 +396,11 @@ class RecipePanel(Adw.PreferencesPage):
             *(name for _folder, names in folders for name in names),
         ]
         menu = Gio.Menu()
+        # The dynamic "From image" selection is the default.
+        special = Gio.Menu()
+        special.append_item(self._apply_item(FROM_IMAGE_LABEL, FROM_IMAGE))
+        menu.append_section(None, special)
         top = Gio.Menu()
-        top.append_item(self._apply_item("—", ""))
         for name in ungrouped:
             top.append_item(self._apply_item(name, name))
         menu.append_section(None, top)
@@ -417,8 +422,8 @@ class RecipePanel(Adw.PreferencesPage):
 
     def sync_combo(self, label: str) -> None:
         """Show label on the picker button (or "—" if not a recipe)."""
-        shown = label if label in self._recipe_names else "—"
-        self.recipe_button.set_label(shown)
+        known = label == FROM_IMAGE_LABEL or label in self._recipe_names
+        self.recipe_button.set_label(label if known else "—")
 
     def set_controls_sensitive(self, enabled: bool) -> None:
         """Enable or disable every edit control (not the apply-combo)."""

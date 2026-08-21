@@ -36,6 +36,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: cmb-hashes
+        name: cmb-hashes
+        entry: python scripts/check_cmb_hashes.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: version-consistency
         name: version-consistency
         entry: python scripts/check_version.py

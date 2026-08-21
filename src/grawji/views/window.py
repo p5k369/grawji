@@ -35,6 +35,8 @@ from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary, recipes_path
 from grawji.settings import (
+    FROM_IMAGE,
+    FROM_IMAGE_LABEL,
     load_settings,
     save_settings,
     settings_path,
@@ -422,12 +424,7 @@ class MainWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_opened(self, generation: int, _result: object) -> None:
-        """Show the first preview, optionally from the image's recipe.
-
-        If the "load recipe from image" setting is on, the controls are
-        set to the image's own in-camera recipe first; otherwise the
-        current (sticky) recipe is kept and applied to the new image.
-        """
+        """Show the first preview, applying the sticky recipe selection."""
         if generation != self._generation:
             return  # a newer selection has superseded this open
         profile = self._session.profile
@@ -444,9 +441,16 @@ class MainWindow(Adw.ApplicationWindow):
             )
             self._notify_unverified(model)
         render_working = True
-        if profile is not None and self._settings.load_recipe_from_image:
+        selection = self._settings.open_recipe
+        saved = (
+            None
+            if selection == FROM_IMAGE
+            else self._recipe_library.get(selection)
+        )
+        from_image = selection == FROM_IMAGE or saved is None
+        if profile is not None and from_image:
             self.recipe_panel.set_active(
-                recipe_from_profile(profile), "From image"
+                recipe_from_profile(profile), FROM_IMAGE_LABEL
             )
             # The loaded recipe is the image's own, so the embedded JPEG
             # already shown is exactly what a render would produce - skip the
@@ -454,6 +458,8 @@ class MainWindow(Adw.ApplicationWindow):
             if self.preview_view.has_embedded_jpeg:
                 self._set_busy(busy=False, status="Ready.")
                 render_working = False
+        elif saved is not None:
+            self.recipe_panel.set_active(saved, selection)
         if render_working:
             self._render_preview()
         # Comparing carries across images: refresh the baseline for this one.
@@ -564,8 +570,23 @@ class MainWindow(Adw.ApplicationWindow):
             self._schedule_render()
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
-        """Apply the recipe chosen in the panel's apply-combo."""
-        self._library.apply(name)
+        """Apply and remember the recipe chosen in the panel's picker."""
+        self._settings.open_recipe = name
+        self._save_settings()
+        if name == FROM_IMAGE:
+            self._apply_from_image()
+        else:
+            self._library.apply(name)
+
+    def _apply_from_image(self) -> None:
+        """Load the open image's own in-camera recipe into the controls."""
+        profile = self._session.profile
+        if profile is None:
+            return
+        self.recipe_panel.set_active(
+            recipe_from_profile(profile), FROM_IMAGE_LABEL
+        )
+        self._render_if_open()
 
     def _reset_recipe(self) -> None:
         """Reset all controls to the default recipe."""
