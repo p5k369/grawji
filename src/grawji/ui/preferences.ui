@@ -47,12 +47,6 @@
           <object class="AdwPreferencesGroup">
             <property name="title">Behaviour</property>
             <child>
-              <object class="AdwSwitchRow" id="load_recipe_row">
-                <property name="title">Load recipe from selected image</property>
-                <property name="subtitle">Off: keep the current recipe and apply it to each image</property>
-              </object>
-            </child>
-            <child>
               <object class="AdwActionRow">
                 <property name="title">Filmstrip scroll speed</property>
                 <property name="subtitle">Pixels per second while holding an arrow</property>
