@@ -25,6 +25,11 @@
           </object>
         </child>
         <child type="overlay">
+          <object class="GtkDrawingArea" id="crop_overlay">
+            <property name="visible">false</property>
+          </object>
+        </child>
+        <child type="overlay">
           <object class="GtkBox" id="histogram_slot">
             <property name="halign">start</property>
             <property name="valign">end</property>
@@ -32,6 +37,148 @@
             <property name="height-request">110</property>
             <property name="margin-start">10</property>
             <property name="margin-bottom">10</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkRevealer" id="crop_bar">
+        <property name="reveal-child">false</property>
+        <child>
+          <object class="GtkBox">
+            <property name="spacing">6</property>
+            <property name="margin-start">6</property>
+            <property name="margin-end">6</property>
+            <property name="margin-top">4</property>
+            <property name="margin-bottom">4</property>
+            <child>
+              <object class="GtkDropDown" id="crop_aspect">
+                <property name="tooltip-text">Crop aspect ratio</property>
+                <property name="valign">center</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item>Free</item>
+                      <item>Original</item>
+                      <item>1:1</item>
+                      <item>5:4</item>
+                      <item>4:3</item>
+                      <item>7:5</item>
+                      <item>3:2</item>
+                      <item>16:10</item>
+                      <item>16:9</item>
+                      <item>2:1</item>
+                      <item>65:24</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton" id="crop_swap">
+                <property name="icon-name">object-flip-vertical-symbolic</property>
+                <property name="tooltip-text">Swap crop orientation (landscape/portrait)</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkDropDown" id="crop_guides">
+                <property name="tooltip-text">Composition guides</property>
+                <property name="valign">center</property>
+                <property name="selected">1</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item>None</item>
+                      <item>Thirds</item>
+                      <item>Grid</item>
+                      <item>Center</item>
+                      <item>Diagonals</item>
+                      <item>Triangles</item>
+                      <item>Golden</item>
+                      <item>Spiral</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton" id="guide_flip_h">
+                <property name="icon-name">object-flip-horizontal-symbolic</property>
+                <property name="tooltip-text">Mirror guides horizontally</property>
+                <property name="visible">false</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton" id="guide_flip_v">
+                <property name="icon-name">object-flip-vertical-symbolic</property>
+                <property name="tooltip-text">Mirror guides vertically</property>
+                <property name="visible">false</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScale" id="angle_scale">
+                <property name="hexpand">true</property>
+                <property name="draw-value">false</property>
+                <property name="tooltip-text">Straighten (drag a line along a horizon with the right mouse button)</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkSpinButton" id="angle_spin">
+                <property name="digits">2</property>
+                <property name="valign">center</property>
+                <property name="tooltip-text">Angle in degrees</property>
+                <property name="adjustment">
+                  <object class="GtkAdjustment">
+                    <property name="lower">-45</property>
+                    <property name="upper">45</property>
+                    <property name="step-increment">0.01</property>
+                    <property name="page-increment">1</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="crop_reset">
+                <property name="icon-name">edit-undo-symbolic</property>
+                <property name="tooltip-text">Reset crop and angle</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="crop_cancel">
+                <property name="icon-name">window-close-symbolic</property>
+                <property name="tooltip-text">Cancel (Esc)</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="crop_apply">
+                <property name="icon-name">object-select-symbolic</property>
+                <property name="tooltip-text">Apply crop (Enter)</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="suggested-action"/>
+                </style>
+              </object>
+            </child>
           </object>
         </child>
       </object>
@@ -107,6 +254,17 @@
           <object class="GtkButton" id="rotate_right">
             <property name="icon-name">object-rotate-right-symbolic</property>
             <property name="tooltip-text">Rotate right</property>
+            <property name="sensitive">false</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkToggleButton" id="crop_button">
+            <property name="icon-name">grawji-crop-symbolic</property>
+            <property name="tooltip-text">Crop and straighten (c)</property>
             <property name="sensitive">false</property>
             <property name="valign">center</property>
             <style>

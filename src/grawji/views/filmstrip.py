@@ -18,6 +18,7 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import Gdk, GdkPixbuf, GExiv2, Gio, GLib, Gtk, Pango
 
+from grawji.crop import sidecar_path
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 from grawji.settings import cache_dir
 
@@ -56,6 +57,14 @@ _ORIENTATIONS = {
 }
 
 
+def _is_raf(gfile: Any) -> bool:
+    """Whether a monitor-event Gio.File refers to a RAF file."""
+    if gfile is None:
+        return False
+    name = gfile.get_basename() or ""
+    return name.lower().endswith(".raf")
+
+
 class FilmStrip(Gtk.ScrolledWindow):
     """A horizontally-scrolling strip of clickable RAF thumbnails."""
 
@@ -89,6 +98,9 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._scan_id = 0
         self._paths: list[str] = []
         self._buttons: list[Gtk.Button] = []
+        self._badges: dict[str, Gtk.Image] = {}
+        self._center_pending: Gtk.Button | None = None
+        self._recenter_id = 0
         self._current = -1
         # Batch-select mode: while active, a click toggles a card's
         # membership in the export set (shown raised) instead of opening it.
@@ -119,15 +131,20 @@ class FilmStrip(Gtk.ScrolledWindow):
         )
         scroll.connect("scroll", self._on_scroll)
         self.add_controller(scroll)
+        self.get_hadjustment().connect("changed", self._on_range_changed)
 
     def scan(self, folder: str) -> None:
         """Populate the strip with the RAF files in folder, and watch it.
 
         The strip re-scans itself automatically (debounced) when the
-        folder's contents change.
+        folder's RAF files change. Re-scanning the same folder keeps
+        the current image selected and in view.
         """
         self._scan_id += 1
         scan_id = self._scan_id
+        keep = None
+        if folder == self._folder and 0 <= self._current < len(self._paths):
+            keep = self._paths[self._current]
         self._clear()
         if self._select_mode:
             # A new folder invalidates any in-progress selection.
@@ -152,6 +169,10 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._box.append(button)
             self._buttons.append(button)
             cards.append((str(path), picture, camera_label))
+
+        if keep is not None and keep in self._paths:
+            # Restore the selection once the new cards have a layout
+            GLib.idle_add(partial(self._restore_current, scan_id, keep))
 
         if cards:
             if self._on_loading is not None:
@@ -182,11 +203,23 @@ class FilmStrip(Gtk.ScrolledWindow):
 
         camera_label = caption("")
         name_label = caption(path.stem)
+        badge = Gtk.Image.new_from_icon_name("grawji-crop-symbolic")
+        badge.set_pixel_size(10)
+        badge.set_halign(Gtk.Align.END)
+        badge.set_valign(Gtk.Align.END)
+        badge.set_margin_end(4)
+        badge.set_margin_bottom(4)
+        badge.set_opacity(0.75)
+        badge.set_tooltip_text("Crop/rotate applied")
+        badge.set_visible(sidecar_path(path).exists())
+        self._badges[str(path)] = badge
+        thumb = Gtk.Overlay(child=picture)
+        thumb.add_overlay(badge)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         card.set_margin_top(2)
         card.set_margin_bottom(2)
         card.append(camera_label)
-        card.append(picture)
+        card.append(thumb)
         card.append(name_label)
 
         button = Gtk.Button(child=card)
@@ -213,8 +246,22 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._box.remove(child)
             child = nxt
         self._buttons = []
+        self._badges = {}
+        self._center_pending = None
 
-    def _set_current(self, index: int) -> None:
+    def set_altered(self, path: str, altered: bool) -> None:
+        """Show or hide the geometry badge on path's card."""
+        badge = self._badges.get(path)
+        if badge is not None:
+            badge.set_visible(altered)
+
+    def _restore_current(self, scan_id: int, path: str) -> bool:
+        """Re-select path after a same-folder re-scan (on idle)."""
+        if scan_id == self._scan_id and path in self._paths:
+            self._set_current(self._paths.index(path), center=True)
+        return GLib.SOURCE_REMOVE
+
+    def _set_current(self, index: int, *, center: bool = False) -> None:
         """Mark index as selected and update the highlight."""
         for pos, button in enumerate(self._buttons):
             if pos == index:
@@ -222,22 +269,58 @@ class FilmStrip(Gtk.ScrolledWindow):
             else:
                 button.remove_css_class("thumb-selected")
         self._current = index
+        self._center_pending = None
         if 0 <= index < len(self._buttons):
-            self._scroll_into_view(self._buttons[index])
+            button = self._buttons[index]
+            if center:
+                # Card widths settle while thumbnails load; re-center
+                # on the final layout once this scan finishes.
+                self._center_pending = button
+            self._scroll_into_view(button, center=center)
 
-    def _scroll_into_view(self, button: Gtk.Button) -> None:
+    def _scroll_into_view(
+        self, button: Gtk.Button, retries: int = 20, *, center: bool = False
+    ) -> None:
         """Scroll the strip horizontally so button is visible."""
         adj = self.get_hadjustment()
         ok, rect = button.compute_bounds(self._box)
-        if not ok:
+        if not ok or rect.size.width <= 0 or adj.get_page_size() <= 0:
+            if retries > 0:
+                GLib.timeout_add(
+                    50, self._retry_scroll, button, retries - 1, center
+                )
             return
         left, right = rect.origin.x, rect.origin.x + rect.size.width
         page = adj.get_page_size()
         value = adj.get_value()
-        if left < value:
+        if center:
+            adj.set_value(left - (page - rect.size.width) / 2)
+        elif left < value:
             adj.set_value(left)
         elif right > value + page:
             adj.set_value(right - page)
+
+    def _retry_scroll(
+        self, button: Gtk.Button, retries: int, center: bool
+    ) -> bool:
+        """Re-attempt the scroll once the widget got its layout."""
+        if button.get_parent() is not None:  # card still in the strip
+            self._scroll_into_view(button, retries, center=center)
+        return GLib.SOURCE_REMOVE
+
+    def _on_range_changed(self, _adj: Any) -> None:
+        """Keep a pending restored selection centered through layout."""
+        if self._center_pending is None or self._recenter_id:
+            return
+        self._recenter_id = GLib.timeout_add(10, self._recenter_pending)
+
+    def _recenter_pending(self) -> bool:
+        """Re-center the pending selection after a layout pass."""
+        self._recenter_id = 0
+        button = self._center_pending
+        if button is not None and button.get_parent() is not None:
+            self._scroll_into_view(button, 0, center=True)
+        return GLib.SOURCE_REMOVE
 
     def _on_clicked(self, path: str, _button: Gtk.Button) -> None:
         """Handle a thumbnail click.
@@ -374,7 +457,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         """Select the thumbnail for path. False if it is not in the strip."""
         if path not in self._paths:
             return False
-        self._set_current(self._paths.index(path))
+        self._set_current(self._paths.index(path), center=True)
         self._on_select(path)
         return True
 
@@ -598,8 +681,12 @@ class FilmStrip(Gtk.ScrolledWindow):
         monitor.connect("changed", self._on_folder_changed)
         self._monitor = monitor
 
-    def _on_folder_changed(self, *_args: Any) -> None:
-        """Debounce a re-scan after the folder's contents settle."""
+    def _on_folder_changed(
+        self, _monitor: Any, file: Any, other: Any, _event: Any
+    ) -> None:
+        """Debounce a re-scan when RAF files appear, vanish or move."""
+        if not (_is_raf(file) or _is_raf(other)):
+            return
         if self._reload_pending_id:
             GLib.source_remove(self._reload_pending_id)
         self._reload_pending_id = GLib.timeout_add(

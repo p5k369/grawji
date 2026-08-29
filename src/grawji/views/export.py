@@ -17,14 +17,25 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gio, GLib, Gtk
 
+from grawji import crop
 from grawji.core import CameraSession, ForeignRafError
 from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
 from grawji.settings import Settings
 from grawji.views import imagemeta
 from grawji.views.batch_export import BatchExportDialog
+from grawji.views.crop_render import bake_pixbuf
+from grawji.views.preview_view import oriented_pixbuf
 
 SetBusy = Callable[..., None]
+
+
+def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
+    """A decode callback applying the RAF's sidecar geometry, or None."""
+    geometry = crop.load_sidecar(raf_path)
+    if geometry.is_identity:
+        return None
+    return lambda jpeg: bake_pixbuf(oriented_pixbuf(jpeg), geometry)
 
 
 def export_basename(raf_path: Path | str) -> str:
@@ -222,11 +233,7 @@ class BatchController:
         skip_foreign: bool,
         tally: dict[str, int],
     ) -> None:
-        """Convert one RAF into out_path.
-
-        A foreign RAF is skipped (when allowed) and a file-write error is
-        counted so the batch carries on.
-        """
+        """Convert one RAF into out_path."""
         try:
             self._session.open(raf_file)
             jpeg = self._session.render(recipe, full_resolution=True)
@@ -235,9 +242,18 @@ class BatchController:
                 raise
             tally["foreign"] += 1
             return
+        decode = sidecar_decode(raf_file)
         try:
-            out_path.write_bytes(jpeg)
-        except OSError as exc:
+            if decode is None:
+                out_path.write_bytes(jpeg)
+            else:
+                write_jpeg(
+                    jpeg,
+                    str(out_path),
+                    quality=self._settings.jpeg_quality,
+                    decode=decode,
+                )
+        except (GLib.Error, OSError) as exc:
             logging.getLogger("grawji").warning(
                 "batch export could not write %s: %s", out_path, exc
             )

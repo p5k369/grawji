@@ -27,13 +27,10 @@ export.
   is what the camera would write.
 - **Full recipe control**: film simulation, white balance, dynamic range,
   highlights, shadows, color and sharpness.
-- **Start from the image's own settings** (toggleable) or keep a sticky recipe
-  and apply it across shots.
 - **Recipes**: save, apply and delete named recipes. Import and export them
   in X RAW Studio's FP format (FP1/FP2/FP3), so a recipe from Fujifilm X RAW
   Studio drops straight in (and back out). grawji maps the
   parameters it supports. Effects it does not model are left neutral.
-- **Filmstrip** browser with EXIF info for the selected RAF.
 - **Export** single images or batch-export a whole folder at full resolution.
 - **Experimental**: write recipes into the camera's C1-C7 custom banks
   over USB, on X-Processor 5 bodies and on the X100F/X-T3 generation, and
@@ -41,20 +38,23 @@ export.
   X-Processor 5 and X100F/X-T3 hardware. Every write is read back and
   checked. Values a body cannot store are reported as dropped instead of
   written wrong.
-- Keyboard shortcuts, pan/zoom with a darktable-style background, and a
-  remembered window size and last folder.
 
-## Architecture
+## Warranty disclaimer
 
-rawji is imported as a library. grawji is a GTK4 UI plus a thin adapter
-(`grawji.core`) around rawji's public API, following a **load-once,
-render-many** workflow:
+Fujifilm's official
+[Camera Control SDK page](https://www.fujifilm-x.com/global/camera-control-sdk/)
+states, verbatim:
 
-- **Open RAF** (once, slow): `connect → send_raf → get_profile`
-- **Change recipe** (often, fast — session + RAF stay open):
-  `rmw_patch(base, recipe) → set_profile → trigger_conversion → wait_for_result`
-- **Quit**: `disconnect`
+> USING THIS SDK TO CONNECT TO OR CONTROL, ANY COMPATIBLE FUJIFILM CAMERA
+> WILL VOID THE CAMERA'S LIMITED PRODUCT WARRANTY.
 
+grawji and rawji do not use that SDK, but they talk to the camera over the
+same USB protocol and are not licensed by Fujifilm.
+[Reporting based on statements from Fujifilm](https://fujixweekly.com/2026/06/08/your-cameras-warranty-might-be-voided/)
+says the policy extends to any non-licensed program connecting to the
+camera, and that the camera records a marker each time one connects.
+Consumer-protection law in your country may limit or override such terms,
+but do not count on it: **use grawji at your own risk.**
 
 ## Install
 
@@ -139,7 +139,7 @@ make run        # or: .venv/bin/python -m grawji
 ```
 
 USB access: most distributions already grant non-root access via `uaccess` or
-`plugdev`; if yours does not, add a udev rule for the Fuji vendor id `0x04cb`
+`plugdev`. If yours does not, add a udev rule for the Fuji vendor id `0x04cb`
 (check first).
 
 </details>

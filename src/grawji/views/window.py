@@ -18,7 +18,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import camera_info, raf
+from grawji import camera_info, crop, raf
 from grawji.capabilities import (
     Capabilities,
     capabilities_for,
@@ -150,10 +150,9 @@ class MainWindow(Adw.ApplicationWindow):
                 self._settings.window_width, self._settings.window_height
             )
         self._init_sidebar()
-        self._install_css()
+        self._install_assets()
 
-        self.preview_view.set_background(self._settings.canvas_background)
-        self.preview_view.set_show_histogram(self._settings.show_histogram)
+        self._init_preview_wiring()
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self.recipe_panel.connect("changed", self._on_recipe_changed)
         self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
@@ -238,6 +237,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("zoom-fit", view.zoom_fit, ("<Ctrl>0",)),
             ("cycle-background", self._cycle_background, ("b",)),
             ("toggle-peek", self._toggle_peek, ("backslash",)),
+            ("toggle-crop", self._toggle_crop, ("c",)),
             (
                 "shortcuts",
                 lambda: dialogs.present_shortcuts(self),
@@ -305,6 +305,27 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.main_paned.set_position(self._sidebar_expanded_width)
 
+    def _init_preview_wiring(self) -> None:
+        """Apply preview settings and hook up its crop editor."""
+        self.preview_view.set_background(self._settings.canvas_background)
+        self.preview_view.set_show_histogram(self._settings.show_histogram)
+        self.preview_view.connect(
+            "geometry-changed", self._on_geometry_changed
+        )
+        self.preview_view.set_crop_guides(self._settings.crop_guides)
+        self.preview_view.crop_guides.connect(
+            "notify::selected", self._on_guides_changed
+        )
+        crop_keys = Gtk.EventControllerKey.new()
+        crop_keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        crop_keys.connect("key-pressed", self._on_crop_key)
+        self.add_controller(crop_keys)
+
+    def _install_assets(self) -> None:
+        """Install display-wide assets: the app CSS and bundled icons."""
+        self._install_css()
+        self._install_icons()
+
     def _install_css(self) -> None:
         """Load the app's CSS for the preview canvas and thumbnails."""
         provider = Gtk.CssProvider()
@@ -314,6 +335,17 @@ class MainWindow(Adw.ApplicationWindow):
             provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
+
+    def _install_icons(self) -> None:
+        """Register grawji's bundled icons with the icon theme.
+
+        Symbolic icons no theme reliably ships (e.g. the crop glyph)
+        are looked up from the package's ui/icons directory instead.
+        """
+        icons = resources.files("grawji").joinpath("ui", "icons")
+        Gtk.IconTheme.get_for_display(
+            Gdk.Display.get_default()
+        ).add_search_path(str(icons))
 
     def _init_filmstrip(self) -> None:
         """Build the filmstrip flanked by previous/next navigation."""
@@ -373,7 +405,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._load_pending_id = 0
         if generation != self._generation:
             return GLib.SOURCE_REMOVE
-        self.preview_view.reset_rotation()
+        self.preview_view.set_crop(crop.load_sidecar(raf_path))
         # The camera open runs on its own worker. The embedded-preview read
         # and decode run on a short-lived thread. Neither blocks the UI, so
         # the filmstrip animation stays smooth and the image appears as soon
@@ -719,6 +751,40 @@ class MainWindow(Adw.ApplicationWindow):
     def _toggle_peek(self) -> None:
         """Toggle showing the in-camera original."""
         self.preview_view.set_peek(peeking=not self.preview_view.peeking)
+
+    def _toggle_crop(self) -> None:
+        """Open the crop editor, or commit it if it is already open."""
+        button = self.preview_view.crop_button
+        if button.get_sensitive():
+            button.set_active(not button.get_active())
+
+    def _on_crop_key(
+        self, _controller: Any, keyval: int, _code: int, _state: Any
+    ) -> bool:
+        """Finish the crop edit from the keyboard."""
+        if not self.preview_view.crop_editing:
+            return False
+        if keyval == Gdk.KEY_Escape:
+            self.preview_view.cancel_crop()
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self.preview_view.apply_crop()
+            return True
+        return False
+
+    def _on_guides_changed(self, *_args: object) -> None:
+        """Remember the chosen composition guides."""
+        self._settings.crop_guides = self.preview_view.guides_name
+        self._save_settings()
+
+    def _on_geometry_changed(self, _view: Any) -> None:
+        """Persist a committed crop/rotation to the RAF's sidecar."""
+        if self._raf_path is None:
+            return
+        crop.save_sidecar(self._raf_path, self.preview_view.crop_rotate)
+        self._filmstrip.set_altered(
+            str(self._raf_path), crop.sidecar_path(self._raf_path).exists()
+        )
 
     def _populate_exif_rows(self, rows: list[tuple[str, str]]) -> None:
         """Show already-parsed EXIF (label, value) pairs in the Image group."""

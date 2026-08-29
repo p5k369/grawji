@@ -112,7 +112,7 @@ check_untyped_defs = true
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-module = ["rawji.*", "usb.*"]
+module = ["rawji.*", "usb.*", "cairo"]
 ignore_missing_imports = true
 
 # pygobject-stubs is installed for editor type hints, but grawji treats the

@@ -39,13 +39,13 @@ Keeping the toggle to a single setting is what makes the diff readable.
 
 Open the pcap in Wireshark and look at the bulk OUT transfers to the
 camera's device address. X Raw Studio uploads the profile as PTP
-property 0xd185; the payload is easy to spot by its size (601, 605 or
+property 0xd185. The payload is easy to spot by its size (601, 605 or
 629 bytes depending on the body - it starts with a u16 parameter count
 followed by the length-prefixed wide-char IOPCode).
 
 Extract the profile payload sent before and after the toggle and diff
-them byte-wise. Exactly one 4-byte little-endian slot should differ;
-its offset is `513 + index * 4`. If more than one slot moved, the
+them byte-wise. Exactly one 4-byte little-endian slot should differ.
+Its offset is `513 + index * 4`. If more than one slot moved, the
 capture mixed edits - redo it. The value pair tells you the encoding
 (e.g. Clarity -5/+5 showed -50/+50, so the slot encodes value*10).
 
