@@ -63,6 +63,8 @@ class Settings:
             startup so the tree reopens as it was left.
         last_image: Path of the image selected in the filmstrip, reselected
             on startup when it is still present. Empty means none.
+        crop_guides: Composition guides shown in the crop editor
+            ("None", "Thirds", "Grid", ...).
     """
 
     open_recipe: str = FROM_IMAGE
@@ -81,6 +83,7 @@ class Settings:
     last_export_dir: str = ""
     expanded_folders: list[str] = field(default_factory=list)
     last_image: str = ""
+    crop_guides: str = "Thirds"
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

@@ -46,7 +46,7 @@ and the live profile can only narrow a row, never widen it.
 | X-T30 III * | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | Reala Ace |
 
 `*` X-M5 and X-T30 III pair the X-Processor 5 with the older X-Trans 4
-sensor; feature set follows the processor.
+sensor. Feature set follows the processor.
 
 ## GFX series
 

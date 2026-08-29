@@ -1,10 +1,13 @@
-"""The preview viewport: zoom, pan, peek, rotation, background, histogram."""
+"""The preview viewport: zoom, pan, peek, crop, background, histogram."""
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
 from importlib import resources
-from typing import Any
+from typing import Any, ClassVar
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -19,14 +22,30 @@ from gi.repository import (
     Gtk,
 )
 
+from grawji import crop
+from grawji.views.crop_render import bake_pixbuf, orient_pixbuf
 from grawji.views.widgets import Histogram
 
-# Manual rotation (degrees clockwise) -> GdkPixbuf rotation.
-_ROTATIONS = {
-    90: GdkPixbuf.PixbufRotation.CLOCKWISE,
-    180: GdkPixbuf.PixbufRotation.UPSIDEDOWN,
-    270: GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE,
+_ZONE_CURSORS = {
+    "nw": "nwse-resize",
+    "se": "nwse-resize",
+    "ne": "nesw-resize",
+    "sw": "nesw-resize",
+    "n": "ns-resize",
+    "s": "ns-resize",
+    "e": "ew-resize",
+    "w": "ew-resize",
+    "move": "move",
 }
+
+# Handle grab distance on the crop overlay, in pixels.
+_GRAB_PX = 12.0
+
+# A shorter right-button drag than this does not define a horizon.
+_MIN_HORIZON_PX = 4.0
+
+# Longest edge of the image used while crop-editing.
+_EDIT_MAX_EDGE = 2560
 
 # Zoom is multiplicative.
 ZOOM_STEP = 1.15
@@ -44,7 +63,7 @@ _UI = (
 
 
 class _ScaledPaintable(GObject.GObject, Gdk.Paintable):
-    """A texture presented at a chosen intrinsic size, GPU-scaled on draw."""
+    """A paintable presented at a chosen intrinsic size, scaled on draw."""
 
     def __init__(self, texture: Any, width: int, height: int) -> None:
         """Present texture as though it were width x height pixels."""
@@ -122,12 +141,68 @@ class _SplitPaintable(GObject.GObject, Gdk.Paintable):
         )
 
 
-def oriented_pixbuf(jpeg: bytes) -> Any:
-    """Decode JPEG bytes into an EXIF-oriented pixbuf.
+def _capped_copy(pixbuf: Any) -> Any:
+    """A copy of pixbuf whose longest edge is at most _EDIT_MAX_EDGE."""
+    w, h = pixbuf.get_width(), pixbuf.get_height()
+    edge = max(w, h)
+    if edge <= _EDIT_MAX_EDGE:
+        return pixbuf
+    scale = _EDIT_MAX_EDGE / edge
+    return pixbuf.scale_simple(
+        max(1, round(w * scale)),
+        max(1, round(h * scale)),
+        GdkPixbuf.InterpType.BILINEAR,
+    )
 
-    GTK-free so it can run on a worker thread; the result is only
-    attached to widgets back on the main thread.
-    """
+
+class _RotatedPaintable(GObject.GObject, Gdk.Paintable):
+    """A texture drawn fine-rotated, sized as the rotation's bounding box."""
+
+    def __init__(self, texture: Any, width: int, height: int) -> None:
+        """Wrap texture (width x height pixels), initially unrotated."""
+        super().__init__()
+        self._texture = texture
+        self._width = max(1, width)
+        self._height = max(1, height)
+        self._angle = 0.0
+
+    def set_angle(self, angle: float) -> None:
+        """Set the rotation in degrees clockwise and redraw."""
+        if angle == self._angle:
+            return
+        self._angle = angle
+        self.invalidate_size()
+        self.invalidate_contents()
+
+    def _bbox(self) -> tuple[float, float]:
+        """The rotated bounding box of the texture, in texture pixels."""
+        return crop.rotated_size(self._width, self._height, self._angle)
+
+    def do_get_intrinsic_width(self) -> int:
+        """Report the bounding-box width to the layout system."""
+        return max(1, round(self._bbox()[0]))
+
+    def do_get_intrinsic_height(self) -> int:
+        """Report the bounding-box height to the layout system."""
+        return max(1, round(self._bbox()[1]))
+
+    def do_snapshot(self, snapshot: Any, width: float, height: float) -> None:
+        """Draw the texture rotated about the center of the given area."""
+        bw, bh = self._bbox()
+        if bw <= 0 or bh <= 0:
+            return
+        scale = width / bw
+        dw, dh = self._width * scale, self._height * scale
+        snapshot.save()
+        snapshot.translate(Graphene.Point().init(width / 2, height / 2))
+        snapshot.rotate(self._angle)
+        snapshot.translate(Graphene.Point().init(-dw / 2, -dh / 2))
+        self._texture.snapshot(snapshot, dw, dh)
+        snapshot.restore()
+
+
+def oriented_pixbuf(jpeg: bytes) -> Any:
+    """Decode jpeg bytes into an exif-oriented pixbuf."""
     loader = GdkPixbuf.PixbufLoader()
     loader.write(jpeg)
     loader.close()
@@ -138,14 +213,18 @@ def oriented_pixbuf(jpeg: bytes) -> Any:
 class PreviewView(Gtk.Box):
     """The rendered-image viewport plus its status/tool strip.
 
-    Owns everything about presenting a JPEG: zoom (Ctrl+scroll or the
+    Owns everything about presenting a jpeg: zoom (Ctrl+scroll or the
     win.zoom-* actions), drag panning, hold-to-peek at the in-camera
-    original, manual rotation, the cycling canvas background and the
-    histogram overlay. The window feeds it JPEGs and reads back the
-    rotation when exporting.
+    original, crop and straighten, the cycling canvas background and the
+    histogram overlay. The window feeds it jpegs and reads back the
+    geometry when exporting.
     """
 
     __gtype_name__ = "GrawjiPreviewView"
+
+    __gsignals__: ClassVar[dict[str, Any]] = {
+        "geometry-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+    }
 
     scroll = Gtk.Template.Child()
     picture = Gtk.Template.Child()
@@ -156,13 +235,43 @@ class PreviewView(Gtk.Box):
     peek_button = Gtk.Template.Child()
     rotate_left = Gtk.Template.Child()
     rotate_right = Gtk.Template.Child()
+    crop_button = Gtk.Template.Child()
+    crop_overlay = Gtk.Template.Child()
+    crop_bar = Gtk.Template.Child()
+    crop_aspect = Gtk.Template.Child()
+    crop_swap = Gtk.Template.Child()
+    crop_guides = Gtk.Template.Child()
+    guide_flip_h = Gtk.Template.Child()
+    guide_flip_v = Gtk.Template.Child()
+    angle_scale = Gtk.Template.Child()
+    angle_spin = Gtk.Template.Child()
+    crop_reset = Gtk.Template.Child()
+    crop_cancel = Gtk.Template.Child()
+    crop_apply = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
-        """Wire the zoom, pan, peek and rotation controllers."""
+        """Wire the zoom, pan, peek and crop controllers."""
         super().__init__(**kwargs)
         self._zoom = 1.0
-        self._rotation = 0
+        self._crop = crop.CropRotate()
+        self._pre_edit = crop.CropRotate()
+        self._editing = False
+        self._edit_closing = False
+        self._syncing_angle = False
+        self._syncing_swap = False
+        self._syncing_aspect = False
+        self._drag_zone: str | None = None
+        self._drag_rect: crop.Rect = crop.FULL_RECT
+        self._hover_zone: str | None = None
+        self._horizon: tuple[float, float, float, float] | None = None
+        self._edit_base: Any | None = None
+        self._edit_base_src: Any | None = None
+        self._edit_texture: Any = None
+        self._edit_texture_size = (0, 0)
+        self._edit_orientation = -1
+        self._edit_paintable: _RotatedPaintable | None = None
         self._pixbuf: Any | None = None
+        self._oriented_pixbuf: Any | None = None
         self._original_pixbuf: Any | None = None
         self._last_jpeg: bytes | None = None
         self._embedded_jpeg: bytes | None = None
@@ -178,7 +287,7 @@ class PreviewView(Gtk.Box):
         self._compare = False
         self._base_jpeg: bytes | None = None
         self._base_pixbuf: Any | None = None
-        self._base_rotation = 0
+        self._base_geometry: crop.CropRotate | None = None
         self._split: _SplitPaintable | None = None
         self._split_fraction = 0.5
         self._dragging_divider = False
@@ -186,12 +295,16 @@ class PreviewView(Gtk.Box):
 
         self.rotate_left.connect("clicked", lambda *_a: self.rotate(-90))
         self.rotate_right.connect("clicked", lambda *_a: self.rotate(90))
+        self._init_crop_controls()
 
         self._histogram = Histogram()
         self._histogram.set_hexpand(True)
         self._histogram.set_vexpand(True)
         self.histogram_slot.append(self._histogram)
+        self._init_viewport_controllers()
 
+    def _init_viewport_controllers(self) -> None:
+        """Wire the zoom, pan, pointer and peek controllers."""
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.VERTICAL
         )
@@ -212,6 +325,7 @@ class PreviewView(Gtk.Box):
             self.scroll.get_vadjustment(),
         ):
             adj.connect("changed", self._on_viewport_changed)
+            adj.connect("value-changed", self._on_viewport_scrolled)
 
         peek = Gtk.GestureClick()
         peek.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
@@ -220,10 +334,57 @@ class PreviewView(Gtk.Box):
         peek.connect("cancel", self._on_peek_cancel)
         self.peek_button.add_controller(peek)
 
+    def _init_crop_controls(self) -> None:
+        """Wire the crop bar, the overlay drawing and its gestures."""
+        self.crop_button.connect("toggled", self._on_crop_toggled)
+        self.crop_apply.connect("clicked", lambda *_a: self.apply_crop())
+        self.crop_cancel.connect("clicked", lambda *_a: self.cancel_crop())
+        self.crop_reset.connect("clicked", lambda *_a: self._reset_edit())
+        self._angle_adj = self.angle_spin.get_adjustment()
+        self.angle_scale.set_adjustment(self._angle_adj)
+        self.angle_scale.add_mark(0.0, Gtk.PositionType.BOTTOM, None)
+        self._angle_adj.connect("value-changed", self._on_angle_changed)
+        self.crop_aspect.connect("notify::selected", self._on_aspect_changed)
+        self.crop_swap.connect("toggled", self._on_swap_toggled)
+        self.crop_guides.connect("notify::selected", self._on_guides_selected)
+        for flip in (self.guide_flip_h, self.guide_flip_v):
+            flip.connect("toggled", lambda *_a: self.crop_overlay.queue_draw())
+        self.crop_overlay.set_draw_func(self._draw_crop_overlay)
+
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", self._on_crop_drag_begin)
+        drag.connect("drag-update", self._on_crop_drag_update)
+        drag.connect("drag-end", self._on_crop_drag_end)
+        self.crop_overlay.add_controller(drag)
+        horizon = Gtk.GestureDrag()
+        horizon.set_button(3)
+        horizon.connect("drag-begin", self._on_horizon_begin)
+        horizon.connect("drag-update", self._on_horizon_update)
+        horizon.connect("drag-end", self._on_horizon_end)
+        self.crop_overlay.add_controller(horizon)
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("motion", self._on_crop_motion)
+        self.crop_overlay.add_controller(motion)
+        wheel = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.BOTH_AXES
+        )
+        wheel.connect("scroll", self._on_overlay_scroll)
+        self.crop_overlay.add_controller(wheel)
+
     @property
     def rotation(self) -> int:
-        """The manual rotation baked into the display, degrees clockwise."""
-        return self._rotation
+        """The committed 90-degree orientation, degrees clockwise."""
+        return self._crop.orientation
+
+    @property
+    def crop_rotate(self) -> crop.CropRotate:
+        """The current geometry (live values while editing)."""
+        return self._crop
+
+    @property
+    def crop_editing(self) -> bool:
+        """Whether the crop editor is active."""
+        return self._editing
 
     @property
     def peeking(self) -> bool:
@@ -263,16 +424,20 @@ class PreviewView(Gtk.Box):
     def clear_source(self) -> None:
         """Forget the source JPEG (a new selection failed to decode)."""
         self._last_jpeg = None
+        self._oriented_pixbuf = None
 
-    def reset_rotation(self) -> None:
-        """Clear the manual rotation (for a new selection)."""
-        self._rotation = 0
+    def set_crop(self, value: crop.CropRotate) -> None:
+        """Set the committed geometry (for a newly selected image)."""
+        if self._editing:
+            self.cancel_crop()
+        self._crop = value
+        self._invalidate_derived()
 
     def show_jpeg(self, jpeg: bytes) -> bool:
         """Display JPEG bytes in the preview; False if undecodable."""
         self._last_jpeg = jpeg
         try:
-            pixbuf = self.pixbuf_from_jpeg(jpeg)
+            pixbuf = oriented_pixbuf(jpeg)
         except GLib.Error as exc:
             self.set_status(f"Cannot display image: {exc}")
             return False
@@ -280,29 +445,117 @@ class PreviewView(Gtk.Box):
         return True
 
     def show_pixbuf(self, pixbuf: Any, *, jpeg: bytes | None = None) -> None:
-        """Display an already-decoded pixbuf (jpeg is its source bytes)."""
+        """Display an EXIF-oriented pixbuf (jpeg is its source bytes)."""
         if jpeg is not None:
             self._last_jpeg = jpeg
-        self._pixbuf = pixbuf
+        self._oriented_pixbuf = pixbuf
         self._original_pixbuf = None
         self._peek = False
         self.peek_button.set_sensitive(True)
         self.rotate_left.set_sensitive(True)
         self.rotate_right.set_sensitive(True)
-        self._histogram.update(pixbuf)
-        self._refresh_display()
+        self.crop_button.set_sensitive(True)
+        if self._editing:
+            self._conform_crop()
+        self._redisplay()
 
     def pixbuf_from_jpeg(self, jpeg: bytes) -> Any:
-        """Decode JPEG bytes, applying EXIF orientation and rotation."""
-        pixbuf = oriented_pixbuf(jpeg)
-        rotation = _ROTATIONS.get(self._rotation)
-        return pixbuf.rotate_simple(rotation) if rotation else pixbuf
+        """Decode JPEG bytes and bake the current geometry into them."""
+        return bake_pixbuf(oriented_pixbuf(jpeg), self._crop)
 
     def rotate(self, degrees: int) -> None:
-        """Update the rotation and redisplay the current image."""
-        self._rotation = (self._rotation + degrees) % 360
-        if self._last_jpeg is not None:
-            self.show_jpeg(self._last_jpeg)
+        """Turn the image by a 90-degree step and redisplay."""
+        current = self._crop
+        self._crop = replace(
+            current,
+            orientation=(current.orientation + degrees) % 360,
+            rect=crop.rotate_rect_90(current.rect, degrees),
+        )
+        self._invalidate_derived()
+        self._redisplay()
+        if not self._editing:
+            self.emit("geometry-changed")
+
+    def _invalidate_derived(self) -> None:
+        """Drop pixbufs derived under a now-stale geometry."""
+        self._original_pixbuf = None
+        self._base_pixbuf = None
+
+    def _redisplay(self, *, histogram: bool = True) -> None:
+        """Recompute the displayed image from the oriented source."""
+        if self._oriented_pixbuf is None:
+            return
+        if not self._editing:
+            display = bake_pixbuf(self._oriented_pixbuf, self._crop)
+            self._pixbuf = display
+            if histogram:
+                self._histogram.update(display)
+        self._refresh_display()
+        self.crop_overlay.queue_draw()
+
+    def _edit_display_paintable(self) -> _RotatedPaintable | None:
+        """The GPU-rotated paintable for the crop editor."""
+        if self._oriented_pixbuf is None:
+            return None
+        if self._edit_base_src is not self._oriented_pixbuf:
+            self._edit_base = _capped_copy(self._oriented_pixbuf)
+            self._edit_base_src = self._oriented_pixbuf
+            self._edit_texture = None
+        if (
+            self._edit_texture is None
+            or self._edit_orientation != self._crop.orientation
+        ):
+            pixbuf = orient_pixbuf(self._edit_base, self._crop.orientation)
+            self._edit_texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self._edit_texture_size = (
+                pixbuf.get_width(),
+                pixbuf.get_height(),
+            )
+            self._edit_orientation = self._crop.orientation
+            self._edit_paintable = None
+        if self._edit_paintable is None:
+            self._edit_paintable = _RotatedPaintable(
+                self._edit_texture, *self._edit_texture_size
+            )
+        self._edit_paintable.set_angle(self._crop.angle)
+        return self._edit_paintable
+
+    def _drop_edit_display(self) -> None:
+        """Free the crop editor's texture and caches."""
+        self._edit_base = None
+        self._edit_base_src = None
+        self._edit_texture = None
+        self._edit_orientation = -1
+        self._edit_paintable = None
+
+    def _apply_edit_view(self) -> None:
+        """Present the crop editor's GPU-rotated view at the zoom."""
+        paintable = self._edit_display_paintable()
+        dims = self._display_dims()
+        if paintable is None or dims is None:
+            return
+        self._split = None
+        pw, ph = dims
+        vw = self.scroll.get_width() or pw
+        vh = self.scroll.get_height() or ph
+        if self._zoom == 1.0:
+            self.picture.set_can_shrink(True)
+            self.picture.set_halign(Gtk.Align.FILL)
+            self.picture.set_valign(Gtk.Align.FILL)
+            self.picture.set_paintable(paintable)
+            self._content_w, self._content_h = float(vw), float(vh)
+        else:
+            fit = min(vw / pw, vh / ph)
+            sw = max(1, int(pw * fit * self._zoom))
+            sh = max(1, int(ph * fit * self._zoom))
+            self.picture.set_can_shrink(False)
+            self.picture.set_halign(Gtk.Align.CENTER)
+            self.picture.set_valign(Gtk.Align.CENTER)
+            self.picture.set_paintable(_ScaledPaintable(paintable, sw, sh))
+            self._content_w, self._content_h = float(sw), float(sh)
+        self._shown_size = (pw, ph)
+        self._update_zoom_label()
+        self.crop_overlay.queue_draw()
 
     def zoom_in(self) -> None:
         """Zoom in one step, centred on the viewport."""
@@ -339,10 +592,11 @@ class PreviewView(Gtk.Box):
         self._anchor_scroll(vadj, fy, ay, self._content_h, vh)
 
     def _fit_scale(self) -> float | None:
-        """The fit-to-viewport scale of the current image, native = 1.0."""
-        if self._pixbuf is None:
+        """The fit-to-viewport scale of the shown image, native = 1.0."""
+        dims = self._display_dims()
+        if dims is None:
             return None
-        pw, ph = self._pixbuf.get_width(), self._pixbuf.get_height()
+        pw, ph = dims
         vw, vh = self.scroll.get_width(), self.scroll.get_height()
         if pw <= 0 or ph <= 0 or vw <= 0 or vh <= 0:
             return None
@@ -350,6 +604,8 @@ class PreviewView(Gtk.Box):
 
     def set_peek(self, *, peeking: bool) -> None:
         """Show the in-camera original while peeking, else the result."""
+        if peeking and self._editing:
+            return
         if peeking and self._original_pixbuf is None:
             if self._embedded_jpeg is None:
                 return
@@ -375,15 +631,15 @@ class PreviewView(Gtk.Box):
             self._refresh_display()
 
     def _base_for_rotation(self) -> Any | None:
-        """The baseline pixbuf decoded at the current rotation (cached)."""
+        """The baseline pixbuf decoded at the current geometry."""
         if self._base_jpeg is None:
             return None
-        if self._base_pixbuf is None or self._base_rotation != self._rotation:
+        if self._base_pixbuf is None or self._base_geometry != self._crop:
             try:
                 self._base_pixbuf = self.pixbuf_from_jpeg(self._base_jpeg)
             except GLib.Error:
                 return None
-            self._base_rotation = self._rotation
+            self._base_geometry = self._crop
         return self._base_pixbuf
 
     def set_compare(self, *, on: bool) -> bool:
@@ -416,7 +672,7 @@ class PreviewView(Gtk.Box):
     def _on_peek_pressed(
         self, gesture: Gtk.GestureClick, _n: int, _x: float, _y: float
     ) -> None:
-        """Start peeking; claim the press so the button does not cancel it."""
+        """Start peeking. Claim the press so the button does not cancel it."""
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self.set_peek(peeking=True)
 
@@ -525,6 +781,11 @@ class PreviewView(Gtk.Box):
         self.set_zoom(self._zoom * factor, anchor=self._pointer)
         return True
 
+    def _on_viewport_scrolled(self, _adj: Any) -> None:
+        """Keep the crop overlay glued to the image while panning."""
+        if self._editing:
+            self.crop_overlay.queue_draw()
+
     def _on_viewport_changed(self, _adj: Any) -> None:
         """Refresh the zoom readout when the viewport geometry changes."""
         self._update_zoom_label()
@@ -572,7 +833,11 @@ class PreviewView(Gtk.Box):
 
     def _apply_zoom(self) -> None:
         """Show the preview at the current zoom (split view when comparing)."""
-        base_pixbuf = self._base_for_rotation() if self._compare else None
+        if self._editing:
+            self._apply_edit_view()
+            return
+        comparing_now = self._compare and not self._editing
+        base_pixbuf = self._base_for_rotation() if comparing_now else None
         comparing = base_pixbuf is not None
         pixbuf = self._pixbuf if comparing else self._preview_pixbuf()
         if pixbuf is None:
@@ -622,3 +887,481 @@ class PreviewView(Gtk.Box):
         self._content_w, self._content_h = sw, sh
         self._shown_size = (pw, ph)
         self._update_zoom_label()
+
+    def _on_crop_toggled(self, button: Any) -> None:
+        """Enter the crop editor, or commit it when toggled back off."""
+        if self._edit_closing:
+            return
+        if button.get_active():
+            if not self._start_edit():
+                self._set_crop_toggle(active=False)
+        else:
+            self.apply_crop()
+
+    def _set_crop_toggle(self, *, active: bool) -> None:
+        """Sync the toolbar toggle without re-entering its handler."""
+        self._edit_closing = True
+        self.crop_button.set_active(active)
+        self._edit_closing = False
+
+    def _start_edit(self) -> bool:
+        """Open the crop editor on the current image."""
+        if self._editing or self._oriented_pixbuf is None:
+            return self._editing
+        self._pre_edit = self._crop
+        self.zoom_fit()
+        self._editing = True
+        self._select_aspect(self._crop.aspect)
+        self._sync_swap(active=self._crop.aspect_swapped)
+        self._conform_crop()
+        self._sync_angle(self._crop.angle)
+        self.crop_bar.set_reveal_child(True)
+        self.crop_overlay.set_visible(True)
+        self._redisplay(histogram=False)
+        return True
+
+    def _conform_crop(self) -> None:
+        """Shrink the crop rect onto the current image if it strays."""
+        dims = self._oriented_dims()
+        if dims is None:
+            return
+        rect = crop.shrink_to_fit(
+            dims[0], dims[1], self._crop.angle, self._crop.rect
+        )
+        if rect != self._crop.rect:
+            self._crop = replace(self._crop, rect=rect)
+            self.crop_overlay.queue_draw()
+
+    def apply_crop(self) -> None:
+        """Commit the crop edit (Enter, the check button or the toggle)."""
+        self._finish_edit(apply=True)
+
+    def cancel_crop(self) -> None:
+        """Abandon the crop edit and restore the previous geometry."""
+        self._finish_edit(apply=False)
+
+    def _finish_edit(self, *, apply: bool) -> None:
+        """Leave the crop editor, keeping or reverting its changes."""
+        if not self._editing:
+            return
+        self._editing = False
+        if not apply:
+            self._crop = self._pre_edit
+        self._horizon = None
+        self.crop_bar.set_reveal_child(False)
+        self.crop_overlay.set_visible(False)
+        self._set_crop_toggle(active=False)
+        self._invalidate_derived()
+        self._drop_edit_display()
+        self._redisplay()
+        if apply and self._crop != self._pre_edit:
+            self.emit("geometry-changed")
+
+    def _reset_edit(self) -> None:
+        """Reset the editor to the untouched state."""
+        if not self._editing:
+            return
+        self._crop = replace(
+            self._crop,
+            angle=0.0,
+            rect=crop.FULL_RECT,
+            aspect="Original",
+            aspect_swapped=False,
+        )
+        self._select_aspect("Original")
+        self._sync_swap(active=False)
+        self._sync_angle(0.0)
+        self._redisplay(histogram=False)
+
+    def _sync_angle(self, value: float) -> None:
+        """Move the angle controls without re-applying the angle."""
+        self._syncing_angle = True
+        self._angle_adj.set_value(value)
+        self._syncing_angle = False
+
+    def _on_angle_changed(self, adj: Any) -> None:
+        """Apply a new angle from the slider or spin button."""
+        if self._syncing_angle or not self._editing:
+            return
+        self._set_angle(adj.get_value())
+
+    def _oriented_dims(self) -> tuple[int, int] | None:
+        """The image size in pixels after the 90-degree orientation."""
+        if self._oriented_pixbuf is None:
+            return None
+        w = self._oriented_pixbuf.get_width()
+        h = self._oriented_pixbuf.get_height()
+        if self._crop.orientation in (90, 270):
+            return h, w
+        return w, h
+
+    def _set_angle(self, angle: float) -> None:
+        """Re-rotate to angle, carrying the crop rect along."""
+        dims = self._oriented_dims()
+        if dims is None:
+            return
+        w, h = dims
+        old = self._crop
+        obw, obh = crop.rotated_size(w, h, old.angle)
+        nbw, nbh = crop.rotated_size(w, h, angle)
+        x, y, rw, rh = old.rect
+        # Keep the crop's pixel size and its offset from the image
+        # center while the bounding box changes, then shrink to fit.
+        ccx = (x + rw / 2 - 0.5) * obw
+        ccy = (y + rh / 2 - 0.5) * obh
+        nw = rw * obw / nbw
+        nh = rh * obh / nbh
+        nx = 0.5 + ccx / nbw - nw / 2
+        ny = 0.5 + ccy / nbh - nh / 2
+        rect = crop.shrink_to_fit(w, h, angle, (nx, ny, nw, nh))
+        self._crop = replace(old, angle=angle, rect=rect)
+        self._redisplay(histogram=False)
+
+    @property
+    def guides_name(self) -> str:
+        """The selected composition-guide kind."""
+        item = self.crop_guides.get_selected_item()
+        return item.get_string() if item is not None else "Thirds"
+
+    def set_crop_guides(self, name: str) -> None:
+        """Select the composition guides by name."""
+        model = self.crop_guides.get_model()
+        index = 1  # Thirds
+        for i in range(model.get_n_items()):
+            if model.get_string(i) == name:
+                index = i
+                break
+        self.crop_guides.set_selected(index)
+        self._update_guide_flips()
+
+    def _on_guides_selected(self, *_args: object) -> None:
+        """Redraw for the new guides and show the flips only if useful."""
+        self._update_guide_flips()
+        self.crop_overlay.queue_draw()
+
+    def _update_guide_flips(self) -> None:
+        """Show the mirror toggles only for chiral guides."""
+        chiral = self.guides_name in ("Spiral", "Triangles")
+        self.guide_flip_h.set_visible(chiral)
+        self.guide_flip_v.set_visible(chiral)
+
+    def _aspect_label(self) -> str:
+        """The aspect dropdown's current label."""
+        item = self.crop_aspect.get_selected_item()
+        return item.get_string() if item is not None else "Free"
+
+    def _select_aspect(self, label: str) -> None:
+        """Move the aspect dropdown without re-shaping the selection."""
+        model = self.crop_aspect.get_model()
+        index = 0
+        for i in range(model.get_n_items()):
+            if model.get_string(i) == label:
+                index = i
+                break
+        self._syncing_aspect = True
+        self.crop_aspect.set_selected(index)
+        self._syncing_aspect = False
+
+    def _aspect_ratio_px(self) -> float | None:
+        """The selected crop aspect as pixel width over height, or None."""
+        label = self._aspect_label()
+        if label == "Free":
+            ratio = None
+        elif label == "Original":
+            dims = self._oriented_dims()
+            ratio = dims[0] / dims[1] if dims is not None else None
+        else:
+            a, b = label.split(":")
+            ratio = float(a) / float(b)
+        if ratio is not None and self.crop_swap.get_active():
+            return 1.0 / ratio
+        return ratio
+
+    def _on_swap_toggled(self, _button: Any) -> None:
+        """Rotate the selection between landscape and portrait."""
+        if self._syncing_swap or not self._editing:
+            return
+        self._crop = replace(
+            self._crop, aspect_swapped=self.crop_swap.get_active()
+        )
+        dims = self._oriented_dims()
+        if dims is None:
+            return
+        w, h = dims
+        rect = crop.swap_rect(w, h, self._crop.angle, self._crop.rect)
+        self._crop = replace(self._crop, rect=rect)
+        self.crop_overlay.queue_draw()
+
+    def _sync_swap(self, *, active: bool) -> None:
+        """Move the swap toggle without re-shaping the selection."""
+        self._syncing_swap = True
+        self.crop_swap.set_active(active)
+        self._syncing_swap = False
+
+    def _on_aspect_changed(self, *_args: object) -> None:
+        """Remember the choice and re-shape the crop rect to it."""
+        if self._syncing_aspect or not self._editing:
+            return
+        self._crop = replace(self._crop, aspect=self._aspect_label())
+        ratio = self._aspect_ratio_px()
+        dims = self._oriented_dims()
+        if ratio is None or dims is None:
+            return
+        w, h = dims
+        current = self._crop
+        bw, bh = crop.rotated_size(w, h, current.angle)
+        x, y, rw, rh = current.rect
+        # Keep the center and roughly the area, in pixels.
+        area = (rw * bw) * (rh * bh)
+        pw = math.sqrt(area * ratio)
+        ph = pw / ratio
+        scale = min(1.0, bw / pw, bh / ph)
+        nw = pw * scale / bw
+        nh = ph * scale / bh
+        nx = min(max(x + rw / 2 - nw / 2, 0.0), 1.0 - nw)
+        ny = min(max(y + rh / 2 - nh / 2, 0.0), 1.0 - nh)
+        rect = crop.shrink_to_fit(w, h, current.angle, (nx, ny, nw, nh))
+        self._crop = replace(current, rect=rect)
+        self.crop_overlay.queue_draw()
+
+    def _display_dims(self) -> tuple[int, int] | None:
+        """Logical pixel size of what the picture currently displays."""
+        if self._editing:
+            dims = self._oriented_dims()
+            if dims is None:
+                return None
+            bw, bh = crop.rotated_size(dims[0], dims[1], self._crop.angle)
+            return max(1, round(bw)), max(1, round(bh))
+        if self._pixbuf is None:
+            return None
+        return self._pixbuf.get_width(), self._pixbuf.get_height()
+
+    def _display_bounds(self) -> tuple[float, float, float, float] | None:
+        """The drawn image in crop-overlay coordinates."""
+        dims = self._display_dims()
+        if dims is None:
+            return None
+        iw, ih = dims
+        ok, rect = self.picture.compute_bounds(self.crop_overlay)
+        if not ok or iw <= 0 or ih <= 0:
+            return None
+        if rect.size.width <= 0 or rect.size.height <= 0:
+            return None
+        scale = min(rect.size.width / iw, rect.size.height / ih)
+        dw, dh = iw * scale, ih * scale
+        if dw <= 0 or dh <= 0:
+            return None
+        return (
+            rect.origin.x + (rect.size.width - dw) / 2,
+            rect.origin.y + (rect.size.height - dh) / 2,
+            dw,
+            dh,
+        )
+
+    def _pointer_zone(self, x: float, y: float) -> str | None:
+        """The crop drag zone under an overlay-coordinate pointer."""
+        bounds = self._display_bounds()
+        if bounds is None:
+            return None
+        ox, oy, dw, dh = bounds
+        return crop.hit_zone(
+            self._crop.rect,
+            (x - ox) / dw,
+            (y - oy) / dh,
+            _GRAB_PX / dw,
+            _GRAB_PX / dh,
+        )
+
+    def _on_overlay_scroll(
+        self, controller: Any, dx: float, dy: float
+    ) -> bool:
+        """Zoom or pan the view from a wheel over the editor."""
+        event = controller.get_current_event()
+        state = event.get_modifier_state() if event else 0
+        if state & Gdk.ModifierType.CONTROL_MASK:
+            factor = ZOOM_STEP if dy < 0 else 1 / ZOOM_STEP
+            self.set_zoom(self._zoom * factor, anchor=self._pointer)
+            return True
+        if state & Gdk.ModifierType.SHIFT_MASK:
+            dx, dy = dy, dx
+        step = 60.0
+        hadj = self.scroll.get_hadjustment()
+        vadj = self.scroll.get_vadjustment()
+        hadj.set_value(hadj.get_value() + dx * step)
+        vadj.set_value(vadj.get_value() + dy * step)
+        return True
+
+    def _on_crop_drag_begin(self, _gesture: Any, x: float, y: float) -> None:
+        """Grab a handle, an edge, the rect body, or start a pan."""
+        self._drag_zone = self._pointer_zone(x, y)
+        self._drag_rect = self._crop.rect
+        if self._drag_zone is None:
+            self._pan_h = self.scroll.get_hadjustment().get_value()
+            self._pan_v = self.scroll.get_vadjustment().get_value()
+
+    def _on_crop_drag_update(
+        self, _gesture: Any, dx: float, dy: float
+    ) -> None:
+        """Resize or move the crop rect, constrained to image pixels."""
+        if self._drag_zone is None:
+            self.scroll.get_hadjustment().set_value(self._pan_h - dx)
+            self.scroll.get_vadjustment().set_value(self._pan_v - dy)
+            return
+        bounds = self._display_bounds()
+        dims = self._oriented_dims()
+        if bounds is None or dims is None:
+            return
+        _ox, _oy, dw, dh = bounds
+        w, h = dims
+        angle = self._crop.angle
+        ratio = self._aspect_ratio_px()
+        nratio = None
+        if ratio is not None:
+            bw, bh = crop.rotated_size(w, h, angle)
+            nratio = ratio * bh / bw
+        rect = crop.constrain_drag(
+            w,
+            h,
+            angle,
+            self._drag_rect,
+            self._drag_zone,
+            dx=dx / dw,
+            dy=dy / dh,
+            ratio=nratio,
+        )
+        self._crop = replace(self._crop, rect=rect)
+        self.crop_overlay.queue_draw()
+
+    def _on_crop_drag_end(self, _gesture: Any, _dx: float, _dy: float) -> None:
+        """Release the dragged handle."""
+        self._drag_zone = None
+
+    def _on_horizon_begin(self, _gesture: Any, x: float, y: float) -> None:
+        """Start drawing the straighten line."""
+        self._horizon = (x, y, x, y)
+        self.crop_overlay.queue_draw()
+
+    def _on_horizon_update(self, gesture: Any, dx: float, dy: float) -> None:
+        """Track the straighten line under the pointer."""
+        ok, sx, sy = gesture.get_start_point()
+        if not ok:
+            return
+        self._horizon = (sx, sy, sx + dx, sy + dy)
+        self.crop_overlay.queue_draw()
+
+    def _on_horizon_end(self, _gesture: Any, dx: float, dy: float) -> None:
+        """Level the image to the drawn line."""
+        self._horizon = None
+        if abs(dx) < _MIN_HORIZON_PX and abs(dy) < _MIN_HORIZON_PX:
+            self.crop_overlay.queue_draw()
+            return
+        angle = self._crop.angle + crop.level_delta(dx, dy)
+        angle = max(-crop.MAX_ANGLE, min(crop.MAX_ANGLE, angle))
+        self._sync_angle(angle)
+        self._set_angle(angle)
+
+    def _horizon_off_degrees(self, dx: float, dy: float) -> float:
+        """The drawn line's on-screen tilt in degrees."""
+        return -crop.level_delta(dx, dy)
+
+    def _on_crop_motion(self, _controller: Any, x: float, y: float) -> None:
+        """Track the pointer and show the zone cursor."""
+        self._pointer = (x, y)
+        zone = self._pointer_zone(x, y)
+        if zone == self._hover_zone:
+            return
+        self._hover_zone = zone
+        name = _ZONE_CURSORS.get(zone or "")
+        self.crop_overlay.set_cursor(
+            Gdk.Cursor.new_from_name(name, None) if name else None
+        )
+
+    def _draw_crop_overlay(
+        self, _area: Any, ctx: Any, width: int, height: int
+    ) -> None:
+        """Draw the dimmed surround, guides, handles and horizon line."""
+        if not self._editing:
+            return
+        bounds = self._display_bounds()
+        if bounds is None:
+            return
+        ox, oy, dw, dh = bounds
+        x, y, w, h = self._crop.rect
+        rx, ry = ox + x * dw, oy + y * dh
+        rw, rh = w * dw, h * dh
+        # Dim everything outside the crop rect.
+        ctx.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+        ctx.set_source_rgba(0, 0, 0, 0.45)
+        ctx.rectangle(ox, oy, dw, dh)
+        ctx.rectangle(rx, ry, rw, rh)
+        ctx.fill()
+        # Composition guides (selectable, darktable-style).
+        ctx.set_line_width(1.0)
+        ctx.set_source_rgba(1, 1, 1, 0.35)
+        lines = crop.guide_lines(
+            self.guides_name,
+            rw,
+            rh,
+            flip_h=self.guide_flip_h.get_active(),
+            flip_v=self.guide_flip_v.get_active(),
+        )
+        for x1, y1, x2, y2 in lines:
+            ctx.move_to(rx + x1, ry + y1)
+            ctx.line_to(rx + x2, ry + y2)
+        ctx.stroke()
+        # The rect border: a dark halo under a white line.
+        ctx.set_source_rgba(0, 0, 0, 0.6)
+        ctx.set_line_width(3.0)
+        ctx.rectangle(rx, ry, rw, rh)
+        ctx.stroke()
+        ctx.set_source_rgba(1, 1, 1, 0.9)
+        ctx.set_line_width(1.0)
+        ctx.rectangle(rx, ry, rw, rh)
+        ctx.stroke()
+        # Corner and edge handles.
+        ctx.set_source_rgba(1, 1, 1, 0.95)
+        half = 4.0
+        for hx in (rx, rx + rw / 2, rx + rw):
+            for hy in (ry, ry + rh / 2, ry + rh):
+                if hx == rx + rw / 2 and hy == ry + rh / 2:
+                    continue
+                ctx.rectangle(hx - half, hy - half, half * 2, half * 2)
+        ctx.fill()
+        if self._horizon is not None:
+            self._draw_horizon(ctx, width, height)
+
+    def _draw_horizon(self, ctx: Any, width: int, height: int) -> None:
+        """Draw the straighten line plus its off-level degree readout."""
+        if self._horizon is None:
+            return
+        x0, y0, x1, y1 = self._horizon
+        ctx.set_source_rgba(1.0, 0.8, 0.2, 0.9)
+        ctx.set_line_width(2.0)
+        ctx.move_to(x0, y0)
+        ctx.line_to(x1, y1)
+        ctx.stroke()
+        for ex, ey in ((x0, y0), (x1, y1)):
+            ctx.arc(ex, ey, 3.0, 0.0, 2.0 * math.pi)
+            ctx.stroke()
+        dx, dy = x1 - x0, y1 - y0
+        if abs(dx) < _MIN_HORIZON_PX and abs(dy) < _MIN_HORIZON_PX:
+            return
+        label = f"{self._horizon_off_degrees(dx, dy):.2f}°"
+        ctx.set_font_size(13.0)
+        ext = ctx.text_extents(label)
+        pad = 5.0
+        tx = x1 + 16.0
+        ty = y1 - 16.0
+        tx = min(max(tx, pad), width - ext.width - 2 * pad)
+        ty = min(max(ty, ext.height + 2 * pad), height - pad)
+        ctx.set_source_rgba(0, 0, 0, 0.65)
+        ctx.rectangle(
+            tx - pad,
+            ty - ext.height - pad,
+            ext.width + 2 * pad,
+            ext.height + 2 * pad,
+        )
+        ctx.fill()
+        ctx.set_source_rgba(1, 1, 1, 0.95)
+        ctx.move_to(tx - ext.x_bearing, ty)
+        ctx.show_text(label)

@@ -30,6 +30,9 @@ _SHORTCUT_GROUPS = {
         ("Cycle background", "b"),
         ("Show original (before/after)", "backslash"),
         ("Toggle histogram", "h"),
+        ("Crop and straighten", "c"),
+        ("Apply crop", "Return"),
+        ("Cancel crop", "Escape"),
     ],
     "Application": [
         ("Preferences", "<Ctrl>comma"),
