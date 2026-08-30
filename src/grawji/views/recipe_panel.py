@@ -339,6 +339,14 @@ class RecipePanel(Adw.PreferencesPage):
         self._update_grain_size_visibility()
         self._update_mono_visibility()
 
+    def set_exposure(self, value: float) -> None:
+        """Move only the exposure control, without emitting changed."""
+        self._suppress_signals = True
+        try:
+            self._exposure_row.set_value(value)
+        finally:
+            self._suppress_signals = False
+
     def set_active(self, recipe: Recipe, label: str) -> None:
         """Load a recipe and mark it active (for the recipe indicator)."""
         self._applied_recipe = recipe

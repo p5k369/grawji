@@ -12,20 +12,14 @@ orientation, then the fine angle, then the crop.
 
 from __future__ import annotations
 
-import json
-import logging
 import math
 from dataclasses import dataclass
-from pathlib import Path
 
 Rect = tuple[float, float, float, float]
 
 FULL_RECT: Rect = (0.0, 0.0, 1.0, 1.0)
 MAX_ANGLE = 45.0
 MIN_SIZE = 0.05
-SIDECAR_SUFFIX = ".grawji.json"
-
-_log = logging.getLogger("grawji")
 
 
 @dataclass(frozen=True)
@@ -622,36 +616,3 @@ def _spiral_lines(w: float, h: float) -> list[Line]:
         )
         for i in range(len(points) - 1)
     ]
-
-
-def sidecar_path(raf_path: Path | str) -> Path:
-    """The sidecar path for a RAF: the RAF name plus .grawji.json."""
-    raf = Path(raf_path)
-    return raf.with_name(raf.name + SIDECAR_SUFFIX)
-
-
-def load_sidecar(raf_path: Path | str) -> CropRotate:
-    """Load the RAF's geometry sidecar, or the identity when absent."""
-    path = sidecar_path(raf_path)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return CropRotate()
-    if not isinstance(data, dict) or not isinstance(data.get("crop"), dict):
-        return CropRotate()
-    return CropRotate.from_dict(data["crop"])
-
-
-def save_sidecar(raf_path: Path | str, crop: CropRotate) -> None:
-    """Write the RAF's geometry sidecar, removing it for the identity."""
-    path = sidecar_path(raf_path)
-    try:
-        if crop.is_identity:
-            path.unlink(missing_ok=True)
-        else:
-            path.write_text(
-                json.dumps({"version": 1, "crop": crop.to_dict()}, indent=2),
-                encoding="utf-8",
-            )
-    except OSError as exc:
-        _log.warning("could not write sidecar %s: %s", path, exc)

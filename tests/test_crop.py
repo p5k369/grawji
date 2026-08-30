@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import itertools
-import json
 import math
-from pathlib import Path
 
 import pytest
 
@@ -20,12 +18,9 @@ from grawji.crop import (
     hit_zone,
     largest_fit,
     level_delta,
-    load_sidecar,
     rotate_rect_90,
     rotated_size,
-    save_sidecar,
     shrink_to_fit,
-    sidecar_path,
     swap_rect,
 )
 
@@ -407,33 +402,3 @@ def test_guide_lines_spiral_portrait_and_mirror() -> None:
     assert mirrored[0][1] == pytest.approx(200.0)
     flipped = guide_lines("Spiral", 300, 200, flip_v=True)
     assert flipped[0][1] == pytest.approx(0.0)
-
-
-def test_sidecar_round_trip(tmp_path: Path) -> None:
-    """Geometry survives a save/load cycle next to the RAF."""
-    raf = tmp_path / "DSCF0001.RAF"
-    raf.write_bytes(b"raf")
-    value = CropRotate(orientation=90, angle=2.5, rect=(0.1, 0.1, 0.7, 0.6))
-    save_sidecar(raf, value)
-    assert sidecar_path(raf).name == "DSCF0001.RAF.grawji.json"
-    assert load_sidecar(raf) == value
-
-
-def test_sidecar_identity_removes_file(tmp_path: Path) -> None:
-    """Resetting the geometry deletes the sidecar again."""
-    raf = tmp_path / "DSCF0002.RAF"
-    raf.write_bytes(b"raf")
-    save_sidecar(raf, CropRotate(orientation=90))
-    assert sidecar_path(raf).exists()
-    save_sidecar(raf, CropRotate())
-    assert not sidecar_path(raf).exists()
-
-
-def test_sidecar_missing_or_corrupt(tmp_path: Path) -> None:
-    """Absent or unreadable sidecars fall back to the identity."""
-    raf = tmp_path / "DSCF0003.RAF"
-    assert load_sidecar(raf) == CropRotate()
-    sidecar_path(raf).write_text("not json", encoding="utf-8")
-    assert load_sidecar(raf) == CropRotate()
-    sidecar_path(raf).write_text(json.dumps({"crop": 5}), encoding="utf-8")
-    assert load_sidecar(raf) == CropRotate()
