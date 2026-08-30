@@ -12,7 +12,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GdkPixbuf
 
-from grawji.crop import CropRotate, save_sidecar
+from grawji.crop import CropRotate
+from grawji.sidecar import save_crop
 from grawji.views.export import sidecar_decode
 
 
@@ -32,7 +33,7 @@ def test_sidecar_decode_without_sidecar(tmp_path: Path) -> None:
     raf = tmp_path / "DSCF0001.RAF"
     raf.write_bytes(b"raf")
     assert sidecar_decode(str(raf)) is None
-    save_sidecar(raf, CropRotate())  # identity writes no file
+    save_crop(raf, CropRotate())  # identity writes no file
     assert sidecar_decode(str(raf)) is None
 
 
@@ -40,7 +41,7 @@ def test_sidecar_decode_applies_geometry(tmp_path: Path) -> None:
     """A stored crop/rotation is baked into the decoded pixels."""
     raf = tmp_path / "DSCF0002.RAF"
     raf.write_bytes(b"raf")
-    save_sidecar(
+    save_crop(
         raf,
         CropRotate(orientation=90, rect=(0.25, 0.25, 0.5, 0.5)),
     )

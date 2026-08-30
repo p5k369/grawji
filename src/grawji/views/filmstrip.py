@@ -18,9 +18,9 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import Gdk, GdkPixbuf, GExiv2, Gio, GLib, Gtk, Pango
 
-from grawji.crop import sidecar_path
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 from grawji.settings import cache_dir
+from grawji.sidecar import sidecar_path
 
 # How much of the embedded JPEG to read for the EXIF thumbnail (near the
 # start), so the multi-megabyte preview is not touched on the fast path.

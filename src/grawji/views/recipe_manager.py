@@ -812,7 +812,9 @@ class RecipeLibraryController:
         recipe = self._library.get(name)
         if recipe is None:
             return
+        exposure = self._panel.get_recipe().exposure
         self._panel.set_active(recipe, name)
+        self._panel.set_exposure(exposure)
         self._on_render()
         self._on_status(f"Applied recipe “{name}”.{self._fit_note(recipe)}")
 
@@ -939,6 +941,7 @@ class RecipeLibraryController:
             activate: Re-render the preview after saving (used for imports,
                 where the saved recipe is new to the controls).
         """
+        recipe = replace(recipe, exposure=0.0)
         dialog = Adw.AlertDialog(
             heading="Save recipe", body="Name this recipe:"
         )

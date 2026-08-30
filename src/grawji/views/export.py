@@ -6,6 +6,7 @@ import logging
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gio, GLib, Gtk
 
-from grawji import crop
-from grawji.core import CameraSession, ForeignRafError
+from grawji import sidecar
+from grawji.core import CameraSession, ForeignRafError, recipe_from_profile
 from grawji.preview import CameraWorker
 from grawji.recipe import Recipe
 from grawji.settings import Settings
@@ -32,7 +33,7 @@ SetBusy = Callable[..., None]
 
 def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
     """A decode callback applying the RAF's sidecar geometry, or None."""
-    geometry = crop.load_sidecar(raf_path)
+    geometry = sidecar.load_crop(raf_path)
     if geometry.is_identity:
         return None
     return lambda jpeg: bake_pixbuf(oriented_pixbuf(jpeg), geometry)
@@ -236,7 +237,10 @@ class BatchController:
         """Convert one RAF into out_path."""
         try:
             self._session.open(raf_file)
-            jpeg = self._session.render(recipe, full_resolution=True)
+            jpeg = self._session.render(
+                replace(recipe, exposure=self._image_exposure(raf_file)),
+                full_resolution=True,
+            )
         except ForeignRafError:
             if not skip_foreign:
                 raise
@@ -260,6 +264,16 @@ class BatchController:
             tally["failed"] += 1
         else:
             tally["exported"] += 1
+
+    def _image_exposure(self, raf_file: str) -> float:
+        """The EV to render raf_file with: stored, else as shot."""
+        stored = sidecar.load_exposure(raf_file)
+        if stored is not None:
+            return stored
+        profile = self._session.profile
+        if profile is None:
+            return 0.0
+        return recipe_from_profile(profile).exposure
 
     def _on_cancel(self) -> None:
         """Ask the running batch to stop after the current image."""

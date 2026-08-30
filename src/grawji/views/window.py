@@ -6,6 +6,7 @@ import contextlib
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from importlib import resources
 from pathlib import Path
@@ -18,7 +19,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import camera_info, crop, raf
+from grawji import camera_info, raf, sidecar
 from grawji.capabilities import (
     Capabilities,
     capabilities_for,
@@ -132,6 +133,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
         self._raf_path: Path | None = None
+        self._stored_ev: float | None = None
+        self._image_ev: float | None = None
         self._current_folder: str | None = None
         self._notified_models: set[str] = set()
         self._exif_rows: list[Any] = []
@@ -405,7 +408,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._load_pending_id = 0
         if generation != self._generation:
             return GLib.SOURCE_REMOVE
-        self.preview_view.set_crop(crop.load_sidecar(raf_path))
+        self.preview_view.set_crop(sidecar.load_crop(raf_path))
+        self._stored_ev = sidecar.load_exposure(raf_path)
+        self._image_ev = None
         # The camera open runs on its own worker. The embedded-preview read
         # and decode run on a short-lived thread. Neither blocks the UI, so
         # the filmstrip animation stays smooth and the image appears as soon
@@ -480,18 +485,31 @@ class MainWindow(Adw.ApplicationWindow):
             else self._recipe_library.get(selection)
         )
         from_image = selection == FROM_IMAGE or saved is None
+        shot_recipe = (
+            recipe_from_profile(profile) if profile is not None else Recipe()
+        )
+        # EV is per image: the stored override wins, else the shot EV.
+        ev = (
+            self._stored_ev
+            if self._stored_ev is not None
+            else shot_recipe.exposure
+        )
         if profile is not None and from_image:
-            self.recipe_panel.set_active(
-                recipe_from_profile(profile), FROM_IMAGE_LABEL
-            )
+            self.recipe_panel.set_active(shot_recipe, FROM_IMAGE_LABEL)
             # The loaded recipe is the image's own, so the embedded JPEG
             # already shown is exactly what a render would produce - skip the
-            # slow conversion round-trip until the user actually edits.
-            if self.preview_view.has_embedded_jpeg:
+            # slow conversion round-trip until the user actually edits. A
+            # stored EV override changes the result, so it must render.
+            if (
+                self.preview_view.has_embedded_jpeg
+                and ev == shot_recipe.exposure
+            ):
                 self._set_busy(busy=False, status="Ready.")
                 render_working = False
         elif saved is not None:
             self.recipe_panel.set_active(saved, selection)
+        self.recipe_panel.set_exposure(ev)
+        self._image_ev = ev
         if render_working:
             self._render_preview()
         # Comparing carries across images: refresh the baseline for this one.
@@ -574,7 +592,10 @@ class MainWindow(Adw.ApplicationWindow):
         baseline = self._recipe_library.baseline_recipe()
         if baseline is None:
             return
-        # Rendering the baseline is a camera round-trip; show progress so
+        baseline = replace(
+            baseline, exposure=self.recipe_panel.get_recipe().exposure
+        )
+        # Rendering the baseline is a camera round-trip. Show progress so
         # the wait before the split appears is not a dead moment.
         self._set_busy(busy=True, status="Preparing comparison…")
         self._worker.submit(
@@ -598,8 +619,20 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_recipe_changed(self, _panel: Any) -> None:
         """Re-render (debounced) after a recipe edit."""
-        if self._session.is_open:
-            self._schedule_render()
+        if not self._session.is_open:
+            return
+        self._persist_exposure()
+        self._schedule_render()
+
+    def _persist_exposure(self) -> None:
+        """Store the image's EV in its sidecar when it changed."""
+        if self._raf_path is None:
+            return
+        ev = self.recipe_panel.get_recipe().exposure
+        if self._image_ev is not None and ev == self._image_ev:
+            return
+        self._image_ev = ev
+        sidecar.save_exposure(self._raf_path, ev)
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
         """Apply and remember the recipe chosen in the panel's picker."""
@@ -618,11 +651,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.set_active(
             recipe_from_profile(profile), FROM_IMAGE_LABEL
         )
+        if self._image_ev is not None:
+            self.recipe_panel.set_exposure(self._image_ev)
         self._render_if_open()
 
     def _reset_recipe(self) -> None:
-        """Reset all controls to the default recipe."""
+        """Reset all controls to the default recipe, keeping the EV."""
+        exposure = self.recipe_panel.get_recipe().exposure
         self.recipe_panel.set_active(Recipe(), "Default")
+        self.recipe_panel.set_exposure(exposure)
         self._render_if_open()
 
     def _render_if_open(self) -> None:
@@ -781,9 +818,9 @@ class MainWindow(Adw.ApplicationWindow):
         """Persist a committed crop/rotation to the RAF's sidecar."""
         if self._raf_path is None:
             return
-        crop.save_sidecar(self._raf_path, self.preview_view.crop_rotate)
+        sidecar.save_crop(self._raf_path, self.preview_view.crop_rotate)
         self._filmstrip.set_altered(
-            str(self._raf_path), crop.sidecar_path(self._raf_path).exists()
+            str(self._raf_path), sidecar.sidecar_path(self._raf_path).exists()
         )
 
     def _populate_exif_rows(self, rows: list[tuple[str, str]]) -> None:
