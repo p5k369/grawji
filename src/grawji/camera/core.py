@@ -634,6 +634,22 @@ class CameraSession:
                 assignments,
             )
 
+    def download_settings_backup(self) -> bytes:
+        """Download the connected body's settings blob."""
+        with self._lock:
+            self._close_locked()
+            return camera_backup.download_settings(
+                self._connect_backup, self._safe_disconnect
+            )
+
+    def restore_settings_backup(self, blob: bytes) -> str:
+        """Restore a settings blob."""
+        with self._lock:
+            self._close_locked()
+            return camera_backup.restore_settings(
+                self._connect_backup, self._safe_disconnect, blob
+            )
+
     def read_bank_names(self) -> list[str]:
         """Return the connected body's current bank names, or [] if none."""
         with self._lock:

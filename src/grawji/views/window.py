@@ -21,7 +21,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from grawji import raf, sidecar
-from grawji.camera import camera_info
+from grawji.camera import camera_backup, camera_info
 from grawji.camera.capabilities import (
     Capabilities,
     capabilities_for,
@@ -42,6 +42,7 @@ from grawji.controllers.exports import (
 )
 from grawji.controllers.fileops import FileOpsController
 from grawji.imaging import imagemeta
+from grawji.imaging.export import initial_folder
 from grawji.imaging.render import texture_for_pixbuf
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
@@ -271,6 +272,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("cancel-selection", self._end_select_mode, ("Escape",)),
             ("manage-recipes", self._library.manage, ()),
             ("try-recipes", self._on_try_recipes, ()),
+            ("backup-camera", self._on_backup_camera, ()),
+            ("restore-camera", self._on_restore_camera, ()),
             ("zoom-in", view.zoom_in, ("<Ctrl>plus", "<Ctrl>equal")),
             ("zoom-out", view.zoom_out, ("<Ctrl>minus",)),
             ("zoom-fit", view.zoom_fit, ("<Ctrl>0",)),
@@ -996,6 +999,139 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return capabilities_for(profile, model=raf_model or model)
         return capabilities_for_model(model)
+
+    def _on_backup_camera(self) -> None:
+        """Download the camera's settings blob and save it to a file."""
+        self._set_busy(busy=True, status="Downloading camera settings…")
+        self._camera_ops.download_settings(
+            self._on_backup_downloaded,
+            partial(self._on_camera_op_failed, "Backup"),
+        )
+
+    def _on_backup_downloaded(self, blob: bytes) -> bool:
+        """Ask where to save the downloaded settings blob."""
+        self._set_busy(busy=False, status="Camera settings downloaded.")
+        model = camera_backup.model_from_blob(blob) or "fujifilm"
+        stamp = GLib.DateTime.new_now_local().format("%Y%m%d-%H%M")
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Save camera settings backup")
+        dialog.set_initial_name(f"{model}-settings-{stamp}.bin")
+        start = initial_folder(self._settings.last_backup_dir)
+        if start is not None:
+            dialog.set_initial_folder(start)
+        dialog.save(self, None, partial(self._on_backup_save, blob))
+        return GLib.SOURCE_REMOVE
+
+    def _on_backup_save(self, blob: bytes, dialog: Any, result: Any) -> None:
+        """Write the blob to the chosen file."""
+        try:
+            gfile = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return
+        self._settings.last_backup_dir = str(Path(path).parent)
+        self._save_settings()
+        try:
+            Path(path).write_bytes(blob)
+        except OSError as exc:
+            self.preview_view.set_status(f"Backup failed: {exc}")
+            return
+        self.toast_overlay.add_toast(
+            Adw.Toast.new("Camera settings backed up.")
+        )
+        self.preview_view.set_status(
+            "Backup saved (it contains the camera serial, treat it as"
+            " private)."
+        )
+
+    def _on_restore_camera(self) -> None:
+        """Pick a settings backup file and restore it to the camera."""
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Restore camera settings")
+        backups = Gtk.FileFilter()
+        backups.set_name("Camera settings backups (*.bin)")
+        backups.add_suffix("bin")
+        everything = Gtk.FileFilter()
+        everything.set_name("All files")
+        everything.add_pattern("*")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(backups)
+        filters.append(everything)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(backups)
+        start = initial_folder(self._settings.last_backup_dir)
+        if start is not None:
+            dialog.set_initial_folder(start)
+        dialog.open(self, None, self._on_restore_picked)
+
+    def _on_restore_picked(self, dialog: Any, result: Any) -> None:
+        """Confirm before writing the picked blob to the camera."""
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return
+        try:
+            blob = Path(path).read_bytes()
+        except OSError as exc:
+            self.preview_view.set_status(f"Restore failed: {exc}")
+            return
+        model = camera_backup.model_from_blob(blob)
+        if model is None:
+            self.preview_view.set_status(
+                "Restore refused: not a Fujifilm settings backup."
+            )
+            return
+        self._settings.last_backup_dir = str(Path(path).parent)
+        self._save_settings()
+        confirm = Adw.AlertDialog(
+            heading=f"Restore {model} settings?",
+            body=(
+                "This overwrites EVERY setting on the connected camera"
+                f" with the backup from {Path(path).name}. The model"
+                " must match and the camera validates the file before"
+                " accepting it."
+            ),
+        )
+        confirm.add_response("cancel", "Cancel")
+        confirm.add_response("restore", "Restore")
+        confirm.set_response_appearance(
+            "restore", Adw.ResponseAppearance.DESTRUCTIVE
+        )
+        confirm.connect(
+            "response",
+            lambda _d, response: (
+                self._run_restore(blob) if response == "restore" else None
+            ),
+        )
+        confirm.present(self)
+
+    def _run_restore(self, blob: bytes) -> None:
+        """Write the blob to the camera via the camera-ops worker."""
+        self._set_busy(busy=True, status="Restoring camera settings…")
+        self._camera_ops.restore_settings(
+            blob,
+            self._on_restore_done,
+            partial(self._on_camera_op_failed, "Restore"),
+        )
+
+    def _on_restore_done(self, model: str) -> bool:
+        """Report a finished restore."""
+        self._set_busy(busy=False, status=f"{model} settings restored.")
+        self.toast_overlay.add_toast(
+            Adw.Toast.new(f"{model} settings restored.")
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _on_camera_op_failed(self, what: str, exc: Exception) -> bool:
+        """Report a failed backup/restore."""
+        logging.getLogger("grawji").warning("%s failed: %s", what, exc)
+        self._set_busy(busy=False, status=f"{what} failed: {exc}")
+        return GLib.SOURCE_REMOVE
 
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""

@@ -62,6 +62,8 @@ class Settings:
             preview.
         last_export_dir: Folder of the most recent export.
         the export dialogs open here. Empty means none.
+        last_backup_dir: Folder of the most recent camera-settings
+            backup or restore.
         last_fileop_dir: Destination folder of the most recent copy or
             move. Those dialogs open here. Empty means none.
         expanded_folders: Folder-tree paths that were expanded, restored on
@@ -100,6 +102,7 @@ class Settings:
     show_histogram: bool = False
     last_export_dir: str = ""
     last_fileop_dir: str = ""
+    last_backup_dir: str = ""
     expanded_folders: list[str] = field(default_factory=list)
     last_image: str = ""
     crop_guides: str = "Thirds"

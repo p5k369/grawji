@@ -106,3 +106,43 @@ def test_transfer_errors_are_reported_not_raised(immediate):
     )
     assert messages == []
     assert "0x200f" in errors[0]
+
+
+def test_download_settings_round_trip(immediate):
+    """A downloaded blob reaches the callback."""
+    session = FakeSession(download_settings_backup=b"FUJIFILMX-BACKUP")
+    blobs, errors = [], []
+    CameraOpsController(session).download_settings(blobs.append, errors.append)
+    assert blobs == [b"FUJIFILMX-BACKUP"]
+    assert errors == []
+
+
+def test_download_settings_reports_errors(immediate):
+    """A failed download lands in on_error, nothing escapes."""
+    session = FakeSession(download_settings_backup=RuntimeError("no camera"))
+    blobs, errors = [], []
+    CameraOpsController(session).download_settings(blobs.append, errors.append)
+    assert blobs == []
+    assert str(errors[0]) == "no camera"
+
+
+def test_restore_settings_round_trip(immediate):
+    """A restore reports the restored model."""
+    session = FakeSession(restore_settings_backup="X-T3")
+    models, errors = [], []
+    CameraOpsController(session).restore_settings(
+        b"blob", models.append, errors.append
+    )
+    assert models == ["X-T3"]
+    assert session.calls == [("restore_settings_backup", (b"blob",))]
+
+
+def test_restore_settings_reports_errors(immediate):
+    """A refused restore lands in on_error, nothing escapes."""
+    session = FakeSession(restore_settings_backup=RuntimeError("wrong body"))
+    models, errors = [], []
+    CameraOpsController(session).restore_settings(
+        b"blob", models.append, errors.append
+    )
+    assert models == []
+    assert str(errors[0]) == "wrong body"
