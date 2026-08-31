@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
-from grawji.core import CameraSession
+from grawji.camera.core import CameraSession
 from grawji.recipe import Recipe
 
 Dispatch = Callable[[Callable[[], None]], Any]

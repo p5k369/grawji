@@ -45,7 +45,7 @@ from rawji.fuji_profile import (
     encode_tone_value,
 )
 
-from grawji import camera_backup
+from grawji.camera import camera_backup
 from grawji.recipe import Recipe
 
 # rawji parameter name -> byte offset in the native profile, derived from

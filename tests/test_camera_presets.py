@@ -5,17 +5,17 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from grawji.camera_backup import (
+from grawji.camera.camera_backup import (
     BackupTransferError,
     parse_device_info,
     transfer_recipes,
 )
-from grawji.camera_presets import (
+from grawji.camera.camera_presets import (
     read_preset_names,
     supports_presets,
     transfer_presets,
 )
-from grawji.preset_recipe import (
+from grawji.camera.preset_recipe import (
     PROP_CLARITY,
     PROP_COLOR,
     PROP_FILM_SIMULATION,
@@ -37,7 +37,7 @@ _PTP_INVALID_VALUE = 0x201C
 @pytest.fixture(autouse=True)
 def _no_slot_switch_delay(monkeypatch):
     """Skip the real camera's slot-switch settling wait in tests."""
-    monkeypatch.setattr("grawji.camera_presets._SLOT_SWITCH_DELAY_S", 0)
+    monkeypatch.setattr("grawji.camera.camera_presets._SLOT_SWITCH_DELAY_S", 0)
 
 
 def _ptp_string(text: str) -> bytes:

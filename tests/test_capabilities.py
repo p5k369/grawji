@@ -5,14 +5,14 @@ import struct
 import pytest
 from rawji.fuji_profile import create_profile_simple
 
-from grawji.capabilities import (
+from grawji.camera.capabilities import (
     BASELINE,
     FILM_SIMULATIONS,
     capabilities_for,
     is_xprocessor5,
     read_iopcode,
 )
-from grawji.core import FILM_SIM_CODES
+from grawji.camera.core import FILM_SIM_CODES
 
 
 def test_film_simulations_match_rawjis_enum():

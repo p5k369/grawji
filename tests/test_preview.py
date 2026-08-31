@@ -2,7 +2,7 @@
 
 import threading
 
-from grawji.preview import CameraWorker
+from grawji.camera.preview import CameraWorker
 from grawji.recipe import Recipe
 
 

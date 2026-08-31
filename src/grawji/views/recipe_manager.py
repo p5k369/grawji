@@ -15,9 +15,9 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
-from grawji import compatibility as compat
-from grawji import fs_recipe
-from grawji.fp_xml import parse_fp, serialize_fp
+from grawji.camera import compatibility as compat
+from grawji.camera import fs_recipe
+from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary
 from grawji.views.recipe_panel import RecipePanel

@@ -17,7 +17,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from grawji.backup_recipe import BackupWriteError
+from grawji.camera.backup_recipe import BackupWriteError
 from grawji.recipe import Recipe
 
 # The X-E5 whole-file checksum: additive u16 little-endian at 0x120.

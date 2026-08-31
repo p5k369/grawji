@@ -4,15 +4,15 @@ import struct
 
 import pytest
 
-from grawji.backup_recipe import LAYOUTS
-from grawji.camera_backup import (
+from grawji.camera.backup_recipe import LAYOUTS
+from grawji.camera.camera_backup import (
     BackupTransferError,
     classify_readback,
     model_from_blob,
     transfer_fs_recipes,
     transfer_recipes,
 )
-from grawji.fs_recipe import _XE5
+from grawji.camera.fs_recipe import _XE5
 from grawji.recipe import Recipe
 
 _GET_OBJECT_INFO = 0x1008
@@ -144,7 +144,7 @@ def test_transfer_rejects_relative_with_wrong_blob_size():
     """A relative with an unexpected blob size is refused unwritten."""
     # A "close relative" mapped to gen3 but whose blob is the wrong size
     # is refused by the size guard before any write.
-    from grawji.backup_recipe import BackupWriteError
+    from grawji.camera.backup_recipe import BackupWriteError
 
     cam = FakeCamera(_make_blob("X-T2", 9999))
     with pytest.raises(BackupWriteError, match="expected"):

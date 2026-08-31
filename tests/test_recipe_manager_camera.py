@@ -10,7 +10,7 @@ gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from grawji.capabilities import capabilities_for_model
+from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
 from tests.gui_support import pump

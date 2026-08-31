@@ -18,7 +18,7 @@ from rawji.fuji_enums import (
 )
 from rawji.fuji_profile import encode_noise_reduction
 
-from grawji.backup_recipe import BackupWriteError
+from grawji.camera.backup_recipe import BackupWriteError
 from grawji.recipe import Recipe
 
 # Slot selector and slot name (not part of the recipe write list).

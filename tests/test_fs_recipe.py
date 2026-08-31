@@ -4,8 +4,8 @@ import struct
 
 import pytest
 
-from grawji.backup_recipe import BackupWriteError
-from grawji.fs_recipe import (
+from grawji.camera.backup_recipe import BackupWriteError
+from grawji.camera.fs_recipe import (
     _XE5,
     layout_for,
     unsupported_fields,

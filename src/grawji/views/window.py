@@ -19,20 +19,21 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import camera_info, fileops, raf, sidecar
-from grawji.capabilities import (
+from grawji import raf, sidecar
+from grawji.camera import camera_info
+from grawji.camera.capabilities import (
     Capabilities,
     capabilities_for,
     capabilities_for_model,
     is_known_model,
     read_iopcode,
 )
-from grawji.core import (
+from grawji.camera.core import (
     CameraSession,
     ForeignRafError,
     recipe_from_profile,
 )
-from grawji.preview import CameraWorker
+from grawji.camera.preview import CameraWorker
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary, recipes_path
 from grawji.settings import (
@@ -43,14 +44,14 @@ from grawji.settings import (
     settings_path,
 )
 from grawji.views import dialogs, imagemeta
-from grawji.views.export import (
+from grawji.views.camera_ops import CameraOpsController
+from grawji.views.export_controllers import (
     BatchController,
-    export_basename,
-    initial_folder,
-    with_border,
-    write_jpeg,
+    SingleExportController,
 )
-from grawji.views.filmstrip import FilmStrip, FilmStripNav
+from grawji.views.fileops_controller import FileOpsController
+from grawji.views.filmstrip import FilmStrip
+from grawji.views.filmstrip_nav import FilmStripNav
 from grawji.views.foldertree import FolderTree
 from grawji.views.navigator import Navigator
 from grawji.views.preferences import PreferencesDialog
@@ -134,7 +135,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
         self._raf_path: Path | None = None
-        self._undo_moves: list[tuple[str, str]] = []
         self._stored_ev: float | None = None
         self._image_ev: float | None = None
         self._current_folder: str | None = None
@@ -170,6 +170,18 @@ class MainWindow(Adw.ApplicationWindow):
             get_rotation=lambda: self.preview_view.rotation,
         )
 
+        self._fileops = FileOpsController(
+            parent=self,
+            settings=self._settings,
+            save_settings=self._save_settings,
+            filmstrip=lambda: self._filmstrip,
+            current_raf=lambda: self._raf_path,
+            begin_export=lambda paths: self._batch.begin(  # noqa: PLW0108
+                paths
+            ),
+            set_status=self.preview_view.set_status,
+            add_toast=self.toast_overlay.add_toast,
+        )
         self._init_filmstrip()
 
         self._foldertree = FolderTree(
@@ -177,11 +189,12 @@ class MainWindow(Adw.ApplicationWindow):
             bookmarks=self._settings.bookmarks,
             on_bookmarks_changed=self._on_bookmarks_changed,
             on_expansion_changed=self._on_expanded_changed,
-            on_drop_paths=self._on_tree_drop,
+            on_drop_paths=self._fileops.on_tree_drop,
         )
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
 
+        self._camera_ops = CameraOpsController(self._session)
         self._recipe_library = RecipeLibrary(recipes_path())
         self._library = RecipeLibraryController(
             parent=self,
@@ -193,8 +206,22 @@ class MainWindow(Adw.ApplicationWindow):
             on_baseline_changed=self._on_baseline_changed,
             get_capabilities=self._current_capabilities,
             get_model=camera_info.detect_camera,
-            load_bank_names=self._load_bank_names,
-            run_transfer=self._run_bank_transfer,
+            load_bank_names=self._camera_ops.load_bank_names,
+            run_transfer=self._camera_ops.run_bank_transfer,
+        )
+        self._single_export = SingleExportController(
+            parent=self,
+            worker=self._worker,
+            settings=self._settings,
+            save_settings=self._save_settings,
+            get_recipe=self.recipe_panel.get_recipe,
+            get_current_raf=(
+                lambda: str(self._raf_path) if self._raf_path else None
+            ),
+            base_decode=self.preview_view.pixbuf_from_jpeg,
+            set_busy=self._set_busy,
+            on_error=self._on_error,
+            on_status_link=self.preview_view.set_status_link,
         )
         self._batch = BatchController(
             parent=self,
@@ -373,7 +400,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_select=self._on_raf_selected,
             on_loading=self._on_thumbs_loading,
             on_selection_changed=self._on_selection_changed,
-            on_file_action=self._on_file_action,
+            on_file_action=self._fileops.on_file_action,
             drag_action=lambda: self._settings.drag_action,
         )
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
@@ -728,52 +755,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_busy(busy=False, status="Ready.")
 
     def _on_export_clicked(self, _button: Any) -> None:
-        """Show a save dialog for a full-resolution export."""
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Export JPEG")
-        dialog.set_initial_name(
-            export_basename(self._raf_path or "grawji-export")
-        )
-        start = initial_folder(self._settings.last_export_dir)
-        if start is not None:
-            dialog.set_initial_folder(start)
-        dialog.save(self, None, self._on_export_response)
-
-    def _on_export_response(self, dialog: Any, result: Any) -> None:
-        """Render at full resolution and write to the chosen path."""
-        try:
-            gfile = dialog.save_finish(result)
-        except GLib.Error:
-            return
-        path = gfile.get_path()
-        if path is None:
-            return
-        self._settings.last_export_dir = str(Path(path).parent)
-        self._save_settings()
-        self._set_busy(busy=True, status="Rendering full-resolution export…")
-        self._worker.render(
-            self.recipe_panel.get_recipe(),
-            full_resolution=True,
-            on_done=partial(self._on_exported, path),
-            on_error=self._on_error,
-        )
-
-    def _on_exported(self, path: str, jpeg: bytes) -> None:
-        """Save the exported JPEG with orientation and rotation baked in."""
-        try:
-            write_jpeg(
-                jpeg,
-                path,
-                quality=self._settings.jpeg_quality,
-                decode=with_border(
-                    self.preview_view.pixbuf_from_jpeg, self._settings
-                ),
-            )
-        except (GLib.Error, OSError) as exc:
-            self._set_busy(busy=False, status=f"Export failed: {exc}")
-            return
-        self._set_busy(busy=False, status="Exported.")
-        self.preview_view.set_status_link(f"Exported to {path}", path)
+        """Start a single full-resolution export."""
+        self._single_export.begin()
 
     def _on_batch_export(self) -> None:
         """Enter batch-select mode: pick images, then export them."""
@@ -810,178 +793,6 @@ class MainWindow(Adw.ApplicationWindow):
         if complaint is not None:
             self.preview_view.set_status(complaint)
 
-    def _on_file_action(self, action: str, paths: list[str]) -> None:
-        """Run a filmstrip context-menu file operation."""
-        if action == "export":
-            complaint = self._batch.begin(paths)
-            if complaint is not None:
-                self.preview_view.set_status(complaint)
-        elif action == "copy":
-            self._copy_paths(paths)
-        elif action == "move":
-            self._move_paths(paths)
-        elif action == "trash":
-            self._trash_paths(paths, confirm=len(paths) > 1)
-
-    def _on_tree_drop(
-        self, paths: list[str], folder: str, copy: bool | None
-    ) -> None:
-        """Move or copy images dropped onto a folder-tree row."""
-        if copy is None:
-            copy = self._settings.drag_action == "copy"
-        self._run_fileop("copy" if copy else "move", paths, folder)
-
-    def _copy_paths(self, paths: list[str]) -> None:
-        """Pick a destination folder and copy paths there."""
-        self._pick_fileop_folder("Copy to folder", "copy", paths)
-
-    def _move_paths(self, paths: list[str]) -> None:
-        """Pick a destination folder and move paths there."""
-        self._pick_fileop_folder("Move to folder", "move", paths)
-
-    def _pick_fileop_folder(
-        self, title: str, kind: str, paths: list[str]
-    ) -> None:
-        """Folder dialog for a copy/move, remembering the destination."""
-        if not paths:
-            return
-        dialog = Gtk.FileDialog()
-        dialog.set_title(title)
-        start = initial_folder(self._settings.last_fileop_dir)
-        if start is not None:
-            dialog.set_initial_folder(start)
-
-        def on_response(dlg: Any, result: Any) -> None:
-            try:
-                gfile = dlg.select_folder_finish(result)
-            except GLib.Error:
-                return
-            folder = gfile.get_path()
-            if folder is None:
-                return
-            self._settings.last_fileop_dir = folder
-            self._save_settings()
-            self._run_fileop(kind, paths, folder)
-
-        dialog.select_folder(self, None, on_response)
-
-    def _trash_paths(self, paths: list[str], *, confirm: bool) -> None:
-        """Trash paths, optionally asking first (multi-image only)."""
-        if not paths:
-            return
-        if not confirm:
-            self._run_fileop("trash", paths, None)
-            return
-        dialog = Adw.AlertDialog(
-            heading=f"Move {len(paths)} images to Trash?",
-            body="They can be restored from the file manager's Trash.",
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("trash", "Move to Trash")
-        dialog.set_response_appearance(
-            "trash", Adw.ResponseAppearance.DESTRUCTIVE
-        )
-        dialog.connect(
-            "response",
-            lambda _d, response: (
-                self._run_fileop("trash", paths, None)
-                if response == "trash"
-                else None
-            ),
-        )
-        dialog.present(self)
-
-    def _trash_current(self) -> None:
-        """Trash the open image and advance to its neighbor."""
-        if self._raf_path is None:
-            return
-        path = str(self._raf_path)
-        strip_paths = self._filmstrip.paths
-        following = None
-        if path in strip_paths:
-            index = strip_paths.index(path)
-            remaining = strip_paths[index + 1 :] + strip_paths[:index][::-1]
-            following = remaining[0] if remaining else None
-        self._run_fileop("trash", [path], None)
-        if following is not None:
-            self._filmstrip.select_path(following)
-
-    def _run_fileop(
-        self, kind: str, paths: list[str], dest: str | None
-    ) -> None:
-        """Run a file operation off the main thread and toast the result."""
-
-        def work() -> None:
-            moves: list[tuple[str, str]] = []
-            failed = 0
-            for path in paths:
-                try:
-                    if kind == "copy":
-                        fileops.copy_raf(path, dest or "")
-                    elif kind == "move":
-                        target = fileops.move_raf(path, dest or "")
-                        moves.append((path, str(target)))
-                    else:
-                        fileops.trash_raf(path)
-                except (OSError, GLib.Error) as exc:
-                    logging.getLogger("grawji").warning(
-                        "%s failed for %s: %s", kind, path, exc
-                    )
-                    failed += 1
-            done = len(paths) - failed
-            GLib.idle_add(self._on_fileop_done, kind, done, failed, moves)
-
-        threading.Thread(
-            target=work, name="grawji-fileops", daemon=True
-        ).start()
-
-    def _on_fileop_done(
-        self,
-        kind: str,
-        done: int,
-        failed: int,
-        moves: list[tuple[str, str]],
-    ) -> bool:
-        """Toast the outcome; moves get an Undo button."""
-        noun = "image" if done == 1 else "images"
-        text = {
-            "copy": f"Copied {done} {noun}.",
-            "move": f"Moved {done} {noun}.",
-            "trash": f"Moved {done} {noun} to Trash.",
-        }[kind]
-        if failed:
-            text += f" {failed} failed."
-        toast = Adw.Toast.new(text)
-        if kind == "move" and moves:
-            self._undo_moves = moves
-            toast.set_button_label("Undo")
-            toast.connect("button-clicked", self._on_undo_moves)
-        self.toast_overlay.add_toast(toast)
-        return GLib.SOURCE_REMOVE
-
-    def _on_undo_moves(self, _toast: Any) -> None:
-        """Move the last batch of moved images back where they were."""
-        moves, self._undo_moves = self._undo_moves, []
-
-        def work() -> None:
-            for source, target in moves:
-                try:
-                    fileops.move_raf(target, str(Path(source).parent))
-                except (OSError, GLib.Error) as exc:
-                    logging.getLogger("grawji").warning(
-                        "undo move failed for %s: %s", target, exc
-                    )
-            GLib.idle_add(self._on_undo_done)
-
-        threading.Thread(
-            target=work, name="grawji-fileops", daemon=True
-        ).start()
-
-    def _on_undo_done(self) -> bool:
-        """Report the undone move."""
-        self.toast_overlay.add_toast(Adw.Toast.new("Move undone."))
-        return GLib.SOURCE_REMOVE
-
     def _cycle_background(self) -> None:
         """Cycle the preview background and remember the choice."""
         self._settings.canvas_background = self.preview_view.cycle_background()
@@ -1010,26 +821,13 @@ class MainWindow(Adw.ApplicationWindow):
                 return True
             return False
         if keyval == Gdk.KEY_Delete and not self._focus_is_editable():
-            return self._on_delete_key()
+            return self._fileops.handle_delete()
         return False
 
     def _focus_is_editable(self) -> bool:
         """Whether a text widget owns the focus."""
         focus = self.get_focus()
         return isinstance(focus, (Gtk.Editable, Gtk.Text))
-
-    def _on_delete_key(self) -> bool:
-        """Trash the selected images, or the current one if none are."""
-        paths = self._filmstrip.selected_paths
-        if paths:
-            self._trash_paths(paths, confirm=len(paths) > 1)
-            return True
-        if self._filmstrip.in_select_mode:
-            return False
-        if self._raf_path is not None:
-            self._trash_current()
-            return True
-        return False
 
     def _on_guides_changed(self, *_args: object) -> None:
         """Remember the chosen composition guides."""
@@ -1132,65 +930,6 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return capabilities_for(profile, model=raf_model or model)
         return capabilities_for_model(model)
-
-    def _load_bank_names(self, on_loaded: Callable[[list[str]], None]) -> None:
-        """Read current bank names on a worker thread."""
-
-        def work() -> None:
-            try:
-                names = self._session.read_bank_names()
-            except Exception:
-                names = []
-            GLib.idle_add(on_loaded, names)
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _run_bank_transfer(
-        self,
-        recipes: dict[Any, Any],
-        names: dict[Any, Any],
-        fs_recipes: dict[Any, Any],
-        on_done: Callable[[str], None],
-        on_error: Callable[[str], None],
-    ) -> None:
-        """Transfer recipes to the camera's banks and FS dial on a worker."""
-
-        def work() -> None:
-            written: list[str] = []
-            dropped: set[str] = set()
-            model = ""
-            try:
-                if recipes or names:
-                    result = self._session.transfer_bank_recipes(
-                        recipes, names
-                    )
-                    model = result.model or model
-                    written += [f"C{i + 1}" for i in result.slots]
-                    dropped |= {
-                        f for fs in result.dropped.values() for f in fs
-                    }
-                if fs_recipes:
-                    result = self._session.transfer_fs_recipes(fs_recipes)
-                    model = result.model or model
-                    written += [f"FS{i + 1}" for i in result.slots]
-                    dropped |= {
-                        f for fs in result.dropped.values() for f in fs
-                    }
-            except Exception as exc:
-                GLib.idle_add(on_error, f"Bank transfer failed: {exc}")
-                return
-            slots = ", ".join(written)
-            message = (
-                f"Wrote recipes to {slots} on the {model}. "
-                "The live preview session was closed."
-            )
-            if dropped:
-                message += (
-                    " Dropped unsupported: " + ", ".join(sorted(dropped)) + "."
-                )
-            GLib.idle_add(on_done, message)
-
-        threading.Thread(target=work, daemon=True).start()
 
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""

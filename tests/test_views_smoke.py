@@ -116,7 +116,7 @@ def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:
 
 def test_mono_color_rows_gate_on_bw_and_capability(tmp_path: Any) -> None:
     """Monochromatic Color rows show only for B&W sims the body supports."""
-    from grawji.capabilities import Capabilities
+    from grawji.camera.capabilities import Capabilities
     from grawji.recipe import Recipe
     from grawji.views.recipe_panel import RecipePanel
 
@@ -154,7 +154,7 @@ def test_wb_temp_freeform_keeps_arbitrary_kelvin(tmp_path: Any) -> None:
     """XProcessor5 keeps a non-preset Kelvin; older bodies snap to a preset."""
     from dataclasses import replace
 
-    from grawji.capabilities import BASELINE
+    from grawji.camera.capabilities import BASELINE
     from grawji.recipe import Recipe
     from grawji.views.recipe_panel import RecipePanel
 

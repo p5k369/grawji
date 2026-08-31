@@ -2,7 +2,7 @@
 
 import usb.core
 
-from grawji.camera_info import (
+from grawji.camera.camera_info import (
     detect_camera,
     is_camera_disconnected,
     is_camera_stuck,
