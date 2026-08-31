@@ -16,8 +16,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
 from grawji import fileops
+from grawji.imaging.export import initial_folder
 from grawji.settings import Settings
-from grawji.views.export import initial_folder
 from grawji.views.filmstrip import FilmStrip
 
 _log = logging.getLogger("grawji")

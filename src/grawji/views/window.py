@@ -15,6 +15,7 @@ from typing import Any
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
@@ -34,8 +35,16 @@ from grawji.camera.core import (
     recipe_from_profile,
 )
 from grawji.camera.preview import CameraWorker
+from grawji.controllers.camera_ops import CameraOpsController
+from grawji.controllers.exports import (
+    BatchController,
+    SingleExportController,
+)
+from grawji.controllers.fileops import FileOpsController
+from grawji.imaging import imagemeta
+from grawji.imaging.render import texture_for_pixbuf
 from grawji.recipe import Recipe
-from grawji.recipes import RecipeLibrary, recipes_path
+from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
 from grawji.settings import (
     FROM_IMAGE,
     FROM_IMAGE_LABEL,
@@ -43,19 +52,14 @@ from grawji.settings import (
     save_settings,
     settings_path,
 )
-from grawji.views import dialogs, imagemeta
-from grawji.views.camera_ops import CameraOpsController
-from grawji.views.export_controllers import (
-    BatchController,
-    SingleExportController,
-)
-from grawji.views.fileops_controller import FileOpsController
+from grawji.views import dialogs
 from grawji.views.filmstrip import FilmStrip
 from grawji.views.filmstrip_nav import FilmStripNav
 from grawji.views.foldertree import FolderTree
 from grawji.views.navigator import Navigator
 from grawji.views.preferences import PreferencesDialog
 from grawji.views.preview_view import PreviewView, oriented_pixbuf
+from grawji.views.recipe_grid import RecipeGridDialog
 from grawji.views.recipe_manager import RecipeLibraryController
 from grawji.views.recipe_panel import RecipePanel
 
@@ -266,6 +270,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("select-all", self._select_all, ("<Ctrl>a",)),
             ("cancel-selection", self._end_select_mode, ("Escape",)),
             ("manage-recipes", self._library.manage, ()),
+            ("try-recipes", self._on_try_recipes, ()),
             ("zoom-in", view.zoom_in, ("<Ctrl>plus", "<Ctrl>equal")),
             ("zoom-out", view.zoom_out, ("<Ctrl>minus",)),
             ("zoom-fit", view.zoom_fit, ("<Ctrl>0",)),
@@ -505,9 +510,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.set_native_size(native)
         if pixbuf is not None:
             self.preview_view.show_pixbuf(pixbuf, jpeg=jpeg)
-            self.original_picture.set_paintable(
-                Gdk.Texture.new_for_pixbuf(pixbuf)
-            )
+            self.original_picture.set_paintable(texture_for_pixbuf(pixbuf))
         else:
             self.preview_view.clear_source()
         self._populate_exif_rows(rows)
@@ -686,6 +689,69 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._image_ev = ev
         sidecar.save_exposure(self._raf_path, ev)
+
+    def _on_try_recipes(self) -> None:
+        """Render the open image once per saved recipe, pick from a grid."""
+        if not self._session.is_open:
+            self.preview_view.set_status("Open an image first.")
+            return
+        exposure = self.recipe_panel.get_recipe().exposure
+        groups: list[tuple[str, list[tuple[str, str, Recipe]]]] = []
+        profile = self._session.profile
+        if profile is not None:
+            from_image = recipe_from_profile(profile)
+            groups.append(
+                (
+                    "",
+                    [
+                        (
+                            FROM_IMAGE,
+                            FROM_IMAGE_LABEL,
+                            replace(from_image, exposure=exposure),
+                        )
+                    ],
+                )
+            )
+        folders = [UNGROUPED, *self._recipe_library.folders()]
+        for folder in folders:
+            members: list[tuple[str, str, Recipe]] = []
+            for name in self._recipe_library.names_in(folder):
+                recipe = self._recipe_library.get(name)
+                if recipe is not None:
+                    members.append(
+                        (name, name, replace(recipe, exposure=exposure))
+                    )
+            if members:
+                groups.append((folder or "Recipes", members))
+        if not any(members for _t, members in groups):
+            self.preview_view.set_status("No saved recipes to try.")
+            return
+
+        def render(
+            recipe: Recipe,
+            on_done: Callable[[bytes], None],
+            on_error: Callable[[Exception], None],
+        ) -> None:
+            self._worker.render_thumb(
+                recipe, on_done=on_done, on_error=on_error
+            )
+
+        dialog = RecipeGridDialog(
+            groups=groups,
+            render=render,
+            on_pick=lambda name: self._on_apply_recipe(None, name),
+            orientation=(
+                imagemeta.exif_orientation(str(self._raf_path))
+                if self._raf_path
+                else 1
+            ),
+        )
+        # Re-render on close so the preview matches the panel again
+        dialog.connect("closed", lambda *_a: self._render_if_open())
+        dialogs.fit_dialog(
+            dialog, self, width_fraction=0.55, height_fraction=0.85
+        )
+        dialog.present(self)
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
         """Apply and remember the recipe chosen in the panel's picker."""
@@ -944,6 +1010,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog = PreferencesDialog(
             settings=self._settings, on_change=self._on_settings_changed
         )
+        dialogs.fit_dialog(dialog, self, height_fraction=0.8)
         dialog.present(self)
 
     def _on_bookmarks_changed(self, bookmarks: list[str]) -> None:

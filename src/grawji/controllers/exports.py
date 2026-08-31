@@ -24,18 +24,21 @@ from grawji.camera.core import (
     recipe_from_profile,
 )
 from grawji.camera.preview import CameraWorker
-from grawji.recipe import Recipe
-from grawji.settings import Settings
-from grawji.views.batch_export import BatchExportDialog
-from grawji.views.export import (
+from grawji.imaging import imagemeta
+from grawji.imaging.export import (
     SetBusy,
     export_basename,
     framing_active,
     initial_folder,
+    resize_active,
     sidecar_decode,
     with_border,
+    with_max_edge,
     write_jpeg,
 )
+from grawji.recipe import Recipe
+from grawji.settings import Settings
+from grawji.views.batch_export import BatchExportDialog
 from grawji.views.preview_view import oriented_pixbuf
 
 
@@ -121,7 +124,12 @@ class SingleExportController:
                 jpeg,
                 path,
                 quality=self._settings.jpeg_quality,
-                decode=with_border(self._base_decode, self._settings),
+                decode=with_border(
+                    with_max_edge(self._base_decode, self._settings),
+                    self._settings,
+                ),
+                artist=self._settings.export_artist,
+                rights=self._settings.export_copyright,
             )
         except (GLib.Error, OSError) as exc:
             self._set_busy(busy=False, status=f"Export failed: {exc}")
@@ -287,19 +295,32 @@ class BatchController:
             tally["foreign"] += 1
             return
         decode = sidecar_decode(raf_file)
-        if decode is None and framing_active(self._settings):
+        needs_pixels = framing_active(self._settings) or resize_active(
+            self._settings
+        )
+        if decode is None and needs_pixels:
             decode = oriented_pixbuf
         if decode is not None:
-            decode = with_border(decode, self._settings)
+            decode = with_border(
+                with_max_edge(decode, self._settings), self._settings
+            )
         try:
             if decode is None:
-                out_path.write_bytes(jpeg)
+                out_path.write_bytes(
+                    imagemeta.with_credits(
+                        jpeg,
+                        artist=self._settings.export_artist,
+                        rights=self._settings.export_copyright,
+                    )
+                )
             else:
                 write_jpeg(
                     jpeg,
                     str(out_path),
                     quality=self._settings.jpeg_quality,
                     decode=decode,
+                    artist=self._settings.export_artist,
+                    rights=self._settings.export_copyright,
                 )
         except (GLib.Error, OSError) as exc:
             logging.getLogger("grawji").warning(

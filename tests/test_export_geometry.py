@@ -8,15 +8,19 @@ import pytest
 
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
+gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import GdkPixbuf
+gi.require_version("GExiv2", "0.10")
+
+from gi.repository import GdkPixbuf, GExiv2
 
 from grawji.crop import CropRotate
+from grawji.imaging.export import sidecar_decode, with_border
+from grawji.imaging.imagemeta import with_credits
+from grawji.imaging.render import add_border, scale_to_edge
 from grawji.settings import Settings
 from grawji.sidecar import save_crop
-from grawji.views.export import sidecar_decode, with_border
-from grawji.views.render import add_border
 
 
 def _jpeg_bytes(width: int, height: int) -> bytes:
@@ -129,3 +133,35 @@ def test_add_border_pads_to_aspect() -> None:
     square = add_border(pixbuf, 0.0, "#000000", 1.0)
     assert (square.get_width(), square.get_height()) == (600, 600)
     assert add_border(pixbuf, 0.0, "#000000", 1.5) is pixbuf
+
+
+def test_scale_to_edge_downscales():
+    """The longer edge lands exactly on the limit, aspect kept."""
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 400, 300)
+    scaled = scale_to_edge(pixbuf, 200)
+    assert (scaled.get_width(), scaled.get_height()) == (200, 150)
+
+
+def test_scale_to_edge_never_upscales():
+    """Images already within the limit pass through untouched."""
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 100, 80)
+    assert scale_to_edge(pixbuf, 200) is pixbuf
+    assert scale_to_edge(pixbuf, 0) is pixbuf
+
+
+def test_with_credits_stamps_exif(tmp_path):
+    """Artist and copyright land in the EXIF, pixels stay identical."""
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 8, 8)
+    source = tmp_path / "plain.jpg"
+    pixbuf.savev(str(source), "jpeg", [], [])
+    jpeg = source.read_bytes()
+
+    stamped = with_credits(jpeg, artist="Jane Doe", rights="CC BY 4.0")
+    out = tmp_path / "stamped.jpg"
+    out.write_bytes(stamped)
+    meta = GExiv2.Metadata()
+    meta.open_path(str(out))
+    assert meta.try_get_tag_string("Exif.Image.Artist") == "Jane Doe"
+    assert meta.try_get_tag_string("Exif.Image.Copyright") == "CC BY 4.0"
+    # no credits configured: bytes pass through untouched
+    assert with_credits(jpeg, artist="", rights="") is jpeg

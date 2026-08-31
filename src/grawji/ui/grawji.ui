@@ -8,6 +8,10 @@
         <attribute name="label">Manage Recipes…</attribute>
         <attribute name="action">win.manage-recipes</attribute>
       </item>
+      <item>
+        <attribute name="label">Try Recipes…</attribute>
+        <attribute name="action">win.try-recipes</attribute>
+      </item>
     </section>
     <section>
       <item>

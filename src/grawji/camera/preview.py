@@ -104,6 +104,21 @@ class CameraWorker:
             coalesce_key="render",
         )
 
+    def render_thumb(
+        self,
+        recipe: Recipe,
+        *,
+        on_done: OnDone | None = None,
+        on_error: OnError | None = None,
+    ) -> None:
+        """Queue a small thumbnail render."""
+        self._submit(
+            lambda: self._session.render_thumb(recipe),
+            on_done,
+            on_error,
+            coalesce_key="render",
+        )
+
     def submit(
         self,
         task: Callable[[], Any],
