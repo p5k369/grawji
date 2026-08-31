@@ -496,6 +496,31 @@ def _slide_into(
     )
 
 
+def reframe_point(
+    point: tuple[float, float],
+    w: float,
+    h: float,
+    old_angle: float,
+    old_rect: Rect,
+    new_angle: float,
+) -> tuple[float, float]:
+    """Map a point from one rotation state's crop frame to another's box."""
+    obw, obh = rotated_size(w, h, old_angle)
+    x0, y0, rw0, rh0 = old_rect
+    frame_x = (x0 + point[0] * rw0) * obw
+    frame_y = (y0 + point[1] * rh0) * obh
+    a0 = math.radians(old_angle)
+    cx, cy = frame_x - obw / 2, frame_y - obh / 2
+    source_x = math.cos(a0) * cx + math.sin(a0) * cy + w / 2
+    source_y = -math.sin(a0) * cx + math.cos(a0) * cy + h / 2
+    a1 = math.radians(new_angle)
+    nbw, nbh = rotated_size(w, h, new_angle)
+    dx, dy = source_x - w / 2, source_y - h / 2
+    box_x = math.cos(a1) * dx - math.sin(a1) * dy + nbw / 2
+    box_y = math.sin(a1) * dx + math.cos(a1) * dy + nbh / 2
+    return box_x / nbw, box_y / nbh
+
+
 def level_delta(dx: float, dy: float) -> float:
     """Angle to add to level a dragged line.
 

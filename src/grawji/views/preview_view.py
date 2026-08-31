@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import replace
 from importlib import resources
 from typing import Any, ClassVar
@@ -23,10 +24,11 @@ from gi.repository import (
     Gtk,
 )
 
-from grawji import crop
+from grawji import crop, level
 from grawji.views.render import (
     add_border,
     bake_pixbuf,
+    gray_rows,
     orient_pixbuf,
     parse_aspect,
 )
@@ -49,6 +51,11 @@ _GRAB_PX = 12.0
 
 # A shorter right-button drag than this does not define a horizon.
 _MIN_HORIZON_PX = 4.0
+
+# Longer edge of the small bake analyzed by auto level, and of the
+# grayscale the edge analysis actually runs on.
+_LEVEL_BAKE_PX = 800
+_LEVEL_ANALYSIS_PX = 640
 
 # Longest edge of the image used while crop-editing.
 _EDIT_MAX_EDGE = 2560
@@ -252,6 +259,7 @@ class PreviewView(Gtk.Box):
     guide_flip_v = Gtk.Template.Child()
     angle_scale = Gtk.Template.Child()
     angle_spin = Gtk.Template.Child()
+    auto_level_button = Gtk.Template.Child()
     crop_reset = Gtk.Template.Child()
     crop_cancel = Gtk.Template.Child()
     crop_apply = Gtk.Template.Child()
@@ -315,6 +323,11 @@ class PreviewView(Gtk.Box):
         self._drag_rect: crop.Rect = crop.FULL_RECT
         self._hover_zone: str | None = None
         self._horizon: tuple[float, float, float, float] | None = None
+        self._auto_candidates: list[level.Candidate] = []
+        self._auto_base: crop.CropRotate | None = None
+        self._auto_expected: crop.CropRotate | None = None
+        self._auto_index = 0
+        self._auto_lines: list[tuple[float, float, float, float]] = []
         self._edit_base: Any | None = None
         self._edit_base_src: Any | None = None
         self._edit_texture: Any = None
@@ -363,6 +376,7 @@ class PreviewView(Gtk.Box):
         self.angle_scale.set_adjustment(self._angle_adj)
         self.angle_scale.add_mark(0.0, Gtk.PositionType.BOTTOM, None)
         self._angle_adj.connect("value-changed", self._on_angle_changed)
+        self.auto_level_button.connect("clicked", self._on_auto_level)
         self.crop_aspect.connect("notify::selected", self._on_aspect_changed)
         self.crop_swap.connect("toggled", self._on_swap_toggled)
         self.crop_guides.connect("notify::selected", self._on_guides_selected)
@@ -1053,6 +1067,7 @@ class PreviewView(Gtk.Box):
         if not apply:
             self._crop = self._pre_edit
         self._horizon = None
+        self._reset_auto_level()
         self.crop_bar.set_reveal_child(False)
         self.crop_overlay.set_visible(False)
         self._set_crop_toggle(active=False)
@@ -1102,6 +1117,9 @@ class PreviewView(Gtk.Box):
 
     def _set_angle(self, angle: float) -> None:
         """Re-rotate to angle, carrying the crop rect along."""
+        # Any angle change invalidates the drawn auto-level marking;
+        # the auto path re-marks right after.
+        self._auto_lines = []
         dims = self._oriented_dims()
         if dims is None:
             return
@@ -1357,6 +1375,116 @@ class PreviewView(Gtk.Box):
         self._horizon = (sx, sy, sx + dx, sy + dy)
         self.crop_overlay.queue_draw()
 
+    def _on_auto_level(self, *_args: object) -> None:
+        """Level to a detected line family, cycling on repeat clicks.
+
+        The edge analysis runs off the main loop on a small bake of
+        the current edit state, so it respects the crop and the angle
+        already applied.
+        """
+        if not self._editing or self._oriented_pixbuf is None:
+            return
+        if (
+            len(self._auto_candidates) > 1
+            and self._auto_expected is not None
+            and self._crop == self._auto_expected
+        ):
+            self._auto_index = (self._auto_index + 1) % len(
+                self._auto_candidates
+            )
+            self._apply_auto_candidate()
+            return
+        self.auto_level_button.set_sensitive(False)
+        threading.Thread(
+            target=self._auto_level_work,
+            args=(self._oriented_pixbuf, self._crop),
+            name="grawji-auto-level",
+            daemon=True,
+        ).start()
+
+    def _auto_level_work(self, source: Any, state: crop.CropRotate) -> None:
+        """Compute the level suggestions for state."""
+        width = source.get_width()
+        height = source.get_height()
+        scale = _LEVEL_BAKE_PX / max(width, height)
+        if scale < 1.0:
+            source = source.scale_simple(
+                max(1, round(width * scale)),
+                max(1, round(height * scale)),
+                GdkPixbuf.InterpType.BILINEAR,
+            )
+        baked = bake_pixbuf(source, state)
+        candidates = level.suggest_candidates(
+            gray_rows(baked, _LEVEL_ANALYSIS_PX)
+        )
+        GLib.idle_add(self._finish_auto_level, state, candidates)
+
+    def _finish_auto_level(
+        self, state: crop.CropRotate, candidates: list[level.Candidate]
+    ) -> bool:
+        """Store fresh suggestions and apply the first."""
+        self.auto_level_button.set_sensitive(True)
+        if not self._editing or self._crop != state:
+            return GLib.SOURCE_REMOVE
+        if not candidates:
+            self.set_status("No level suggestion found.")
+            return GLib.SOURCE_REMOVE
+        self._auto_base = state
+        self._auto_candidates = candidates
+        self._auto_index = 0
+        self._apply_auto_candidate()
+        return GLib.SOURCE_REMOVE
+
+    def _apply_auto_candidate(self) -> None:
+        """Apply the current suggestion relative to the analyzed state."""
+        base = self._auto_base
+        if base is None:
+            return
+        candidate = self._auto_candidates[self._auto_index]
+        angle = base.angle + candidate.delta
+        angle = max(-crop.MAX_ANGLE, min(crop.MAX_ANGLE, angle))
+        self._sync_angle(angle)
+        self._set_angle(angle)
+        self._auto_expected = self._crop
+        self._mark_auto_lines(base, candidate, angle)
+        count = len(self._auto_candidates)
+        more = ", click again for the next line" if count > 1 else ""
+        self.set_status(
+            f"Auto level {self._auto_index + 1}/{count}:"
+            f" {candidate.delta:+.2f}°{more}"
+        )
+
+    def _mark_auto_lines(
+        self,
+        base: crop.CropRotate,
+        candidate: level.Candidate,
+        angle: float,
+    ) -> None:
+        """Show the lines this suggestion leveled to."""
+        dims = self._oriented_dims()
+        if dims is None:
+            return
+        w, h = dims
+        lines = []
+        for x0, y0, x1, y1 in candidate.segments:
+            ax, ay = crop.reframe_point(
+                (x0, y0), w, h, base.angle, base.rect, angle
+            )
+            bx, by = crop.reframe_point(
+                (x1, y1), w, h, base.angle, base.rect, angle
+            )
+            lines.append((ax, ay, bx, by))
+        self._auto_lines = lines
+        self.crop_overlay.queue_draw()
+
+    def _reset_auto_level(self) -> None:
+        """Drop cached auto-level suggestions."""
+        self._auto_candidates = []
+        self._auto_base = None
+        self._auto_expected = None
+        self._auto_index = 0
+        self._auto_lines = []
+
     def _on_horizon_end(self, _gesture: Any, dx: float, dy: float) -> None:
         """Level the image to the drawn line."""
         self._horizon = None
@@ -1435,6 +1563,17 @@ class PreviewView(Gtk.Box):
                     continue
                 ctx.rectangle(hx - half, hy - half, half * 2, half * 2)
         ctx.fill()
+        if self._auto_lines:
+            ctx.save()
+            ctx.rectangle(ox, oy, dw, dh)
+            ctx.clip()
+            ctx.set_source_rgba(0.24, 0.82, 0.44, 0.9)
+            ctx.set_line_width(2.0)
+            for ax, ay, bx, by in self._auto_lines:
+                ctx.move_to(ox + ax * dw, oy + ay * dh)
+                ctx.line_to(ox + bx * dw, oy + by * dh)
+            ctx.stroke()
+            ctx.restore()
         if self._horizon is not None:
             self._draw_horizon(ctx, width, height)
 
