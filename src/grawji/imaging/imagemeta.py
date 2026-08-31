@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import gi
 
 gi.require_version("GExiv2", "0.10")
@@ -71,6 +74,17 @@ def native_size(path: str) -> tuple[int, int] | None:
     return size
 
 
+def exif_orientation(path: str) -> int:
+    """Read a file's EXIF orientation tag."""
+    meta = GExiv2.Metadata()
+    try:
+        meta.open_path(path)
+        value = meta.try_get_tag_long("Exif.Image.Orientation")
+    except GLib.Error:
+        return 1
+    return value if 1 <= value <= 8 else 1  # noqa: PLR2004
+
+
 def camera_model(path: str) -> str | None:
     """Read the camera model from a file's EXIF, or None."""
     meta = GExiv2.Metadata()
@@ -81,16 +95,45 @@ def camera_model(path: str) -> str | None:
         return None
 
 
-def copy_exif(source_jpeg: bytes, dest_path: str) -> None:
+def copy_exif(
+    source_jpeg: bytes, dest_path: str, *, artist: str = "", rights: str = ""
+) -> None:
     """Transplant the camera JPEG's metadata onto the exported file.
 
     The orientation tag is reset to normal because the caller bakes the
-    orientation into the pixels before writing.
+    orientation into the pixels before writing. A non-empty artist or
+    copyright string is written on top of the camera EXIF.
     """
     try:
         metadata = GExiv2.Metadata()
         metadata.open_buf(source_jpeg)
         metadata.set_orientation(GExiv2.Orientation.NORMAL)
+        if artist:
+            metadata.try_set_tag_string("Exif.Image.Artist", artist)
+        if rights:
+            metadata.try_set_tag_string("Exif.Image.Copyright", rights)
         metadata.save_file(dest_path)
     except GLib.Error:
         pass
+
+
+def with_credits(jpeg: bytes, *, artist: str, rights: str) -> bytes:
+    """Return jpeg with artist/copyright stamped, pixels untouched."""
+    if not artist and not rights:
+        return jpeg
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        tmp_path.write_bytes(jpeg)
+        metadata = GExiv2.Metadata()
+        metadata.open_path(str(tmp_path))
+        if artist:
+            metadata.try_set_tag_string("Exif.Image.Artist", artist)
+        if rights:
+            metadata.try_set_tag_string("Exif.Image.Copyright", rights)
+        metadata.save_file(str(tmp_path))
+        return tmp_path.read_bytes()
+    except GLib.Error:
+        return jpeg
+    finally:
+        tmp_path.unlink(missing_ok=True)

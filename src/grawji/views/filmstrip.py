@@ -12,6 +12,7 @@ from typing import Any
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 
 from gi.repository import (
     Gdk,
@@ -23,9 +24,10 @@ from gi.repository import (
     PangoCairo,
 )
 
+from grawji.imaging.render import texture_for_pixbuf
+from grawji.imaging.thumbnails import ThumbnailLoader
 from grawji.settings import cache_dir
 from grawji.sidecar import sidecar_path
-from grawji.views.thumbnails import ThumbnailLoader
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_PX_PER_S_DEFAULT = 600
@@ -663,7 +665,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         """Set the thumbnail and camera caption of one card."""
         if scan_id == self._scan_id:
             picture.set_size_request(pixbuf.get_width(), self._thumb_height)
-            picture.set_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+            picture.set_paintable(texture_for_pixbuf(pixbuf))
             camera_label.set_text(model)
 
     def _loading_done(self, scan_id: int) -> None:

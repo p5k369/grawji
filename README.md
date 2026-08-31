@@ -11,7 +11,7 @@ GTK4 frontend for [rawji](https://github.com/pinpox/rawji). Develop Fujifilm
 RAFs natively on Linux through the **real camera engine** (authentic film
 simulations, identical to X RAW STUDIO).
 
-The name is **g**(tk) + **rawji**. rawji is command-line only, grawji makes
+The name is **g**(tk) + **rawji** (/dʒiː ˈrɔː dʒiː/). rawji is command-line only, grawji makes
 *interactive* work on the look practical: set a recipe, see a live preview,
 export.
 
@@ -25,19 +25,13 @@ export.
 
 - **Live preview** through the camera's own conversion engine. What you see
   is what the camera would write.
-- **Full recipe control**: film simulation, white balance, dynamic range,
-  highlights, shadows, color and sharpness.
-- **Recipes**: save, apply and delete named recipes. Import and export them
-  in X RAW Studio's FP format (FP1/FP2/FP3), so a recipe from Fujifilm X RAW
-  Studio drops straight in (and back out). grawji maps the
-  parameters it supports. Effects it does not model are left neutral.
-- **Export** single images or batch-export a whole folder at full resolution.
-- **Experimental**: write recipes into the camera's C1-C7 custom banks
-  over USB, on X-Processor 5 bodies and on the X100F/X-T3 generation, and
-  into the X-E5's FS1-FS3 film-simulation dial positions. Verified on
-  X-Processor 5 and X100F/X-T3 hardware. Every write is read back and
-  checked. Values a body cannot store are reported as dropped instead of
-  written wrong.
+- **Recipes**: full parameter control, saved recipe library, FP1/FP2/FP3
+  exchange with X RAW Studio, and a try-them-all comparison grid.
+- **Crop and straighten**, with auto level.
+- **Export** single images or whole folders at full resolution, with
+  optional framing and metadata.
+- **Cull and organize** in the filmstrip: select, copy, move, trash.
+- **Experimental**: write recipes into the camera's custom banks over USB.
 
 ## Warranty disclaimer
 
@@ -143,25 +137,6 @@ USB access: most distributions already grant non-root access via `uaccess` or
 (check first).
 
 </details>
-
-## Development
-
-`make dev` builds the venv with the dev extras and installs the pre-commit
-hooks. To hack on rawji too (e.g. add a camera product id), clone it next to
-grawji and override the dependency with an editable checkout:
-
-```sh
-make dev RAWJI="-e ../rawji"
-```
-
-`make lint` runs ruff + `mypy src tests`, `make format` formats, `make test`
-runs pytest (line length 79). `pygobject-stubs` (a dev dependency) gives the
-editor type hints for GTK and libadwaita.
-
-To build the Flatpak (needs `flatpak-builder` and the GNOME 50 runtime/SDK),
-`make flatpak` builds and installs it. `make flatpak-bundle` writes a
-single-file `grawji.flatpak`. The manifest is `flatpak/io.github.p5k369.grawji.yaml`,
-it builds fully offline (the build backend is vendored as pinned wheels).
 
 ## Credits
 

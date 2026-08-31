@@ -10,7 +10,7 @@ import gi
 
 gi.require_version("Gdk", "4.0")
 
-from gi.repository import Gdk, GdkPixbuf
+from gi.repository import Gdk, GdkPixbuf, GLib
 
 from grawji.crop import FULL_RECT, CropRotate, rotated_size
 
@@ -22,6 +22,22 @@ _ROTATIONS = {
 
 # Working size for edge analysis
 _GRAY_TARGET = 400
+
+
+def texture_for_pixbuf(pixbuf: Any) -> Gdk.Texture:
+    """A GPU texture from a pixbuf."""
+    fmt = (
+        Gdk.MemoryFormat.R8G8B8A8
+        if pixbuf.get_has_alpha()
+        else Gdk.MemoryFormat.R8G8B8
+    )
+    return Gdk.MemoryTexture.new(
+        pixbuf.get_width(),
+        pixbuf.get_height(),
+        fmt,
+        GLib.Bytes.new(pixbuf.get_pixels()),
+        pixbuf.get_rowstride(),
+    )
 
 
 def gray_rows(pixbuf: Any, target: int = _GRAY_TARGET) -> list[list[int]]:
@@ -93,6 +109,23 @@ def add_border(
         0, 0, w, h, framed, (total_w - w) // 2, (total_h - h) // 2
     )
     return framed
+
+
+def scale_to_edge(pixbuf: Any, max_edge: int) -> Any:
+    """Downscale so the longer edge is max_edge pixels."""
+    if max_edge <= 0:
+        return pixbuf
+    width = pixbuf.get_width()
+    height = pixbuf.get_height()
+    longer = max(width, height)
+    if longer <= max_edge:
+        return pixbuf
+    scale = max_edge / longer
+    return pixbuf.scale_simple(
+        max(1, round(width * scale)),
+        max(1, round(height * scale)),
+        GdkPixbuf.InterpType.HYPER,
+    )
 
 
 def orient_pixbuf(pixbuf: Any, orientation: int) -> Any:

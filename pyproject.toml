@@ -80,6 +80,8 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
 "scripts/**" = ["D103", "T201"]
+"src/grawji/controllers/*.py" = ["E402"]
+"src/grawji/imaging/*.py" = ["E402"]
 "src/grawji/views/*.py" = ["E402"]
 "tests/**" = ["PLR2004", "S", "ARG", "ANN", "E402", "E501", "F401", "PLC0415"]
 
@@ -126,6 +128,8 @@ follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
 module = [
+  "grawji.controllers.*",
+  "grawji.imaging.*",
   "grawji.views.*",
   "grawji.__main__",
 ]

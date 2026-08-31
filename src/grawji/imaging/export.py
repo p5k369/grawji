@@ -15,10 +15,15 @@ gi.require_version("Adw", "1")
 from gi.repository import Gio
 
 from grawji import sidecar
+from grawji.imaging import imagemeta
+from grawji.imaging.render import (
+    add_border,
+    bake_pixbuf,
+    parse_aspect,
+    scale_to_edge,
+)
 from grawji.settings import Settings
-from grawji.views import imagemeta
 from grawji.views.preview_view import oriented_pixbuf
-from grawji.views.render import add_border, bake_pixbuf, parse_aspect
 
 SetBusy = Callable[..., None]
 
@@ -37,6 +42,21 @@ def framing_active(settings: Settings) -> bool:
         settings.export_border_percent > 0
         or parse_aspect(settings.export_border_aspect) is not None
     )
+
+
+def resize_active(settings: Settings) -> bool:
+    """Whether the export size limit would change any pixels."""
+    return settings.export_max_edge > 0
+
+
+def with_max_edge(
+    decode: Callable[[bytes], Any], settings: Settings
+) -> Callable[[bytes], Any]:
+    """Wrap decode with the configured long-edge limit, if any."""
+    if not resize_active(settings):
+        return decode
+    max_edge = settings.export_max_edge
+    return lambda jpeg: scale_to_edge(decode(jpeg), max_edge)
 
 
 def with_border(
@@ -72,6 +92,8 @@ def write_jpeg(
     *,
     quality: int,
     decode: Callable[[bytes], Any],
+    artist: str = "",
+    rights: str = "",
 ) -> None:
     """Write jpeg to path with orientation and rotation baked in.
 
@@ -91,7 +113,7 @@ def write_jpeg(
         pixbuf.savev(tmp_path, "jpeg", ["quality"], [str(quality)])
         # GdkPixbuf re-encoding drops all metadata, so copy the camera's
         # EXIF back on (orientation is now baked into the pixels).
-        imagemeta.copy_exif(jpeg, tmp_path)
+        imagemeta.copy_exif(jpeg, tmp_path, artist=artist, rights=rights)
         Path(path).write_bytes(Path(tmp_path).read_bytes())
     finally:
         Path(tmp_path).unlink(missing_ok=True)

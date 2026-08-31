@@ -10,13 +10,14 @@ import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 
 from dataclasses import replace
 
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
 from grawji import crop, level
-from grawji.views.render import bake_pixbuf, gray_rows
+from grawji.imaging.render import bake_pixbuf, gray_rows
 
 if TYPE_CHECKING:
     from grawji.views.preview_view import PreviewView

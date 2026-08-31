@@ -8,6 +8,7 @@ from importlib import resources
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gtk
@@ -44,6 +45,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
     jpeg_quality_scale = Gtk.Template.Child()
     glide_speed_scale = Gtk.Template.Child()
     drag_action_row = Gtk.Template.Child()
+    max_edge_row = Gtk.Template.Child()
+    artist_row = Gtk.Template.Child()
+    copyright_row = Gtk.Template.Child()
     border_row = Gtk.Template.Child()
     border_percent_row = Gtk.Template.Child()
     border_color_button = Gtk.Template.Child()
@@ -73,6 +77,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.drag_action_row.set_selected(
             _DRAG_ACTIONS.index(drag) if drag in _DRAG_ACTIONS else 0
         )
+        self.max_edge_row.set_value(settings.export_max_edge)
+        self.artist_row.set_text(settings.export_artist)
+        self.copyright_row.set_text(settings.export_copyright)
         self.border_row.set_enable_expansion(settings.export_border_enabled)
         self.border_row.set_expanded(settings.export_border_enabled)
         self.border_row.connect(
@@ -97,6 +104,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
         self.glide_speed_scale.connect("value-changed", self._on_edited)
         self.drag_action_row.connect("notify::selected", self._on_edited)
+        self.max_edge_row.connect("notify::value", self._on_edited)
+        self.artist_row.connect("changed", self._on_edited)
+        self.copyright_row.connect("changed", self._on_edited)
         self.border_row.connect("notify::enable-expansion", self._on_edited)
         self.border_percent_row.connect("notify::value", self._on_edited)
         self.border_color_button.connect("notify::rgba", self._on_edited)
@@ -126,6 +136,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings.drag_action = _DRAG_ACTIONS[
             self.drag_action_row.get_selected()
         ]
+        self._settings.export_max_edge = int(self.max_edge_row.get_value())
+        self._settings.export_artist = self.artist_row.get_text().strip()
+        self._settings.export_copyright = self.copyright_row.get_text().strip()
         self._settings.export_border_enabled = (
             self.border_row.get_enable_expansion()
         )
