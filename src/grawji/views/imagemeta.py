@@ -8,7 +8,7 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import GExiv2, GLib
 
-from grawji import exif
+from grawji import exif, raf
 
 
 def exif_rows(jpeg: bytes) -> list[tuple[str, str]]:
@@ -28,6 +28,47 @@ def exif_rows(jpeg: bytes) -> list[tuple[str, str]]:
         if value:
             raw[tag] = value
     return exif.format_exif(raw)
+
+
+def native_size(path: str) -> tuple[int, int] | None:
+    """The RAF's delivered pixel size, oriented for display, or None."""
+    size = raf.output_size(path)
+    meta = GExiv2.Metadata()
+    try:
+        meta.open_path(path)
+    except GLib.Error:
+        return size
+
+    def read_pair(width_tag: str, height_tag: str) -> tuple[int, int] | None:
+        try:
+            width = meta.try_get_tag_long(width_tag)
+            height = meta.try_get_tag_long(height_tag)
+        except GLib.Error:
+            return None
+        if width > 0 and height > 0:
+            return int(width), int(height)
+        return None
+
+    if size is None:
+        size = read_pair(
+            "Exif.Photo.PixelXDimension", "Exif.Photo.PixelYDimension"
+        )
+    if size is None:
+        size = read_pair(
+            "Exif.Fujifilm.RawImageFullWidth",
+            "Exif.Fujifilm.RawImageFullHeight",
+        )
+    if size is None:
+        size = read_pair("Exif.Image.ImageWidth", "Exif.Image.ImageLength")
+    if size is None:
+        return None
+    try:
+        orientation = meta.try_get_tag_long("Exif.Image.Orientation")
+    except GLib.Error:
+        orientation = 1
+    if orientation in (5, 6, 7, 8):
+        return size[1], size[0]
+    return size
 
 
 def camera_model(path: str) -> str | None:

@@ -25,25 +25,25 @@ class Recipe:
             "Off"; folded into the grain profile slot).
         color_chrome: Color Chrome Effect: "Off", "Weak" or "Strong".
         color_chrome_blue: Color Chrome FX Blue: "Off", "Weak" or "Strong".
-            Only honoured on bodies whose profile is long enough (offset
+            Only honored on bodies whose profile is long enough (offset
             609); ignored on older, shorter profiles.
         exposure: Exposure compensation in EV, -2.0 to +3.0 (1/3 steps).
-        highlights: Highlight tone, -2 to +4. XProcessor5 bodies honour
+        highlights: Highlight tone, -2 to +4. XProcessor5 bodies honor
             0.5 steps, older bodies integer steps only.
         shadows: Shadow tone, -2 to +4 (0.5 steps on XProcessor5).
-        color: Colour / saturation, -4 to +4.
+        color: Color / saturation, -4 to +4.
         sharpness: Sharpness, -4 to +4.
         noise_reduction: Noise reduction, -4 to +4.
-        clarity: Clarity, -5 to +5. Only honoured on bodies whose profile
+        clarity: Clarity, -5 to +5. Only honored on bodies whose profile
             is long enough (offset 617); ignored on older profiles.
         smooth_skin: Smooth Skin Effect: "Off", "Weak" or "Strong". Only
-            honoured on bodies whose profile is long enough (offset 605).
+            honored on bodies whose profile is long enough (offset 605).
         wb_shift_r: White-balance red shift, -9 to +9.
         wb_shift_b: White-balance blue shift, -9 to +9.
-        color_temp: White-balance colour temperature in kelvin,
+        color_temp: White-balance color temperature in kelvin,
             2500 to 10000 (only applied when white_balance is
             "Temperature").
-        color_space: Export colour space, "sRGB" or "AdobeRGB".
+        color_space: Export color space, "sRGB" or "AdobeRGB".
         mono_warm_cool: Monochromatic Color warm-cool toning for B&W film
             sims, camera units (negative cool, positive warm). Only applied
             when the film simulation is Acros or Monochrome.

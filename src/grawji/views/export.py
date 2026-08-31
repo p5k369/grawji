@@ -25,8 +25,8 @@ from grawji.recipe import Recipe
 from grawji.settings import Settings
 from grawji.views import imagemeta
 from grawji.views.batch_export import BatchExportDialog
-from grawji.views.crop_render import bake_pixbuf
 from grawji.views.preview_view import oriented_pixbuf
+from grawji.views.render import add_border, bake_pixbuf, parse_aspect
 
 SetBusy = Callable[..., None]
 
@@ -37,6 +37,26 @@ def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
     if geometry.is_identity:
         return None
     return lambda jpeg: bake_pixbuf(oriented_pixbuf(jpeg), geometry)
+
+
+def framing_active(settings: Settings) -> bool:
+    """Whether the export border/padding would change any pixels."""
+    return settings.export_border_enabled and (
+        settings.export_border_percent > 0
+        or parse_aspect(settings.export_border_aspect) is not None
+    )
+
+
+def with_border(
+    decode: Callable[[bytes], Any], settings: Settings
+) -> Callable[[bytes], Any]:
+    """Wrap decode with the configured export border, if any."""
+    if not framing_active(settings):
+        return decode
+    percent = settings.export_border_percent
+    color = settings.export_border_color
+    aspect = parse_aspect(settings.export_border_aspect)
+    return lambda jpeg: add_border(decode(jpeg), percent, color, aspect)
 
 
 def export_basename(raf_path: Path | str) -> str:
@@ -102,6 +122,7 @@ class BatchController:
         on_status: Callable[[str], None],
         on_error: Callable[[Exception], None],
         on_finished: Callable[[], None] | None = None,
+        on_status_link: Callable[[str, str], None] | None = None,
     ) -> None:
         """Wire the controller to the window's session and callbacks.
 
@@ -122,6 +143,8 @@ class BatchController:
             on_error: Receives a camera failure (on the main loop).
             on_finished: Called after a run completes (not on camera
                 failure), e.g. to leave batch-select mode.
+            on_status_link: Sets a status line whose text opens the
+                given path on click.
         """
         self._parent = parent
         self._worker = worker
@@ -134,9 +157,11 @@ class BatchController:
         self._on_status = on_status
         self._on_error = on_error
         self._on_finished = on_finished
+        self._on_status_link = on_status_link
         self._dialog: BatchExportDialog | None = None
         self._cancel: threading.Event | None = None
         self._pending: list[str] = []
+        self._out_dir: str | None = None
 
     def begin(self, paths: list[str] | None = None) -> str | None:
         """Start the flow with a folder pick; returns a status complaint.
@@ -196,6 +221,7 @@ class BatchController:
     ) -> None:
         """Render the pending RAFs with the current recipe."""
         self._settings.batch_overwrite = overwrite
+        self._out_dir = out_dir
         paths = self._pending
         recipe = self._get_recipe()
         total = len(paths)
@@ -247,6 +273,10 @@ class BatchController:
             tally["foreign"] += 1
             return
         decode = sidecar_decode(raf_file)
+        if decode is None and framing_active(self._settings):
+            decode = oriented_pixbuf
+        if decode is not None:
+            decode = with_border(decode, self._settings)
         try:
             if decode is None:
                 out_path.write_bytes(jpeg)
@@ -301,6 +331,8 @@ class BatchController:
             parts.append(f"{tally['failed']} failed.")
         summary = " ".join(parts)
         self._set_busy(busy=False, status=summary)
+        if exported and self._out_dir and self._on_status_link is not None:
+            self._on_status_link(summary, self._out_dir)
         if self._dialog is not None:
             self._dialog.finish(summary)
         if self._on_finished is not None:

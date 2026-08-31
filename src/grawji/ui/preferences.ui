@@ -14,7 +14,15 @@
     <property name="step-increment">1</property>
     <property name="page-increment">10</property>
   </object>
+  <object class="GtkAdjustment" id="border_percent_adjustment">
+    <property name="lower">0</property>
+    <property name="upper">25</property>
+    <property name="step-increment">0.1</property>
+    <property name="page-increment">1</property>
+  </object>
   <template class="GrawjiPreferencesDialog" parent="AdwPreferencesDialog">
+    <property name="content-width">560</property>
+    <property name="content-height">720</property>
     <child>
       <object class="AdwPreferencesPage">
         <child>
@@ -38,14 +46,14 @@
             <child>
               <object class="AdwSwitchRow" id="wb_grid_row">
                 <property name="title">Tint the white-balance shift grid</property>
-                <property name="subtitle">Colour each cell with the shift it applies</property>
+                <property name="subtitle">Color each cell with the shift it applies</property>
               </object>
             </child>
           </object>
         </child>
         <child>
           <object class="AdwPreferencesGroup">
-            <property name="title">Behaviour</property>
+            <property name="title">Behavior</property>
             <child>
               <object class="AdwActionRow">
                 <property name="title">Filmstrip scroll speed</property>
@@ -81,6 +89,55 @@
                     <property name="value-pos">left</property>
                     <property name="digits">0</property>
                     <property name="adjustment">jpeg_quality_adjustment</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwExpanderRow" id="border_row">
+                <property name="title">Border</property>
+                <property name="subtitle">Frame exports with a solid border</property>
+                <property name="show-enable-switch">true</property>
+                <child>
+                  <object class="AdwSpinRow" id="border_percent_row">
+                    <property name="title">Size</property>
+                    <property name="subtitle">Percent of the longer edge</property>
+                    <property name="digits">1</property>
+                    <property name="adjustment">border_percent_adjustment</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow">
+                    <property name="title">Color</property>
+                    <child type="suffix">
+                      <object class="GtkColorDialogButton" id="border_color_button">
+                        <property name="valign">center</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwComboRow" id="border_aspect_row">
+                    <property name="title">Pad to aspect</property>
+                    <property name="subtitle">Fill with the border color up to this ratio</property>
+                    <property name="model">
+                      <object class="GtkStringList">
+                        <items>
+                          <item>None</item>
+                          <item>1:1</item>
+                          <item>5:4</item>
+                          <item>4:3</item>
+                          <item>3:2</item>
+                          <item>16:9</item>
+                        </items>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwSwitchRow" id="border_portrait_row">
+                    <property name="title">Portrait</property>
+                    <property name="subtitle">Pad upright instead of wide</property>
                   </object>
                 </child>
               </object>

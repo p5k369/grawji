@@ -54,7 +54,7 @@ PROP_UNKNOWN_D1A5 = 0xD1A5
 NUM_SLOTS = 7
 
 # Properties whose meaning is unknown or not a recipe field (image size,
-# image quality, long-exposure NR, colour space, two unknowns).
+# image quality, long-exposure NR, color space, two unknowns).
 PASSTHROUGH_DEFAULTS: dict[int, int] = {
     PROP_IMAGE_SIZE: 7,  # L 3:2
     PROP_IMAGE_QUALITY: 4,
@@ -78,8 +78,8 @@ _GRAIN_OFF_STORED = frozenset({6, 7})
 _DR_PERCENT = {"DR100": 100, "DR200": 200, "DR400": 400}
 
 # Only the Acros/Monochrome families take the mono toning values. Those
-# plus Sepia lock the colour axis (the camera greys it out), so the
-# colour property is omitted for them, as X Raw Studio does.
+# plus Sepia lock the color axis (the camera greys it out), so the
+# color property is omitted for them, as X Raw Studio does.
 _MONO_TONING_PREFIXES = ("Acros", "Monochrome")
 
 

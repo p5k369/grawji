@@ -198,7 +198,7 @@ def film_simulation_byte(name: str) -> int:
 
 
 def _clamp_clarity(value: int) -> int:
-    """Clamp clarity into the honoured -5..+5 range."""
+    """Clamp clarity into the honored -5..+5 range."""
     return max(-_CLARITY_LIMIT, min(_CLARITY_LIMIT, value))
 
 
@@ -274,7 +274,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
         "Sharpness": recipe.sharpness,
         "NoiseReduction": encode_noise_reduction(recipe.noise_reduction),
         "ColorSpace": _enum_value(
-            ColorSpace, recipe.color_space, "colour space"
+            ColorSpace, recipe.color_space, "color space"
         ),
         "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
         "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
@@ -285,7 +285,7 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
         changes["WhiteBalance"] = _enum_value(
             rawji.WhiteBalance, recipe.white_balance, "white balance"
         )
-        # Colour temperature only takes effect in Temperature mode.
+        # Color temperature only takes effect in Temperature mode.
         if recipe.white_balance == "Temperature":
             changes["WBColorTemp"] = validate_color_temp(recipe.color_temp)
     # Monochromatic Color toning: only for B&W sims.

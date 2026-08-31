@@ -73,7 +73,7 @@ class FakePresetCamera:
     """In-memory gen5 body: 7 preset slots of device properties."""
 
     def __init__(self, *, reject=(), ignore=(), grain_quirk=False):
-        """Slots start empty-ish; reject/ignore steer write behaviour."""
+        """Slots start empty-ish; reject/ignore steer write behavior."""
         self.slots = [_Slot(name=f"BANK{i + 1}") for i in range(7)]
         self.active = 3  # 1-based, like the camera
         self.reject = set(reject)
@@ -101,7 +101,7 @@ class FakePresetCamera:
         return _PTP_OK, [], b""
 
     def send_data_command(self, code, params, data):
-        """Accept property writes, honouring reject/ignore/quirk."""
+        """Accept property writes, honoring reject/ignore/quirk."""
         if code != _SET_PROP:
             return _PTP_OK, []
         prop = params[0]
@@ -170,7 +170,7 @@ def test_as_shot_leaves_the_slot_wb_untouched():
 
 
 def test_mono_recipe_omits_color():
-    """A B&W recipe never writes the dual-use colour property."""
+    """A B&W recipe never writes the dual-use color property."""
     cam = FakePresetCamera()
     transfer_presets(cam, {2: Recipe(film_simulation="Acros")})
     assert PROP_COLOR not in cam.slots[2].props
