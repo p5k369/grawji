@@ -7,6 +7,7 @@ import math
 
 import pytest
 
+from grawji import crop
 from grawji.crop import (
     FULL_RECT,
     CropRotate,
@@ -402,3 +403,37 @@ def test_guide_lines_spiral_portrait_and_mirror() -> None:
     assert mirrored[0][1] == pytest.approx(200.0)
     flipped = guide_lines("Spiral", 300, 200, flip_v=True)
     assert flipped[0][1] == pytest.approx(0.0)
+
+
+class TestReframePoint:
+    """Mapping crop-frame points across rotation states."""
+
+    def test_identity_without_rotation(self):
+        """Full rect, no angle: frame coords are box coords."""
+        got = crop.reframe_point(
+            (0.25, 0.75), 400, 300, 0.0, crop.FULL_RECT, 0.0
+        )
+        assert got == pytest.approx((0.25, 0.75))
+
+    def test_center_is_invariant(self):
+        """The image center maps to the box center at any angle."""
+        got = crop.reframe_point(
+            (0.5, 0.5), 400, 300, 0.0, crop.FULL_RECT, 7.5
+        )
+        assert got == pytest.approx((0.5, 0.5))
+
+    def test_roundtrip_through_rotation(self):
+        """Mapping there and back with full rects is the identity."""
+        there = crop.reframe_point(
+            (0.2, 0.4), 400, 300, 3.0, crop.FULL_RECT, -5.0
+        )
+        back = crop.reframe_point(there, 400, 300, -5.0, crop.FULL_RECT, 3.0)
+        assert back == pytest.approx((0.2, 0.4), abs=1e-9)
+
+    def test_crop_offset_applies(self):
+        """A point in a sub-rect lands inside that rect's box region."""
+        rect = (0.25, 0.25, 0.5, 0.5)
+        got = crop.reframe_point((0.0, 0.0), 400, 300, 0.0, rect, 0.0)
+        assert got == pytest.approx((0.25, 0.25))
+        got = crop.reframe_point((1.0, 1.0), 400, 300, 0.0, rect, 0.0)
+        assert got == pytest.approx((0.75, 0.75))

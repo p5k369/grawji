@@ -20,6 +20,34 @@ _ROTATIONS = {
     270: GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE,
 }
 
+# Working size for edge analysis
+_GRAY_TARGET = 400
+
+
+def gray_rows(pixbuf: Any, target: int = _GRAY_TARGET) -> list[list[int]]:
+    """Downscale a pixbuf and return grayscale rows."""
+    width = pixbuf.get_width()
+    height = pixbuf.get_height()
+    scale = target / max(width, height)
+    if scale < 1.0:
+        width = max(1, round(width * scale))
+        height = max(1, round(height * scale))
+        pixbuf = pixbuf.scale_simple(
+            width, height, GdkPixbuf.InterpType.BILINEAR
+        )
+    data = pixbuf.get_pixels()
+    stride = pixbuf.get_rowstride()
+    channels = pixbuf.get_n_channels()
+    return [
+        [
+            data[y * stride + x * channels]
+            + data[y * stride + x * channels + 1]
+            + data[y * stride + x * channels + 2]
+            for x in range(width)
+        ]
+        for y in range(height)
+    ]
+
 
 def parse_aspect(label: str) -> float | None:
     """A "W:H" label as a width/height ratio, None for anything else."""

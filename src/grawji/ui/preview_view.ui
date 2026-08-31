@@ -150,6 +150,16 @@
               </object>
             </child>
             <child>
+              <object class="GtkButton" id="auto_level_button">
+                <property name="label">Auto</property>
+                <property name="tooltip-text">Straighten automatically (click again for the next detected line)</property>
+                <property name="valign">center</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
               <object class="GtkButton" id="crop_reset">
                 <property name="icon-name">edit-undo-symbolic</property>
                 <property name="tooltip-text">Reset crop and angle</property>
