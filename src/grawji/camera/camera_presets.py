@@ -16,12 +16,12 @@ import logging
 import struct
 import time
 
-from grawji.camera_types import (
+from grawji.camera.camera_types import (
     BackupTransferError,
     Camera,
     TransferResult,
 )
-from grawji.preset_recipe import (
+from grawji.camera.preset_recipe import (
     NUM_SLOTS,
     PASSTHROUGH_DEFAULTS,
     PROP_CLARITY,

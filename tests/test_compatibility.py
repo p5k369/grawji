@@ -1,7 +1,7 @@
 """Tests for recipe-vs-body compatibility verdicts."""
 
-from grawji.capabilities import capabilities_for_model
-from grawji.compatibility import DEGRADED, FULL, UNAVAILABLE, evaluate
+from grawji.camera.capabilities import capabilities_for_model
+from grawji.camera.compatibility import DEGRADED, FULL, UNAVAILABLE, evaluate
 from grawji.recipe import Recipe
 
 _X100F = capabilities_for_model("X100F")  # gen3

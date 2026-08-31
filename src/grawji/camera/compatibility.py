@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from grawji.capabilities import Capabilities
+from grawji.camera.capabilities import Capabilities
 from grawji.recipe import Recipe
 
 # Verdict levels, worst last.

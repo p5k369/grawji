@@ -5,7 +5,7 @@ import struct
 import pytest
 from rawji.fuji_profile import encode_tone_value
 
-from grawji.core import (
+from grawji.camera.core import (
     OFFSET_FILM_SIM,
     CameraError,
     CameraSession,

@@ -23,7 +23,7 @@ from rawji.fuji_enums import (
     GrainEffectSize,
 )
 
-from grawji.capabilities import FILM_SIMULATIONS, Capabilities
+from grawji.camera.capabilities import FILM_SIMULATIONS, Capabilities
 from grawji.recipe import Recipe
 from grawji.settings import FROM_IMAGE, FROM_IMAGE_LABEL
 from grawji.views.widgets import MonoColorGrid, SliderRow, WBShiftGrid

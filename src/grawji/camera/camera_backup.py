@@ -27,8 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from grawji import camera_presets, fs_recipe
-from grawji.backup_recipe import (
+from grawji.camera import camera_presets, fs_recipe
+from grawji.camera.backup_recipe import (
     BackupWriteError,
     apply_checksum,
     layout_for,
@@ -37,7 +37,11 @@ from grawji.backup_recipe import (
     write_name,
     write_recipes,
 )
-from grawji.camera_types import BackupTransferError, Camera, TransferResult
+from grawji.camera.camera_types import (
+    BackupTransferError,
+    Camera,
+    TransferResult,
+)
 from grawji.recipe import Recipe
 
 _log = logging.getLogger(__name__)

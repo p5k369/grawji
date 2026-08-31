@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from grawji.fp_xml import parse_fp, serialize_fp
+from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
 
 # A real X-T3 FP1 sample (petabyt/fp, "Kodachrome 64").

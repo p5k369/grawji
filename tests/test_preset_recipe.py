@@ -2,8 +2,8 @@
 
 import pytest
 
-from grawji.backup_recipe import BackupWriteError
-from grawji.preset_recipe import (
+from grawji.camera.backup_recipe import BackupWriteError
+from grawji.camera.preset_recipe import (
     PASSTHROUGH_DEFAULTS,
     PROP_CLARITY,
     PROP_COLOR,

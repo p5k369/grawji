@@ -2,7 +2,7 @@
 
 import pytest
 
-from grawji.backup_recipe import (
+from grawji.camera.backup_recipe import (
     LAYOUTS,
     BackupWriteError,
     apply_checksum,

@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 import os
-import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -15,12 +12,9 @@ from typing import Any
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("GExiv2", "0.10")
 
 from gi.repository import (
     Gdk,
-    GdkPixbuf,
-    GExiv2,
     Gio,
     GLib,
     Graphene,
@@ -29,43 +23,17 @@ from gi.repository import (
     PangoCairo,
 )
 
-from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 from grawji.settings import cache_dir
 from grawji.sidecar import sidecar_path
-
-# How much of the embedded JPEG to read for the EXIF thumbnail (near the
-# start), so the multi-megabyte preview is not touched on the fast path.
-_EXIF_PREFIX_BYTES = 256 * 1024
-
-# The camera model rides inside the cached PNG as a tEXt chunk, so a warm
-# start needs no RAF reads at all.
-_MODEL_OPTION = "tEXt::grawji-model"
+from grawji.views.thumbnails import ThumbnailLoader
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_PX_PER_S_DEFAULT = 600
-
-# Holding a nav arrow or arrow key longer than this glides instead of
-# stepping.
-_NAV_HOLD_MS = 350
 
 # Folder-change events settle for this long before the strip re-scans.
 _RELOAD_DEBOUNCE_MS = 500
 
 Dispatch = Callable[[Callable[[], None]], Any]
-
-# EXIF orientation -> (GdkPixbuf rotation, flip horizontally) to display it
-# upright. 5 and 7 (rare transpose/transverse) approximate with a rotation.
-_R = GdkPixbuf.PixbufRotation
-_ORIENTATIONS = {
-    1: (_R.NONE, False),
-    2: (_R.NONE, True),
-    3: (_R.UPSIDEDOWN, False),
-    4: (_R.UPSIDEDOWN, True),
-    5: (_R.CLOCKWISE, True),
-    6: (_R.CLOCKWISE, False),
-    7: (_R.COUNTERCLOCKWISE, True),
-    8: (_R.COUNTERCLOCKWISE, False),
-}
 
 
 def _badged_paintable(
@@ -154,8 +122,6 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._selected: set[str] = set()
         self._anchor: str | None = None
         self._pending_mods: tuple[str, bool, bool] | None = None
-        self._cache_dir = cache_dir() / "thumbs"
-        self._workers = max(1, (os.cpu_count() or 2) - 1)
         self._glide_tick: int | None = None
         self._glide_last: int | None = None
         self._glide_dir = 0
@@ -163,7 +129,15 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._folder: str | None = None
         self._monitor: Any = None
         self._reload_pending_id = 0
-        GExiv2.initialize()
+        self._thumbs = ThumbnailLoader(
+            height=thumb_height,
+            cache_dir=cache_dir() / "thumbs",
+            workers=max(1, (os.cpu_count() or 2) - 1),
+            dispatch=dispatch,
+            is_stale=lambda scan_id: scan_id != self._scan_id,
+            on_thumb=self._apply_thumb,
+            on_finished=self._loading_done,
+        )
 
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         self._box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -319,12 +293,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         if cards:
             if self._on_loading is not None:
                 self._on_loading(True)
-            threading.Thread(
-                target=self._load_thumbnails,
-                args=(cards, scan_id),
-                name="grawji-thumbs",
-                daemon=True,
-            ).start()
+            self._thumbs.load(cards, scan_id)
 
     def _build_card(self, path: Path) -> tuple[Gtk.Picture, Gtk.Label, Any]:
         """Build one thumbnail card: camera on top, name at the bottom."""
@@ -683,181 +652,6 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._set_current(index)
             self._on_select(self._paths[index])
 
-    def _load_thumbnails(
-        self, cards: list[tuple[str, Any, Any]], scan_id: int
-    ) -> None:
-        """Decode this scan's thumbnails in parallel and dispatch each."""
-        with ThreadPoolExecutor(max_workers=self._workers) as pool:
-            for path, picture, camera_label in cards:
-                pool.submit(
-                    self._decode_one, path, picture, camera_label, scan_id
-                )
-        self._dispatch(partial(self._loading_done, scan_id))
-
-    def _decode_one(
-        self, path: str, picture: Any, camera_label: Any, scan_id: int
-    ) -> None:
-        """Produce one thumbnail (cache or decode) and dispatch it."""
-        if scan_id != self._scan_id:
-            return  # a newer scan superseded this one
-        try:
-            pixbuf, model = self._thumbnail(path)
-        except (ValueError, OSError, GLib.Error):
-            return  # skip unreadable / non-RAF files
-        apply = partial(
-            self._apply_thumb, picture, camera_label, pixbuf, model, scan_id
-        )
-        self._dispatch(apply)
-
-    def _thumbnail(self, path: str) -> tuple[Any, str]:
-        """Return path's (thumbnail, camera model), cached when possible."""
-        cache = self._cache_file(path)
-        if cache is not None and cache.exists():
-            try:
-                cached = GdkPixbuf.Pixbuf.new_from_file(str(cache))
-            except GLib.Error:
-                cached = None  # corrupt cache entry: re-decode below
-            if cached is not None:
-                return cached, cached.get_option(_MODEL_OPTION) or ""
-        pixbuf, model = self._decode_thumb(path)
-        if cache is not None:
-            self._store_cache(cache, pixbuf, model)
-        return pixbuf, model
-
-    def _cache_file(self, path: str) -> Path | None:
-        """Return the cache path for path, keyed by its size and mtime."""
-        target = Path(path)
-        try:
-            stat = target.stat()
-        except OSError:
-            return None
-        # v4: the cached PNG additionally carries the camera model.
-        key = (
-            f"v4|{target.resolve()}|{stat.st_mtime_ns}"
-            f"|{stat.st_size}|{self._thumb_height}"
-        )
-        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
-        return self._cache_dir / f"{digest}.png"
-
-    def _store_cache(self, cache: Path, pixbuf: Any, model: str) -> None:
-        """Write a decoded thumbnail to the cache, ignoring failures.
-
-        The camera model travels inside the PNG as a tEXt chunk, so the
-        warm path re-reads nothing from the RAF.
-        """
-        keys, values = ([_MODEL_OPTION], [model]) if model else ([], [])
-        try:
-            self._cache_dir.mkdir(parents=True, exist_ok=True)
-            pixbuf.savev(str(cache), "png", keys, values)
-        except (GLib.Error, OSError):
-            pass
-
-    def _decode_thumb(self, path: str) -> tuple[Any, str]:
-        """Decode a RAF into a thumb_height-tall pixbuf plus camera model.
-
-        Prefers the tiny EXIF thumbnail baked into the embedded JPEG, read
-        from a bounded prefix so the multi-megabyte preview is not touched;
-        the camera model comes out of that same read. Falls back to
-        decoding the full embedded JPEG (downscaled at load) when the RAF
-        carries no embedded thumbnail.
-        """
-        exif_thumb = self._exif_thumbnail_of(path)
-        if exif_thumb is not None:
-            data, orientation, model = exif_thumb
-            pixbuf = self._orient(self._decode_bytes(data), orientation)
-        else:
-            jpeg = embedded_jpeg(path)
-            pixbuf = self._decode_bytes(jpeg, downscale=True)
-            pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
-            model = self._model_of(jpeg)
-        return self._to_thumb_height(pixbuf), model
-
-    @staticmethod
-    def _exif_thumbnail_of(path: str) -> tuple[bytes, int, str] | None:
-        """Read only enough of the RAF to extract its EXIF thumbnail."""
-        try:
-            prefix = embedded_jpeg_prefix(path, _EXIF_PREFIX_BYTES)
-        except (ValueError, OSError):
-            return None
-        return FilmStrip._exif_thumbnail(prefix)
-
-    @staticmethod
-    def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, str] | None:
-        """Return (thumbnail bytes, EXIF orientation, camera model), or None.
-
-        Fuji bakes the photo into a 4:3 thumbnail with black letterbox bars.
-        Those are kept as-is (all thumbnails share the 4:3 frame, so the
-        strip stays a uniform height).
-        """
-        try:
-            meta = GExiv2.Metadata()
-            meta.open_buf(jpeg)
-            thumb = meta.get_exif_thumbnail()
-        except GLib.Error:
-            return None
-        if isinstance(thumb, tuple):  # some bindings return (ok, data)
-            thumb = thumb[-1]
-        if not thumb:
-            return None
-        try:
-            orientation = int(meta.get_orientation())
-        except (GLib.Error, ValueError):
-            orientation = 1
-        try:
-            model = meta.try_get_tag_string("Exif.Image.Model") or ""
-        except GLib.Error:
-            model = ""
-        return bytes(thumb), orientation, model
-
-    @staticmethod
-    def _model_of(jpeg: bytes) -> str:
-        """Read the camera model from JPEG bytes, or an empty string."""
-        try:
-            meta = GExiv2.Metadata()
-            meta.open_buf(jpeg)
-            return meta.try_get_tag_string("Exif.Image.Model") or ""
-        except GLib.Error:
-            return ""
-
-    def _decode_bytes(self, data: bytes, *, downscale: bool = False) -> Any:
-        """Decode JPEG bytes, optionally downscaling to the row height."""
-        loader = GdkPixbuf.PixbufLoader()
-        if downscale:
-            loader.connect("size-prepared", self._scale_to_thumb)
-        loader.write(data)
-        loader.close()
-        return loader.get_pixbuf()
-
-    @staticmethod
-    def _orient(pixbuf: Any, orientation: int) -> Any:
-        """Rotate/flip a pixbuf per its EXIF orientation."""
-        rotation, flip = _ORIENTATIONS.get(orientation, (_R.NONE, False))
-        pixbuf = pixbuf.rotate_simple(rotation) or pixbuf
-        if flip:
-            pixbuf = pixbuf.flip(True) or pixbuf
-        return pixbuf
-
-    def _to_thumb_height(self, pixbuf: Any) -> Any:
-        """Scale a pixbuf to exactly the row height, keeping its aspect."""
-        if pixbuf.get_height() == self._thumb_height:
-            return pixbuf
-        width = max(
-            1,
-            round(
-                pixbuf.get_width() * self._thumb_height / pixbuf.get_height()
-            ),
-        )
-        return pixbuf.scale_simple(
-            width, self._thumb_height, GdkPixbuf.InterpType.BILINEAR
-        )
-
-    def _scale_to_thumb(self, loader: Any, width: int, height: int) -> None:
-        """Scale the image to the thumbnail height, keeping aspect."""
-        if height <= 0:
-            return
-        scale = self._thumb_height / height
-        loader.set_size(max(1, int(width * scale)), self._thumb_height)
-
     def _apply_thumb(
         self,
         picture: Any,
@@ -909,121 +703,3 @@ class FilmStrip(Gtk.ScrolledWindow):
         if self._folder is not None:
             self.scan(self._folder)
         return GLib.SOURCE_REMOVE
-
-
-class FilmStripNav:
-    """Previous/next controls for a filmstrip: buttons and arrow keys.
-
-    Each control steps one card on a tap and glides continuously while
-    held. The buttons' sensitivity follows whether the strip can scroll
-    in that direction.
-    """
-
-    def __init__(self, strip: FilmStrip) -> None:
-        """Build the nav buttons for strip and track its scroll range."""
-        self._strip = strip
-        self._key_hold: int | None = None
-        self._key_dir = 0
-        self.prev_button = self._nav_button(
-            "go-previous-symbolic", "One image left (hold to scroll)", -1
-        )
-        self.prev_button.add_css_class("filmstrip-nav-start")
-        self.next_button = self._nav_button(
-            "go-next-symbolic", "One image right (hold to scroll)", 1
-        )
-        self.next_button.add_css_class("filmstrip-nav-end")
-        adj = strip.get_hadjustment()
-        adj.connect("value-changed", lambda *_a: self.update())
-        adj.connect("changed", lambda *_a: self.update())
-        self.update()
-
-    def attach_keys(self, window: Gtk.Window) -> None:
-        """Bind Left/Right on window to the same tap/hold scrolling."""
-        self._window = window
-        keys = Gtk.EventControllerKey()
-        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        keys.connect("key-pressed", self._on_key_pressed)
-        keys.connect("key-released", self._on_key_released)
-        window.add_controller(keys)
-
-    def update(self) -> None:
-        """Enable each arrow only when the strip can scroll that way."""
-        adj = self._strip.get_hadjustment()
-        value = adj.get_value()
-        self.prev_button.set_sensitive(value > adj.get_lower())
-        self.next_button.set_sensitive(
-            value + adj.get_page_size() < adj.get_upper()
-        )
-
-    def _nav_button(self, icon: str, tooltip: str, delta: int) -> Gtk.Button:
-        """Create a filmstrip scroll button: tap one card, hold to glide."""
-        button = Gtk.Button(icon_name=icon)
-        button.add_css_class("flat")
-        button.set_tooltip_text(tooltip)
-        state: dict[str, int | None] = {"hold": None}
-
-        def begin_glide() -> int:
-            state["hold"] = None
-            self._strip.start_glide(delta)
-            return GLib.SOURCE_REMOVE
-
-        def on_pressed(
-            gesture: Gtk.GestureClick, _n: int, _x: float, _y: float
-        ) -> None:
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            state["hold"] = GLib.timeout_add(_NAV_HOLD_MS, begin_glide)
-
-        def settle(*, step: bool) -> None:
-            if state["hold"] is not None:
-                GLib.source_remove(state["hold"])
-                state["hold"] = None
-                if step:  # released before the threshold: a tap, one card
-                    self._strip.scroll_step(delta)
-            else:
-                self._strip.stop_glide()
-
-        gesture = Gtk.GestureClick()
-        gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        gesture.connect("pressed", on_pressed)
-        gesture.connect("released", lambda *_a: settle(step=True))
-        gesture.connect("cancel", lambda *_a: settle(step=False))
-        button.add_controller(gesture)
-        return button
-
-    def _on_key_pressed(
-        self, _controller: Any, keyval: int, _keycode: int, modifiers: Any
-    ) -> bool:
-        """Start the tap/hold cycle for a bare Left/Right key press."""
-        direction = {Gdk.KEY_Left: -1, Gdk.KEY_Right: 1}.get(keyval, 0)
-        modifier_mask = Gtk.accelerator_get_default_mod_mask()
-        if direction == 0 or (modifiers & modifier_mask):
-            return False
-        focus = self._window.get_focus()
-        if isinstance(focus, Gtk.Editable | Gtk.Text):
-            return False  # keep arrows for text-cursor movement
-        if self._key_dir == direction:
-            return True  # keyboard auto-repeat while held: already handled
-        self._key_dir = direction
-
-        def begin_glide() -> int:
-            self._key_hold = None
-            self._strip.start_glide(direction)
-            return GLib.SOURCE_REMOVE
-
-        self._key_hold = GLib.timeout_add(_NAV_HOLD_MS, begin_glide)
-        return True
-
-    def _on_key_released(
-        self, _controller: Any, keyval: int, _keycode: int, _modifiers: Any
-    ) -> None:
-        """End the cycle: a quick tap steps one card, a hold stops gliding."""
-        direction = {Gdk.KEY_Left: -1, Gdk.KEY_Right: 1}.get(keyval, 0)
-        if direction == 0 or direction != self._key_dir:
-            return
-        self._key_dir = 0
-        if self._key_hold is not None:
-            GLib.source_remove(self._key_hold)
-            self._key_hold = None
-            self._strip.scroll_step(direction)
-        else:
-            self._strip.stop_glide()
