@@ -67,7 +67,7 @@ def test_tone_and_nr_encodings():
 
 
 def test_x100f_color_lookup_including_inverted_codes():
-    """Colour uses the measured lookup, -1/-2 inversion included."""
+    """Color uses the measured lookup, -1/-2 inversion included."""
     layout = LAYOUTS["X100F"]
     for value, code in ((4, 3), (1, 6), (0, 0), (-1, 8), (-2, 7), (-4, 10)):
         blob = write_recipe(_blank(layout), layout, 0, Recipe(color=value))
@@ -116,13 +116,13 @@ def test_color_chrome_only_on_xt3():
 def test_unsupported_values_are_dropped_not_raised():
     """Unsupported values are dropped while the rest still writes."""
     xt3 = LAYOUTS["XT3"]
-    # An unmapped film sim and an out-of-range colour are dropped, and the
+    # An unmapped film sim and an out-of-range color are dropped, and the
     # rest of the recipe still writes.
     recipe = Recipe(film_simulation="RealaAce", color=5, sharpness=2)
     blob = write_recipe(_blank(xt3), xt3, 0, recipe)
     dropped = unsupported_fields(xt3, recipe)
     assert any("film simulation" in d for d in dropped)
-    assert any("colour" in d for d in dropped)
+    assert any("color" in d for d in dropped)
     # Sharpness (supported) was written: code = 4 - 2 = 2.
     assert _slot_byte(blob, xt3, 0, "sharpness") == 2
     # The dropped film-sim byte was left at its baseline value.

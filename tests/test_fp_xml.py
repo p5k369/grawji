@@ -113,12 +113,12 @@ def test_invalid_white_balance_means_as_shot() -> None:
 
 
 def test_color_temp_strips_kelvin_suffix() -> None:
-    """A trailing K on the colour temperature is stripped."""
+    """A trailing K on the color temperature is stripped."""
     assert _with("<WBColorTemp>5900K</WBColorTemp>").color_temp == 5900
 
 
 def test_zero_color_temp_keeps_default() -> None:
-    """A 0K colour temperature keeps the recipe default."""
+    """A 0K color temperature keeps the recipe default."""
     assert _with("<WBColorTemp>0K</WBColorTemp>").color_temp == (
         Recipe().color_temp
     )
@@ -207,8 +207,8 @@ def test_round_trip(recipe: Recipe) -> None:
     assert parsed.mono_magenta_green == recipe.mono_magenta_green
 
 
-def test_mono_color_dropped_for_colour_sims() -> None:
-    """Mono toning is not written for colour film sims."""
+def test_mono_color_dropped_for_color_sims() -> None:
+    """Mono toning is not written for color film sims."""
     velvia = Recipe(
         film_simulation="Velvia", mono_warm_cool=8, mono_magenta_green=-8
     )

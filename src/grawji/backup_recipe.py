@@ -280,7 +280,7 @@ def _encode(
     if recipe.color in layout.color_codes:
         out[rel["color"]] = layout.color_codes[recipe.color]
     else:
-        dropped.append(f"colour {recipe.color:+d}")
+        dropped.append(f"color {recipe.color:+d}")
 
     keep(rel["highlight"], _tone_code(recipe.highlights), "highlight tone")
     keep(rel["shadow"], _tone_code(recipe.shadows), "shadow tone")
@@ -316,7 +316,7 @@ def unsupported_fields(layout: BankLayout, recipe: Recipe) -> list[str]:
 
 
 def _kelvin_index(kelvin: int) -> int:
-    """Nearest descending-list index for a colour temperature."""
+    """Nearest descending-list index for a color temperature."""
     return int(
         min(
             range(len(_KELVIN_DESC)),

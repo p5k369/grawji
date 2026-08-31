@@ -372,7 +372,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._caps = caps
         self._highlights_row.set_range(caps.tone_min, caps.tone_max)
         self._shadows_row.set_range(caps.tone_min, caps.tone_max)
-        # XProcessor5 bodies honour 0.5 tone steps (verified on the X-E5).
+        # XProcessor5 bodies honor 0.5 tone steps (verified on the X-E5).
         tone_step = 0.5 if caps.tone_half_step else 1.0
         for row in (self._highlights_row, self._shadows_row):
             row.set_step(tone_step, fmt=_tone_fmt(tone_step))
@@ -486,11 +486,11 @@ class RecipePanel(Adw.PreferencesPage):
         self._wb_shift_label.set_text(f"R {red:+d}  B {blue:+d}")
 
     def _on_wb_mode_changed(self, *_args: object) -> None:
-        """Enable the colour-temp slider only in Temperature mode."""
+        """Enable the color-temp slider only in Temperature mode."""
         self._update_temp_visibility()
 
     def _update_temp_visibility(self) -> None:
-        """Show the colour-temp slider only when WB is Temperature."""
+        """Show the color-temp slider only when WB is Temperature."""
         wb = _WHITE_BALANCES[self.wb_row.get_selected()]
         self._temp_row.set_visible(wb == "Temperature")
 
@@ -529,7 +529,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._mono_wc_row.set_visible(wc_only)
 
     def _temp_kelvin(self) -> int:
-        """Current colour temperature in Kelvin, for the active mode."""
+        """Current color temperature in Kelvin, for the active mode."""
         value = self._temp_row.get_value()
         if self._wb_temp_freeform:
             return int(value)
@@ -545,7 +545,7 @@ class RecipePanel(Adw.PreferencesPage):
     def _set_wb_temp_freeform(self, freeform: bool) -> None:
         """Switch the temp row between preset picker and free Kelvin.
 
-        XProcessor5 bodies honour any Kelvin, so the row becomes a
+        XProcessor5 bodies honor any Kelvin, so the row becomes a
         continuous slider with a typeable field; older bodies keep the
         31-preset picker. The current temperature is preserved across
         the switch.

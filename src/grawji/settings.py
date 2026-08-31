@@ -12,7 +12,7 @@ FROM_IMAGE_LABEL = "From image"
 
 
 def config_dir() -> Path:
-    """Return grawji's config directory (honours XDG_CONFIG_HOME)."""
+    """Return grawji's config directory (honors XDG_CONFIG_HOME)."""
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "grawji"
 
@@ -23,7 +23,7 @@ def settings_path() -> Path:
 
 
 def cache_dir() -> Path:
-    """Return grawji's cache directory (honours XDG_CACHE_HOME)."""
+    """Return grawji's cache directory (honors XDG_CACHE_HOME)."""
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     return Path(base) / "grawji"
 
@@ -48,7 +48,7 @@ class Settings:
             already exists in the target folder. When False, such images
             are skipped so an interrupted batch can be resumed cheaply.
         wb_grid_tint: When True, tint each white-balance shift grid cell
-            with the colour it nudges the image toward.
+            with the color it nudges the image toward.
         nav_glide_speed: Filmstrip scroll speed while an arrow is held,
             in pixels per second.
         bookmarks: Bookmarked folder paths, shown at the top of the
@@ -65,6 +65,12 @@ class Settings:
             on startup when it is still present. Empty means none.
         crop_guides: Composition guides shown in the crop editor
             ("None", "Thirds", "Grid", ...).
+        export_border_enabled: Whether exports get a framing border.
+        export_border_percent: Width of the border as a percentage of
+            the image's longer edge (the minimum frame on every side).
+        export_border_color: The border color as an RRGGBB hex string.
+        export_border_aspect: Pad the framed canvas to this "W:H"
+            aspect ratio with the border color.
     """
 
     open_recipe: str = FROM_IMAGE
@@ -84,6 +90,10 @@ class Settings:
     expanded_folders: list[str] = field(default_factory=list)
     last_image: str = ""
     crop_guides: str = "Thirds"
+    export_border_enabled: bool = False
+    export_border_percent: float = 3.0
+    export_border_color: str = "#ffffff"
+    export_border_aspect: str = "None"
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

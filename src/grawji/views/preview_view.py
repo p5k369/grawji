@@ -16,6 +16,7 @@ gi.require_version("Adw", "1")
 from gi.repository import (
     Gdk,
     GdkPixbuf,
+    Gio,
     GLib,
     GObject,
     Graphene,
@@ -23,7 +24,12 @@ from gi.repository import (
 )
 
 from grawji import crop
-from grawji.views.crop_render import bake_pixbuf, orient_pixbuf
+from grawji.views.render import (
+    add_border,
+    bake_pixbuf,
+    orient_pixbuf,
+    parse_aspect,
+)
 from grawji.views.widgets import Histogram
 
 _ZONE_CURSORS = {
@@ -232,6 +238,7 @@ class PreviewView(Gtk.Box):
     spinner = Gtk.Template.Child()
     status = Gtk.Template.Child()
     zoom_label = Gtk.Template.Child()
+    size_label = Gtk.Template.Child()
     peek_button = Gtk.Template.Child()
     rotate_left = Gtk.Template.Child()
     rotate_right = Gtk.Template.Child()
@@ -253,23 +260,7 @@ class PreviewView(Gtk.Box):
         """Wire the zoom, pan, peek and crop controllers."""
         super().__init__(**kwargs)
         self._zoom = 1.0
-        self._crop = crop.CropRotate()
-        self._pre_edit = crop.CropRotate()
-        self._editing = False
-        self._edit_closing = False
-        self._syncing_angle = False
-        self._syncing_swap = False
-        self._syncing_aspect = False
-        self._drag_zone: str | None = None
-        self._drag_rect: crop.Rect = crop.FULL_RECT
-        self._hover_zone: str | None = None
-        self._horizon: tuple[float, float, float, float] | None = None
-        self._edit_base: Any | None = None
-        self._edit_base_src: Any | None = None
-        self._edit_texture: Any = None
-        self._edit_texture_size = (0, 0)
-        self._edit_orientation = -1
-        self._edit_paintable: _RotatedPaintable | None = None
+        self._init_edit_state()
         self._pixbuf: Any | None = None
         self._oriented_pixbuf: Any | None = None
         self._original_pixbuf: Any | None = None
@@ -295,6 +286,7 @@ class PreviewView(Gtk.Box):
 
         self.rotate_left.connect("clicked", lambda *_a: self.rotate(-90))
         self.rotate_right.connect("clicked", lambda *_a: self.rotate(90))
+        self.status.connect("activate-link", self._on_status_link)
         self._init_crop_controls()
 
         self._histogram = Histogram()
@@ -302,6 +294,33 @@ class PreviewView(Gtk.Box):
         self._histogram.set_vexpand(True)
         self.histogram_slot.append(self._histogram)
         self._init_viewport_controllers()
+
+    def _init_edit_state(self) -> None:
+        """Initialise the crop editor's state fields."""
+        self._crop = crop.CropRotate()
+        self._pre_edit = crop.CropRotate()
+        self._editing = False
+        self._edit_closing = False
+        self._syncing_angle = False
+        self._syncing_swap = False
+        self._syncing_aspect = False
+        self._border_percent = 0.0
+        self._border_color = "#ffffff"
+        self._border_aspect = "None"
+        self._native_dims: tuple[int, int] | None = None
+        self._native_locked = False
+        self._display_base: Any | None = None
+        self._display_key: tuple[Any, crop.CropRotate] | None = None
+        self._drag_zone: str | None = None
+        self._drag_rect: crop.Rect = crop.FULL_RECT
+        self._hover_zone: str | None = None
+        self._horizon: tuple[float, float, float, float] | None = None
+        self._edit_base: Any | None = None
+        self._edit_base_src: Any | None = None
+        self._edit_texture: Any = None
+        self._edit_texture_size = (0, 0)
+        self._edit_orientation = -1
+        self._edit_paintable: _RotatedPaintable | None = None
 
     def _init_viewport_controllers(self) -> None:
         """Wire the zoom, pan, pointer and peek controllers."""
@@ -398,7 +417,30 @@ class PreviewView(Gtk.Box):
 
     def set_status(self, text: str) -> None:
         """Set the status-line text."""
+        self.status.set_use_markup(False)
         self.status.set_label(text)
+
+    def set_status_link(self, text: str, path: str) -> None:
+        """Set a status line that opens path's location when clicked."""
+        uri = GLib.markup_escape_text(GLib.filename_to_uri(path))
+        label = GLib.markup_escape_text(text)
+        self.status.set_markup(f'<a href="{uri}">{label}</a>')
+
+    def _on_status_link(self, _label: Any, uri: str) -> bool:
+        """Open the linked file's folder (or the folder itself)."""
+        target = Gio.File.new_for_uri(uri)
+        launcher = Gtk.FileLauncher.new(target)
+        parent = self.get_root()
+        window = parent if isinstance(parent, Gtk.Window) else None
+        is_dir = (
+            target.query_file_type(Gio.FileQueryInfoFlags.NONE, None)
+            == Gio.FileType.DIRECTORY
+        )
+        if is_dir:
+            launcher.launch(window, None, None)
+        else:
+            launcher.open_containing_folder(window, None, None)
+        return True
 
     def set_spinner(self, *, active: bool) -> None:
         """Show and run the status-line spinner, or hide and stop it."""
@@ -431,6 +473,8 @@ class PreviewView(Gtk.Box):
         if self._editing:
             self.cancel_crop()
         self._crop = value
+        self._native_dims = None
+        self._native_locked = False
         self._invalidate_derived()
 
     def show_jpeg(self, jpeg: bytes) -> bool:
@@ -449,6 +493,12 @@ class PreviewView(Gtk.Box):
         if jpeg is not None:
             self._last_jpeg = jpeg
         self._oriented_pixbuf = pixbuf
+        dims = (pixbuf.get_width(), pixbuf.get_height())
+        if not self._native_locked and (
+            self._native_dims is None
+            or dims[0] * dims[1] > self._native_dims[0] * self._native_dims[1]
+        ):
+            self._native_dims = dims
         self._original_pixbuf = None
         self._peek = False
         self.peek_button.set_sensitive(True)
@@ -481,17 +531,70 @@ class PreviewView(Gtk.Box):
         self._original_pixbuf = None
         self._base_pixbuf = None
 
+    def set_export_border(
+        self, percent: float, color: str, aspect: str = "None"
+    ) -> None:
+        """Show the configured export framing on the committed preview."""
+        state = (percent, color, aspect)
+        if state == (
+            self._border_percent,
+            self._border_color,
+            self._border_aspect,
+        ):
+            return
+        self._border_percent, self._border_color, self._border_aspect = state
+        self._invalidate_derived()
+        self._redisplay()
+
+    def _bordered(self, pixbuf: Any) -> Any:
+        """Apply the export framing for display purposes."""
+        return add_border(
+            pixbuf,
+            self._border_percent,
+            self._border_color,
+            parse_aspect(self._border_aspect),
+        )
+
     def _redisplay(self, *, histogram: bool = True) -> None:
         """Recompute the displayed image from the oriented source."""
         if self._oriented_pixbuf is None:
             return
         if not self._editing:
-            display = bake_pixbuf(self._oriented_pixbuf, self._crop)
-            self._pixbuf = display
-            if histogram:
-                self._histogram.update(display)
+            key = (self._oriented_pixbuf, self._crop)
+            if self._display_key != key:
+                self._display_base = bake_pixbuf(
+                    self._oriented_pixbuf, self._crop
+                )
+                self._display_key = key
+                if histogram:
+                    # The histogram describes the image, not the border.
+                    self._histogram.update(self._display_base)
+            self._pixbuf = self._bordered(self._display_base)
         self._refresh_display()
+        self._update_size_label()
         self.crop_overlay.queue_draw()
+
+    def set_native_size(self, dims: tuple[int, int] | None) -> None:
+        """Set the image's native (oriented) pixel size from metadata."""
+        if dims is not None:
+            self._native_dims = dims
+            self._native_locked = True
+        self._update_size_label()
+
+    def _update_size_label(self) -> None:
+        """Show the image's pixel size after the crop."""
+        if self._native_dims is None:
+            self.size_label.set_label("")
+            return
+        w, h = self._native_dims
+        if self._crop.orientation in (90, 270):
+            w, h = h, w
+        bw, bh = crop.rotated_size(w, h, self._crop.angle)
+        px_w = max(1, round(self._crop.rect[2] * bw))
+        px_h = max(1, round(self._crop.rect[3] * bh))
+        mp = px_w * px_h / 1e6
+        text = f"{px_w} × {px_h}   {mp:.1f} MP"  # noqa: RUF001
+        self.size_label.set_label(text)
 
     def _edit_display_paintable(self) -> _RotatedPaintable | None:
         """The GPU-rotated paintable for the crop editor."""
@@ -610,8 +713,8 @@ class PreviewView(Gtk.Box):
             if self._embedded_jpeg is None:
                 return
             try:
-                self._original_pixbuf = self.pixbuf_from_jpeg(
-                    self._embedded_jpeg
+                self._original_pixbuf = self._bordered(
+                    self.pixbuf_from_jpeg(self._embedded_jpeg)
                 )
             except GLib.Error:
                 return
@@ -636,7 +739,9 @@ class PreviewView(Gtk.Box):
             return None
         if self._base_pixbuf is None or self._base_geometry != self._crop:
             try:
-                self._base_pixbuf = self.pixbuf_from_jpeg(self._base_jpeg)
+                self._base_pixbuf = self._bordered(
+                    self.pixbuf_from_jpeg(self._base_jpeg)
+                )
             except GLib.Error:
                 return None
             self._base_geometry = self._crop
@@ -1091,6 +1196,7 @@ class PreviewView(Gtk.Box):
         rect = crop.swap_rect(w, h, self._crop.angle, self._crop.rect)
         self._crop = replace(self._crop, rect=rect)
         self.crop_overlay.queue_draw()
+        self._update_size_label()
 
     def _sync_swap(self, *, active: bool) -> None:
         """Move the swap toggle without re-shaping the selection."""
@@ -1123,6 +1229,7 @@ class PreviewView(Gtk.Box):
         rect = crop.shrink_to_fit(w, h, current.angle, (nx, ny, nw, nh))
         self._crop = replace(current, rect=rect)
         self.crop_overlay.queue_draw()
+        self._update_size_label()
 
     def _display_dims(self) -> tuple[int, int] | None:
         """Logical pixel size of what the picture currently displays."""
@@ -1231,6 +1338,7 @@ class PreviewView(Gtk.Box):
         )
         self._crop = replace(self._crop, rect=rect)
         self.crop_overlay.queue_draw()
+        self._update_size_label()
 
     def _on_crop_drag_end(self, _gesture: Any, _dx: float, _dy: float) -> None:
         """Release the dragged handle."""

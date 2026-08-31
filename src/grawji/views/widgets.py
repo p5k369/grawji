@@ -201,7 +201,7 @@ class WBShiftGrid(Gtk.DrawingArea):
         self.queue_draw()
 
     def _cell_rgb(self, r: float, b: float) -> tuple[float, float, float]:
-        """Opponent-colour tint for a shift: +R red, +B blue, and inverses."""
+        """Opponent-color tint for a shift: +R red, +B blue, and inverses."""
         base, amp = 0.5, 0.22
         red = base + amp * (r - b)
         green = base - amp * (r + b)
@@ -267,7 +267,7 @@ class WBShiftGrid(Gtk.DrawingArea):
                 self._on_changed(self._r, self._b)
 
     def _fill_cells(self, cx: Any, ox: float, oy: float, step: float) -> None:
-        """Tint every grid cell with its opponent-colour shift preview."""
+        """Tint every grid cell with its opponent-color shift preview."""
         cells = 2 * self._range
         for col in range(cells):
             r = ((col + 0.5) / cells) * 2 - 1
@@ -351,14 +351,14 @@ class MonoColorGrid(WBShiftGrid):
 class Histogram(Gtk.DrawingArea):
     """A compact histogram overlaid on the preview.
 
-    Click to switch between RGB (per-channel colour) and Luminance (the
+    Click to switch between RGB (per-channel color) and Luminance (the
     shadow-to-highlight tonal distribution). Binning runs off the main
     thread on a downscaled copy; a generation token drops stale results.
     """
 
     _SAMPLE = 160
     _RADIUS = 8.0
-    # RGB channel fill colours.
+    # RGB channel fill colors.
     _RGB_COLOURS = ((0.9, 0.32, 0.32), (0.34, 0.85, 0.4), (0.4, 0.55, 1.0))
     _LUMA_COLOUR = (0.85, 0.85, 0.85)
     # A channel is "clipped" once this fraction of pixels sits at 0 or 255.
@@ -508,25 +508,25 @@ class Histogram(Gtk.DrawingArea):
     def _rgb_clip(
         self, r: int, g: int, b: int, total: int
     ) -> tuple[float, float, float] | None:
-        """Combine per-channel clipping into one marker colour, or None."""
-        colour = (
+        """Combine per-channel clipping into one marker color, or None."""
+        color = (
             float(self._clips(r, total)),
             float(self._clips(g, total)),
             float(self._clips(b, total)),
         )
-        return colour if any(colour) else None
+        return color if any(color) else None
 
     def _corner(
         self,
         cx: Any,
         width: int,
-        colour: tuple[float, float, float],
+        color: tuple[float, float, float],
         *,
         left: bool,
     ) -> None:
         """Fill a small right-triangle in a top corner."""
         s = self._CLIP_SIZE
-        cx.set_source_rgb(*colour)
+        cx.set_source_rgb(*color)
         if left:
             cx.move_to(0, 0)
             cx.line_to(s, 0)

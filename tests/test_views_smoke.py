@@ -136,7 +136,7 @@ def test_mono_color_rows_gate_on_bw_and_capability(tmp_path: Any) -> None:
     assert panel.get_recipe().mono_warm_cool == 12
     assert panel.get_recipe().mono_magenta_green == -6
 
-    # A colour sim hides the grid.
+    # A color sim hides the grid.
     panel.set_recipe(Recipe(film_simulation="Velvia"))
     assert not panel._mono_grid_row.get_visible()
     assert not panel._mono_wc_row.get_visible()

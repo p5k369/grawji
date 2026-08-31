@@ -284,7 +284,7 @@ def test_apply_recipe_patches_wb_shift():
 
 
 def test_color_temp_only_written_in_temperature_mode():
-    """Colour temp is written only when white balance is Temperature."""
+    """Color temp is written only when white balance is Temperature."""
     base = bytes(608)
     in_temp = apply_recipe(
         base, Recipe(white_balance="Temperature", color_temp=8000)
@@ -321,7 +321,7 @@ def test_apply_recipe_encodes_noise_reduction():
 
 
 def test_apply_recipe_patches_color_space():
-    """Colour space maps sRGB to 1 and Adobe RGB to 2 in the profile."""
+    """Color space maps sRGB to 1 and Adobe RGB to 2 in the profile."""
     base = bytes(608)
     srgb = apply_recipe(base, Recipe(color_space="sRGB"))
     adobe = apply_recipe(base, Recipe(color_space="AdobeRGB"))
@@ -373,7 +373,7 @@ def test_apply_recipe_patches_clarity_and_fx_blue():
 
 
 def test_apply_recipe_clamps_clarity():
-    """Out-of-range clarity is clamped to the honoured -5..+5."""
+    """Out-of-range clarity is clamped to the honored -5..+5."""
     patched = apply_recipe(bytes(FULL_PROFILE), Recipe(clarity=99))
     assert _u32(patched, OFF_CLARITY) == 50
 

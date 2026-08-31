@@ -164,7 +164,7 @@ def test_grain_off_skips_the_size_byte():
 
 
 def test_mono_toning_written_only_for_bw_sims():
-    """Acros stores WC/MG as 18 - value; a colour sim leaves them alone."""
+    """Acros stores WC/MG as 18 - value; a color sim leaves them alone."""
     blob = _blank()
     wc_off = _XE5.fields["mono_wc"].offset + 2
     mg_off = _XE5.fields["mono_mg"].offset + 2
@@ -181,7 +181,7 @@ def test_mono_toning_written_only_for_bw_sims():
     )
     assert out[wc_off] == 22
     assert out[mg_off] == 10
-    # A colour sim must not touch these dual-use bytes.
+    # A color sim must not touch these dual-use bytes.
     out = write_fs_recipe(
         _blank(), _XE5, 2, Recipe(film_simulation="Provia", mono_warm_cool=5)
     )

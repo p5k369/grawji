@@ -86,11 +86,11 @@ class Capabilities:
     """Recipe features one camera body supports.
 
     Attributes:
-        tone_min: Lowest highlight/shadow tone the body honours.
-        tone_max: Highest highlight/shadow tone the body honours.
+        tone_min: Lowest highlight/shadow tone the body honors.
+        tone_max: Highest highlight/shadow tone the body honors.
         tone_half_step: Whether the body accepts 0.5 tone steps
             (hardware-verified on the XProcessor5 X-E5 only).
-        wb_temp_freeform: Whether WB colour temperature honours any Kelvin
+        wb_temp_freeform: Whether WB color temperature honors any Kelvin
             value rather than only the 31 Fuji presets.
             Pre-XProcessor5 bodies snap to the preset list,
             so the UI offers only those there.

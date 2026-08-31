@@ -69,7 +69,7 @@ def test_encodes_the_d185_compatible_codes():
 
 
 def test_wb_temperature_follows_the_wb_mode():
-    """The colour temperature comes immediately after the WB mode."""
+    """The color temperature comes immediately after the WB mode."""
     recipe = Recipe(
         white_balance="Temperature",
         color_temp=5150,
@@ -88,7 +88,7 @@ def test_wb_temperature_follows_the_wb_mode():
 
 
 def test_wb_mode_without_temperature_omits_the_kelvin_prop():
-    """A non-Temperature WB never writes the colour temperature."""
+    """A non-Temperature WB never writes the color temperature."""
     got = _as_dict(encode_recipe(Recipe(white_balance="Daylight")))
     assert got[PROP_WHITE_BALANCE] == 0x0004
     assert PROP_WB_COLOR_TEMP not in got
@@ -114,7 +114,7 @@ def test_as_shot_echoes_the_slot_wb_or_omits_the_cluster():
 
 
 def test_mono_sims_swap_color_for_the_toning_axes():
-    """Acros/Monochrome write WC/MG (when set) and never colour."""
+    """Acros/Monochrome write WC/MG (when set) and never color."""
     recipe = Recipe(
         film_simulation="AcrosYe", mono_warm_cool=4, mono_magenta_green=-2
     )
@@ -129,7 +129,7 @@ def test_mono_sims_swap_color_for_the_toning_axes():
 
 
 def test_sepia_locks_color_but_takes_no_toning():
-    """Sepia omits colour and ignores stray mono toning values."""
+    """Sepia omits color and ignores stray mono toning values."""
     recipe = Recipe(film_simulation="Sepia", mono_warm_cool=5, color=2)
     got = _as_dict(encode_recipe(recipe))
     assert PROP_COLOR not in got
@@ -137,7 +137,7 @@ def test_sepia_locks_color_but_takes_no_toning():
 
 
 def test_color_sims_never_write_the_toning_axes():
-    """A colour sim's WC/MG slots hold WB data and must stay untouched."""
+    """A color sim's WC/MG slots hold WB data and must stay untouched."""
     recipe = Recipe(film_simulation="Provia", mono_warm_cool=5)
     got = _as_dict(encode_recipe(recipe))
     assert PROP_MONO_WC not in got

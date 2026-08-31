@@ -69,3 +69,55 @@ def embedded_jpeg_from_bytes(data: bytes) -> bytes:
         msg = "RAF has no valid embedded JPEG"
         raise ValueError(msg)
     return jpeg
+
+
+# RAF metadata block
+_META_OFFSET_POS = 92
+_META_MIN = _META_OFFSET_POS + 8
+# The cropped raw size: what the camera's JPEGs measure.
+_TAG_CROPPED_SIZE = 0x0111
+# Each meta record: u16 tag + u16 payload size.
+_META_RECORD_HEADER = 4
+_SIZE_PAYLOAD = 4
+
+
+def _read_meta_block(path: str | Path) -> bytes | None:
+    """The RAF's metadata block, or None when absent/unreadable."""
+    try:
+        with Path(path).open("rb") as handle:
+            header = handle.read(_META_MIN)
+            if not header.startswith(RAF_MAGIC) or len(header) < _META_MIN:
+                return None
+            offset, length = struct.unpack_from(
+                ">II", header, _META_OFFSET_POS
+            )
+            handle.seek(offset)
+            meta = handle.read(length)
+    except OSError:
+        return None
+    return meta if len(meta) >= _META_RECORD_HEADER else None
+
+
+def output_size(path: str | Path) -> tuple[int, int] | None:
+    """The RAF's delivered image size or None."""
+    meta = _read_meta_block(path)
+    if meta is None:
+        return None
+    (count,) = struct.unpack_from(">I", meta, 0)
+    pos = 4
+    for _ in range(count):
+        if pos + _META_RECORD_HEADER > len(meta):
+            break
+        tag, size = struct.unpack_from(">HH", meta, pos)
+        pos += _META_RECORD_HEADER
+        if (
+            tag == _TAG_CROPPED_SIZE
+            and size == _SIZE_PAYLOAD
+            and pos + size <= len(meta)
+        ):
+            height, width = struct.unpack_from(">HH", meta, pos)
+            if width > 0 and height > 0:
+                return int(width), int(height)
+            return None
+        pos += size
+    return None

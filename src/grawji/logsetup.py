@@ -31,7 +31,7 @@ class _StreamToLogger:
         self._buffer = ""
 
     def isatty(self) -> bool:
-        """Never a terminal (so callers do not emit colour codes)."""
+        """Never a terminal (so callers do not emit color codes)."""
         return False
 
     def fileno(self) -> int:

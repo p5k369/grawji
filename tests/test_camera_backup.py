@@ -36,7 +36,7 @@ class FakeCamera:
     """In-memory PTP camera: serves a blob and accepts restores."""
 
     def __init__(self, blob, *, volatile=None, ignore=()):
-        """Hold the blob plus volatile/ignore behaviour flags."""
+        """Hold the blob plus volatile/ignore behavior flags."""
         self.blob = bytearray(blob)
         self.volatile = volatile or {}
         self.ignore = set(ignore)
@@ -53,7 +53,7 @@ class FakeCamera:
         return _PTP_OK, [], b""  # GetDeviceInfo / USBMode preamble
 
     def send_data_command(self, code, params, data):
-        """Accept a restore, honouring ignore/volatile offsets."""
+        """Accept a restore, honoring ignore/volatile offsets."""
         if code == _SEND_OBJECT_INFO:
             return _PTP_OK, []
         if code == _SEND_OBJECT:

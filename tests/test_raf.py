@@ -114,3 +114,34 @@ def test_prefix_rejects_missing_jpeg_marker(tmp_path):
     path.write_bytes(bytes(data))
     with pytest.raises(ValueError, match="no valid embedded"):
         embedded_jpeg_prefix(path, 10)
+
+
+def test_output_size(tmp_path):
+    """The delivered size comes from the meta block's 0x0111 record."""
+    from grawji.raf import output_size
+
+    meta = struct.pack(">I", 2)
+    meta += struct.pack(">HHHH", 0x0100, 4, 5196, 7872)
+    meta += struct.pack(">HHHH", 0x0111, 4, 5152, 7728)
+    header = bytearray(100)
+    header[: len(RAF_MAGIC)] = RAF_MAGIC
+    struct.pack_into(">II", header, 92, 100, len(meta))
+    path = tmp_path / "meta.RAF"
+    path.write_bytes(bytes(header) + meta)
+    assert output_size(path) == (7728, 5152)
+
+
+def test_output_size_absent_or_broken(tmp_path):
+    """Missing record, bad magic or truncation give None."""
+    from grawji.raf import output_size
+
+    meta = struct.pack(">I", 1) + struct.pack(">HHHH", 0x0100, 4, 1, 1)
+    header = bytearray(100)
+    header[: len(RAF_MAGIC)] = RAF_MAGIC
+    struct.pack_into(">II", header, 92, 100, len(meta))
+    path = tmp_path / "nosize.RAF"
+    path.write_bytes(bytes(header) + meta)
+    assert output_size(path) is None
+    bad = tmp_path / "bad.RAF"
+    bad.write_bytes(b"not a raf")
+    assert output_size(bad) is None

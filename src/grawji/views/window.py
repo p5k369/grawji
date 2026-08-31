@@ -47,6 +47,7 @@ from grawji.views.export import (
     BatchController,
     export_basename,
     initial_folder,
+    with_border,
     write_jpeg,
 )
 from grawji.views.filmstrip import FilmStrip, FilmStripNav
@@ -207,6 +208,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_status=self.preview_view.set_status,
             on_error=self._on_error,
             on_finished=self._end_select_mode,
+            on_status_link=self.preview_view.set_status_link,
         )
         self._install_actions()
         self._refresh_camera_status()
@@ -319,10 +321,23 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.crop_guides.connect(
             "notify::selected", self._on_guides_changed
         )
+        self._apply_export_border()
         crop_keys = Gtk.EventControllerKey.new()
         crop_keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         crop_keys.connect("key-pressed", self._on_crop_key)
         self.add_controller(crop_keys)
+
+    def _apply_export_border(self) -> None:
+        """Feed the preview the effective export framing settings."""
+        s = self._settings
+        if s.export_border_enabled:
+            self.preview_view.set_export_border(
+                s.export_border_percent,
+                s.export_border_color,
+                s.export_border_aspect,
+            )
+        else:
+            self.preview_view.set_export_border(0.0, s.export_border_color)
 
     def _install_assets(self) -> None:
         """Install display-wide assets: the app CSS and bundled icons."""
@@ -430,14 +445,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _decode_selection(self, generation: int, raf_path: str) -> None:
         """Read and decode the embedded preview off the main thread."""
+        native = imagemeta.native_size(raf_path)
         try:
             jpeg = raf.embedded_jpeg(raf_path)
             pixbuf = oriented_pixbuf(jpeg)
             rows = imagemeta.exif_rows(jpeg)
         except (ValueError, OSError, GLib.Error):
-            GLib.idle_add(self._apply_selection, generation, None, None, [])
+            GLib.idle_add(
+                self._apply_selection, generation, None, None, [], native
+            )
             return
-        GLib.idle_add(self._apply_selection, generation, jpeg, pixbuf, rows)
+        GLib.idle_add(
+            self._apply_selection, generation, jpeg, pixbuf, rows, native
+        )
 
     def _apply_selection(
         self,
@@ -445,11 +465,13 @@ class MainWindow(Adw.ApplicationWindow):
         jpeg: bytes | None,
         pixbuf: Any,
         rows: list[tuple[str, str]],
+        native: tuple[int, int] | None,
     ) -> bool:
         """Show the decoded embedded preview + EXIF (on the main thread)."""
         if generation != self._generation:
             return GLib.SOURCE_REMOVE
         self.preview_view.set_embedded_jpeg(jpeg)
+        self.preview_view.set_native_size(native)
         if pixbuf is not None:
             self.preview_view.show_pixbuf(pixbuf, jpeg=jpeg)
             self.original_picture.set_paintable(
@@ -739,12 +761,15 @@ class MainWindow(Adw.ApplicationWindow):
                 jpeg,
                 path,
                 quality=self._settings.jpeg_quality,
-                decode=self.preview_view.pixbuf_from_jpeg,
+                decode=with_border(
+                    self.preview_view.pixbuf_from_jpeg, self._settings
+                ),
             )
         except (GLib.Error, OSError) as exc:
             self._set_busy(busy=False, status=f"Export failed: {exc}")
             return
-        self._set_busy(busy=False, status=f"Exported to {path}")
+        self._set_busy(busy=False, status="Exported.")
+        self.preview_view.set_status_link(f"Exported to {path}", path)
 
     def _on_batch_export(self) -> None:
         """Enter batch-select mode: pick images, then export them."""
@@ -999,6 +1024,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Persist settings and apply any that affect the live UI."""
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
+        self._apply_export_border()
         self._apply_color_scheme()
         self._save_settings()
 
