@@ -71,6 +71,20 @@
                 </child>
               </object>
             </child>
+            <child>
+              <object class="AdwComboRow" id="drag_action_row">
+                <property name="title">Drag images to a folder</property>
+                <property name="subtitle">Hold Ctrl when starting a drag to copy, Shift to move</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item translatable="yes">Move</item>
+                      <item translatable="yes">Copy</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
           </object>
         </child>
         <child>

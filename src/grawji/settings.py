@@ -51,6 +51,9 @@ class Settings:
             with the color it nudges the image toward.
         nav_glide_speed: Filmstrip scroll speed while an arrow is held,
             in pixels per second.
+        drag_action: What an unmodified drag of images onto a folder
+            does, "move" or "copy". Holding Ctrl when starting a drag
+            always copies, Shift always moves.
         bookmarks: Bookmarked folder paths, shown at the top of the
             folder tree in the order they were added.
         color_scheme: UI theme: "default" follows the desktop, "light" or
@@ -59,6 +62,8 @@ class Settings:
             preview.
         last_export_dir: Folder of the most recent export.
         the export dialogs open here. Empty means none.
+        last_fileop_dir: Destination folder of the most recent copy or
+            move. Those dialogs open here. Empty means none.
         expanded_folders: Folder-tree paths that were expanded, restored on
             startup so the tree reopens as it was left.
         last_image: Path of the image selected in the filmstrip, reselected
@@ -83,10 +88,12 @@ class Settings:
     batch_overwrite: bool = False
     wb_grid_tint: bool = True
     nav_glide_speed: int = 600
+    drag_action: str = "move"
     bookmarks: list[str] = field(default_factory=list)
     color_scheme: str = "default"
     show_histogram: bool = False
     last_export_dir: str = ""
+    last_fileop_dir: str = ""
     expanded_folders: list[str] = field(default_factory=list)
     last_image: str = ""
     crop_guides: str = "Thirds"

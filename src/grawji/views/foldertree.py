@@ -50,6 +50,9 @@ class FolderTree(Gtk.ScrolledWindow):
         bookmarks: list[str] | None = None,
         on_bookmarks_changed: Callable[[list[str]], None] | None = None,
         on_expansion_changed: Callable[[list[str]], None] | None = None,
+        on_drop_paths: (
+            Callable[[list[str], str, bool | None], None] | None
+        ) = None,
     ) -> None:
         """Create the tree.
 
@@ -61,12 +64,18 @@ class FolderTree(Gtk.ScrolledWindow):
             on_expansion_changed: Called (debounced) with the expanded
                 folder paths whenever the tree structure changes, so the
                 expansion state can be persisted.
+            on_drop_paths: Called with (paths, folder, copy) when files
+                are dropped onto a folder row; None disables drops. The
+                copy flag is True when Ctrl forced a copy, False when
+                Shift forced a move, and None for an unmodified drag
+                (the caller applies its default).
         """
         super().__init__()
         self._on_select = on_select
         self._bookmarks = list(bookmarks or [])
         self._on_bookmarks_changed = on_bookmarks_changed
         self._on_expansion_changed = on_expansion_changed
+        self._on_drop_paths = on_drop_paths
         self._restoring = False
         self._save_pending = False
         self._launcher: Any = None
@@ -273,6 +282,42 @@ class FolderTree(Gtk.ScrolledWindow):
         secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         secondary.connect("pressed", self._on_row_secondary, item)
         expander.add_controller(secondary)
+
+        if self._on_drop_paths is not None:
+            drop = Gtk.DropTarget.new(
+                GObject.TYPE_STRING,
+                Gdk.DragAction.MOVE | Gdk.DragAction.COPY,
+            )
+            drop.connect("drop", self._on_row_drop, item)
+            expander.add_controller(drop)
+
+    def _on_row_drop(
+        self,
+        target: Gtk.DropTarget,
+        value: str,
+        _x: float,
+        _y: float,
+        item: Gtk.ListItem,
+    ) -> bool:
+        """Move or copy dropped image paths into this folder."""
+        row = item.get_item()
+        if row is None or self._on_drop_paths is None:
+            return False
+        folder = row.get_item().file.get_path()
+        if folder is None:
+            return False
+        paths = [p for p in str(value).splitlines() if p]
+        if not paths:
+            return False
+        drop = target.get_current_drop()
+        actions = drop.get_actions() if drop is not None else Gdk.DragAction(0)
+        copy: bool | None = None
+        if actions == Gdk.DragAction.COPY:
+            copy = True
+        elif actions == Gdk.DragAction.MOVE:
+            copy = False
+        self._on_drop_paths(paths, folder, copy)
+        return True
 
     def _on_row_secondary(
         self,

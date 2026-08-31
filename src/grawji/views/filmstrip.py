@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import threading
 from collections.abc import Callable
@@ -16,7 +17,17 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("GExiv2", "0.10")
 
-from gi.repository import Gdk, GdkPixbuf, GExiv2, Gio, GLib, Gtk, Pango
+from gi.repository import (
+    Gdk,
+    GdkPixbuf,
+    GExiv2,
+    Gio,
+    GLib,
+    Graphene,
+    Gtk,
+    Pango,
+    PangoCairo,
+)
 
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 from grawji.settings import cache_dir
@@ -57,6 +68,31 @@ _ORIENTATIONS = {
 }
 
 
+def _badged_paintable(
+    base: Gdk.Paintable, button: Gtk.Widget, count: int
+) -> Gdk.Paintable:
+    """Compose a card paintable with a count bubble in its top corner."""
+    width = max(1, button.get_width())
+    height = max(1, button.get_height())
+    snapshot = Gtk.Snapshot()
+    base.snapshot(snapshot, width, height)
+    layout = button.create_pango_layout(str(count))
+    text_w, text_h = layout.get_pixel_size()
+    radius = max(text_w, text_h) / 2 + 5
+    center_x = width - radius - 4
+    center_y = radius + 4
+    bounds = Graphene.Rect()
+    bounds.init(0, 0, width, height)
+    ctx = snapshot.append_cairo(bounds)
+    ctx.arc(center_x, center_y, radius, 0, 2 * math.pi)
+    ctx.set_source_rgba(0.1, 0.1, 0.1, 0.85)
+    ctx.fill()
+    ctx.move_to(center_x - text_w / 2, center_y - text_h / 2)
+    ctx.set_source_rgba(1, 1, 1, 1)
+    PangoCairo.show_layout(ctx, layout)
+    return snapshot.to_paintable()
+
+
 def _is_raf(gfile: Any) -> bool:
     """Whether a monitor-event Gio.File refers to a RAF file."""
     if gfile is None:
@@ -68,12 +104,14 @@ def _is_raf(gfile: Any) -> bool:
 class FilmStrip(Gtk.ScrolledWindow):
     """A horizontally-scrolling strip of clickable RAF thumbnails."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         on_select: Callable[[str], None],
         on_loading: Callable[[bool], None] | None = None,
         on_selection_changed: Callable[[int], None] | None = None,
+        on_file_action: Callable[[str, list[str]], None] | None = None,
+        drag_action: Callable[[], str] | None = None,
         dispatch: Dispatch = GLib.idle_add,
         thumb_height: int = 110,
     ) -> None:
@@ -86,6 +124,10 @@ class FilmStrip(Gtk.ScrolledWindow):
                 False when it finishes, for an activity indicator elsewhere.
             on_selection_changed: Called with the number of selected
                 thumbnails while in batch-select mode.
+            on_file_action: Called with ("export"/"copy"/"move"/"trash",
+                paths) from a card's context menu.
+            drag_action: Returns the configured default drag action
+                ("move" or "copy") for an unmodified drag.
             dispatch: Schedules a callback on the GTK main loop.
             thumb_height: Thumbnail height in pixels.
         """
@@ -93,6 +135,10 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._on_select = on_select
         self._on_loading = on_loading
         self._on_selection_changed = on_selection_changed
+        self._on_file_action = on_file_action
+        self._drag_action = drag_action
+        self._menu_paths: list[str] = []
+        self._init_file_actions()
         self._dispatch = dispatch
         self._thumb_height = thumb_height
         self._scan_id = 0
@@ -106,6 +152,8 @@ class FilmStrip(Gtk.ScrolledWindow):
         # membership in the export set (shown raised) instead of opening it.
         self._select_mode = False
         self._selected: set[str] = set()
+        self._anchor: str | None = None
+        self._pending_mods: tuple[str, bool, bool] | None = None
         self._cache_dir = cache_dir() / "thumbs"
         self._workers = max(1, (os.cpu_count() or 2) - 1)
         self._glide_tick: int | None = None
@@ -133,6 +181,97 @@ class FilmStrip(Gtk.ScrolledWindow):
         self.add_controller(scroll)
         self.get_hadjustment().connect("changed", self._on_range_changed)
 
+    def _init_file_actions(self) -> None:
+        """Install the context-menu action group for file operations."""
+        group = Gio.SimpleActionGroup()
+        for kind in ("export", "copy", "move", "trash"):
+            action = Gio.SimpleAction.new(kind, None)
+            action.connect("activate", partial(self._on_menu_action, kind))
+            group.add_action(action)
+        self.insert_action_group("fileops", group)
+
+    def _on_menu_action(self, kind: str, *_args: object) -> None:
+        """Forward a context-menu choice with its captured paths."""
+        if self._on_file_action is not None and self._menu_paths:
+            self._on_file_action(kind, self._menu_paths)
+
+    def _card_paths(self, path: str) -> list[str]:
+        """The paths a card action applies to: the selection or itself."""
+        if path in self._selected:
+            return [p for p in self._paths if p in self._selected]
+        return [path]
+
+    def _on_card_menu(
+        self,
+        path: str,
+        button: Gtk.Button,
+        gesture: Gtk.GestureClick,
+        _n: int,
+        x: float,
+        y: float,
+    ) -> None:
+        """Open the file-operations menu for the right-clicked card."""
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._menu_paths = self._card_paths(path)
+        count = len(self._menu_paths)
+        suffix = f" ({count})" if count > 1 else ""
+        menu = Gio.Menu()
+        menu.append(f"Export{suffix}…", "fileops.export")
+        menu.append(f"Copy to…{suffix}", "fileops.copy")
+        menu.append(f"Move to…{suffix}", "fileops.move")
+        menu.append(f"Move to Trash{suffix}", "fileops.trash")
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(button)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect(
+            "closed", lambda p: GLib.idle_add(self._drop_popover, p)
+        )
+        popover.popup()
+
+    @staticmethod
+    def _drop_popover(popover: Gtk.PopoverMenu) -> bool:
+        """Unparent a dismissed context menu so it can be collected."""
+        popover.unparent()
+        return GLib.SOURCE_REMOVE
+
+    def _on_drag_prepare(
+        self, source: Gtk.DragSource, _x: float, _y: float, path: str
+    ) -> Any:
+        """Provide the dragged card's paths."""
+        state = source.get_current_event_state()
+        if state & Gdk.ModifierType.CONTROL_MASK:
+            action = Gdk.DragAction.COPY
+        elif state & Gdk.ModifierType.SHIFT_MASK:
+            action = Gdk.DragAction.MOVE
+        elif self._drag_action is not None and self._drag_action() == "copy":
+            action = Gdk.DragAction.COPY
+        else:
+            action = Gdk.DragAction.MOVE
+        source.set_actions(action)
+        return Gdk.ContentProvider.new_for_value(
+            "\n".join(self._card_paths(path))
+        )
+
+    def _on_drag_begin(
+        self,
+        source: Gtk.DragSource,
+        _drag: Any,
+        path: str,
+        button: Gtk.Button,
+    ) -> None:
+        """Use the dragged card as the drag icon, badged with the count.
+
+        A drag from a marked card carries every marked image, so a
+        multi-image drag shows how many are coming along.
+        """
+        paintable: Gdk.Paintable = Gtk.WidgetPaintable.new(button)
+        count = len(self._card_paths(path))
+        if count > 1:
+            paintable = _badged_paintable(paintable, button, count)
+        source.set_icon(paintable, 0, 0)
+
     def scan(self, folder: str) -> None:
         """Populate the strip with the RAF files in folder, and watch it.
 
@@ -146,12 +285,10 @@ class FilmStrip(Gtk.ScrolledWindow):
         if folder == self._folder and 0 <= self._current < len(self._paths):
             keep = self._paths[self._current]
         self._clear()
-        if self._select_mode:
+        if folder != self._folder:
             # A new folder invalidates any in-progress selection.
             self._select_mode = False
-            self._selected.clear()
-            self._notify_selection()
-        if folder != self._folder:
+            self.clear_selection()
             self._folder = folder
             self._watch(folder)
 
@@ -169,6 +306,11 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._box.append(button)
             self._buttons.append(button)
             cards.append((str(path), picture, camera_label))
+
+        if self._selected:
+            self._selected &= set(self._paths)
+            self._apply_selection_style()
+            self._notify_selection()
 
         if keep is not None and keep in self._paths:
             # Restore the selection once the new cards have a layout
@@ -226,6 +368,25 @@ class FilmStrip(Gtk.ScrolledWindow):
         button.add_css_class("card")
         button.add_css_class("thumb")
         button.set_tooltip_text(path.name)
+        modifier_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
+        modifier_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        modifier_click.connect(
+            "pressed", partial(self._on_card_pressed, str(path))
+        )
+        button.add_controller(modifier_click)
+        if self._on_file_action is not None:
+            menu_click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+            menu_click.connect(
+                "pressed", partial(self._on_card_menu, str(path), button)
+            )
+            button.add_controller(menu_click)
+            drag = Gtk.DragSource(
+                actions=Gdk.DragAction.MOVE | Gdk.DragAction.COPY
+            )
+            drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            drag.connect("prepare", self._on_drag_prepare, str(path))
+            drag.connect("drag-begin", self._on_drag_begin, str(path), button)
+            button.add_controller(drag)
         return picture, camera_label, button
 
     @property
@@ -323,17 +484,63 @@ class FilmStrip(Gtk.ScrolledWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_clicked(self, path: str, _button: Gtk.Button) -> None:
-        """Handle a thumbnail click.
-
-        In batch-select mode a click toggles the card's membership in the
-        export set (shown raised); otherwise it opens the image.
-        """
+        """Handle a thumbnail click."""
+        pending = self._pending_mods
+        self._pending_mods = None
+        if pending is not None and pending[0] == path:
+            _, ctrl, shift = pending
+            if shift:
+                self._select_range_to(path)
+            elif ctrl:
+                self._toggle_selected(path)
+            return
         if self._select_mode:
             self._toggle_selected(path)
             return
+        self.clear_selection()
         if path in self._paths:
             self._set_current(self._paths.index(path))
         self._on_select(path)
+
+    def clear_selection(self) -> None:
+        """Unmark every card (the open-image highlight is kept)."""
+        if not self._selected and self._anchor is None:
+            return
+        self._selected.clear()
+        self._anchor = None
+        self._apply_selection_style()
+        self._notify_selection()
+
+    def _on_card_pressed(
+        self,
+        path: str,
+        gesture: Gtk.GestureClick,
+        _n: int,
+        _x: float,
+        _y: float,
+    ) -> None:
+        """Record the modifiers held as a card press begins."""
+        state = gesture.get_current_event_state()
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        self._pending_mods = (path, ctrl, shift) if ctrl or shift else None
+
+    def _select_range_to(self, path: str) -> None:
+        """Select every card from the anchor through path."""
+        if path not in self._paths:
+            return
+        end = self._paths.index(path)
+        if self._anchor is not None and self._anchor in self._paths:
+            start = self._paths.index(self._anchor)
+        elif 0 <= self._current < len(self._paths):
+            start = self._current
+        else:
+            start = end
+        low, high = min(start, end), max(start, end)
+        self._selected.update(self._paths[low : high + 1])
+        self._anchor = path
+        self._apply_selection_style()
+        self._notify_selection()
 
     def enter_select_mode(self) -> None:
         """Begin batch-select: clicks toggle export selection.
@@ -343,6 +550,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         """
         self._select_mode = True
         self._selected.clear()
+        self._anchor = None
         for button in self._buttons:
             button.remove_css_class("thumb-selected")
         self._apply_selection_style()
@@ -355,6 +563,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         """
         self._select_mode = False
         self._selected.clear()
+        self._anchor = None
         self._apply_selection_style()
         if 0 <= self._current < len(self._buttons):
             self._buttons[self._current].add_css_class("thumb-selected")
@@ -386,6 +595,7 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._selected.discard(path)
         else:
             self._selected.add(path)
+        self._anchor = path
         self._apply_selection_style()
         self._notify_selection()
 

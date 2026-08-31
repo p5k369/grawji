@@ -20,6 +20,7 @@ _UI = (
     .read_text(encoding="utf-8")
 )
 _COLOR_SCHEMES = ["default", "light", "dark"]
+_DRAG_ACTIONS = ["move", "copy"]
 
 
 def _split_aspect(label: str) -> tuple[str, bool]:
@@ -42,6 +43,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     wb_grid_row = Gtk.Template.Child()
     jpeg_quality_scale = Gtk.Template.Child()
     glide_speed_scale = Gtk.Template.Child()
+    drag_action_row = Gtk.Template.Child()
     border_row = Gtk.Template.Child()
     border_percent_row = Gtk.Template.Child()
     border_color_button = Gtk.Template.Child()
@@ -67,6 +69,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.wb_grid_row.set_active(settings.wb_grid_tint)
         self.jpeg_quality_scale.set_value(settings.jpeg_quality)
         self.glide_speed_scale.set_value(settings.nav_glide_speed)
+        drag = settings.drag_action
+        self.drag_action_row.set_selected(
+            _DRAG_ACTIONS.index(drag) if drag in _DRAG_ACTIONS else 0
+        )
         self.border_row.set_enable_expansion(settings.export_border_enabled)
         self.border_row.set_expanded(settings.export_border_enabled)
         self.border_row.connect(
@@ -90,6 +96,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.wb_grid_row.connect("notify::active", self._on_edited)
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
         self.glide_speed_scale.connect("value-changed", self._on_edited)
+        self.drag_action_row.connect("notify::selected", self._on_edited)
         self.border_row.connect("notify::enable-expansion", self._on_edited)
         self.border_percent_row.connect("notify::value", self._on_edited)
         self.border_color_button.connect("notify::rgba", self._on_edited)
@@ -116,6 +123,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings.nav_glide_speed = int(
             self.glide_speed_scale.get_value()
         )
+        self._settings.drag_action = _DRAG_ACTIONS[
+            self.drag_action_row.get_selected()
+        ]
         self._settings.export_border_enabled = (
             self.border_row.get_enable_expansion()
         )
