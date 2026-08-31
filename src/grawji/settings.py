@@ -76,6 +76,12 @@ class Settings:
         export_border_color: The border color as an RRGGBB hex string.
         export_border_aspect: Pad the framed canvas to this "W:H"
             aspect ratio with the border color.
+        export_max_edge: Downscale exports so the longer edge is at
+            most this many pixels. 0 keeps the original size. Never
+            upscales.
+        export_artist: EXIF Artist written into exports. Empty writes nothing.
+        export_copyright: EXIF Copyright written into exports. Empty
+            writes nothing.
     """
 
     open_recipe: str = FROM_IMAGE
@@ -101,6 +107,9 @@ class Settings:
     export_border_percent: float = 3.0
     export_border_color: str = "#ffffff"
     export_border_aspect: str = "None"
+    export_max_edge: int = 0
+    export_artist: str = ""
+    export_copyright: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

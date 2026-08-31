@@ -9,6 +9,7 @@ from typing import Any, ClassVar
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import (
@@ -21,17 +22,18 @@ from gi.repository import (
 )
 
 from grawji import crop
+from grawji.imaging.render import (
+    add_border,
+    bake_pixbuf,
+    orient_pixbuf,
+    parse_aspect,
+    texture_for_pixbuf,
+)
 from grawji.views.crop_editor import CropEditor
 from grawji.views.paintables import (
     RotatedPaintable,
     ScaledPaintable,
     SplitPaintable,
-)
-from grawji.views.render import (
-    add_border,
-    bake_pixbuf,
-    orient_pixbuf,
-    parse_aspect,
 )
 from grawji.views.widgets import Histogram
 
@@ -423,7 +425,7 @@ class PreviewView(Gtk.Box):
             or self._edit_orientation != self._crop.orientation
         ):
             pixbuf = orient_pixbuf(self._edit_base, self._crop.orientation)
-            self._edit_texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self._edit_texture = texture_for_pixbuf(pixbuf)
             self._edit_texture_size = (
                 pixbuf.get_width(),
                 pixbuf.get_height(),
@@ -766,9 +768,9 @@ class PreviewView(Gtk.Box):
             return
         base_tex = None
         if comparing:
-            base_tex = Gdk.Texture.new_for_pixbuf(base_pixbuf)
+            base_tex = texture_for_pixbuf(base_pixbuf)
         if self._texture_src is not pixbuf:
-            self._texture = Gdk.Texture.new_for_pixbuf(pixbuf)
+            self._texture = texture_for_pixbuf(pixbuf)
             self._texture_src = pixbuf
 
         def paintable(width: int, height: int) -> Any:

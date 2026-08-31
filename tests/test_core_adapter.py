@@ -1,4 +1,4 @@
-"""Tests for the rawji adapter (RMW helpers + CameraSession)."""
+"""Tests for the rawji adapter."""
 
 import struct
 
@@ -94,6 +94,28 @@ class FakeCamera:
         """Record the wait and return placeholder JPEG bytes."""
         self.calls.append(("wait_for_result", timeout))
         return b"JPEG"
+
+    refuse_thumb = False
+    no_result = False
+
+    def send_command(self, code, params=None):
+        """Serve the standard object ops for the thumbnail path."""
+        self.calls.append(("send_command", code, params))
+        handles = (
+            struct.pack("<I", 0)
+            if self.no_result
+            else struct.pack("<II", 1, 0x42)
+        )
+        thumb = (
+            (0x2005, [], b"") if self.refuse_thumb else (0x2001, [], b"THUMB")
+        )
+        responses = {
+            0x1007: (0x2001, [], handles),
+            0x100A: thumb,
+            0x1009: (0x2001, [], b"FULLJPEG"),
+            0x100B: (0x2001, [], b""),
+        }
+        return responses.get(code, (0x2001, [], b""))
 
     def disconnect(self):
         """Record the disconnect."""
@@ -560,3 +582,45 @@ def test_context_manager_closes():
     with session_for(cam) as session:
         session.open("/tmp/shot.RAF")
     assert "disconnect" in cam.calls
+
+
+def test_render_thumb_downloads_the_thumbnail():
+    """render_thumb triggers a preview and fetches only the thumb."""
+    camera = FakeCamera(profile=bytes(FULL_PROFILE))
+    session = session_for(camera)
+    session.open("/tmp/shot.RAF")
+    thumb = session.render_thumb(Recipe())
+    assert thumb == b"THUMB"
+    assert camera.last_full_resolution is False
+    deletes = [c for c in camera.calls if c[:2] == ("send_command", 0x100B)]
+    assert deletes, "result object was not cleaned up"
+
+
+def test_render_thumb_falls_back_to_the_full_preview():
+    """A body refusing GetThumb still delivers via GetObject."""
+    camera = FakeCamera(profile=bytes(FULL_PROFILE))
+    camera.refuse_thumb = True
+    session = session_for(camera)
+    session.open("/tmp/shot.RAF")
+    assert session.render_thumb(Recipe()) == b"FULLJPEG"
+    deletes = [c for c in camera.calls if c[:2] == ("send_command", 0x100B)]
+    assert deletes
+
+
+def test_render_thumb_without_open_raises():
+    """No open RAF means a SessionStateError, like render."""
+    session = session_for(FakeCamera())
+    with pytest.raises(SessionStateError):
+        session.render_thumb(Recipe())
+
+
+def test_render_thumb_times_out_without_a_result():
+    """No result object ever appearing raises a CameraError."""
+    camera = FakeCamera(profile=bytes(FULL_PROFILE))
+    camera.no_result = True
+    session = CameraSession(
+        camera_factory=lambda: camera, usb_reset=lambda: None, timeout=0
+    )
+    session.open("/tmp/shot.RAF")
+    with pytest.raises(CameraError):
+        session.render_thumb(Recipe())

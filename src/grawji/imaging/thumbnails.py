@@ -166,7 +166,7 @@ class ThumbnailLoader:
         exif_thumb = self._exif_thumbnail_of(path)
         if exif_thumb is not None:
             data, orientation, model = exif_thumb
-            pixbuf = _orient(self._decode_bytes(data), orientation)
+            pixbuf = orient_exif(self._decode_bytes(data), orientation)
         else:
             jpeg = embedded_jpeg(path)
             pixbuf = self._decode_bytes(jpeg, downscale=True)
@@ -245,7 +245,7 @@ def _model_of(jpeg: bytes) -> str:
         return ""
 
 
-def _orient(pixbuf: Any, orientation: int) -> Any:
+def orient_exif(pixbuf: Any, orientation: int) -> Any:
     """Rotate/flip a pixbuf per its EXIF orientation."""
     rotation, flip = _ORIENTATIONS.get(orientation, (_R.NONE, False))
     pixbuf = pixbuf.rotate_simple(rotation) or pixbuf

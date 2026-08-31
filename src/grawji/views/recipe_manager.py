@@ -18,8 +18,10 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 from grawji.camera import compatibility as compat
 from grawji.camera import fs_recipe
 from grawji.camera.fp_xml import parse_fp, serialize_fp
+from grawji.imaging.render import texture_for_pixbuf
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary
+from grawji.views import dialogs
 from grawji.views.recipe_panel import RecipePanel
 
 _UI = (
@@ -77,7 +79,7 @@ def _family_paintable(model: str | None) -> Gdk.Texture | None:
         return None
     if pixbuf is None:
         return None
-    return Gdk.Texture.new_for_pixbuf(pixbuf)
+    return texture_for_pixbuf(pixbuf)
 
 
 @Gtk.Template(string=_UI)
@@ -754,6 +756,12 @@ class RecipeLibraryController:
             on_transfer=self._transfer_banks,
         )
         self._manager.connect("closed", self._on_manager_closed)
+        dialogs.fit_dialog(
+            self._manager,
+            self._parent,
+            width_fraction=0.9,
+            height_fraction=0.9,
+        )
         self._manager.present(self._parent)
 
     def _transfer_banks(

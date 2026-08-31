@@ -11,6 +11,13 @@ PyGObject, GExiv2). PyGObject comes from the system, so create the venv
 with access to it:
 
 ```sh
+make dev                       # venv with dev extras plus pre-commit hooks
+make dev RAWJI="-e ../rawji"   # hack on rawji too (editable checkout)
+```
+
+or by hand:
+
+```sh
 python -m venv --system-site-packages .venv
 source .venv/bin/activate
 pip install -e .[dev]
@@ -18,8 +25,9 @@ pip install -e ../rawji   # rawji is not on PyPI, clone it next to grawji
 pre-commit install
 ```
 
-Run the app with `python -m grawji` (add `--verbose` for debug logging),
-and always work with the venv activated - the hooks rely on it.
+Run the app with `make run` or `python -m grawji` (add `--verbose` for
+debug logging), and always work with the venv activated - the hooks rely
+on it. `make lint`, `make format` and `make test` wrap the usual tools.
 
 ## Quality gates
 
@@ -48,6 +56,14 @@ subjects follow the conventional-commit style in `git log`.
 - Preview latency is the top priority: camera calls run on the worker
   thread, results return via `GLib.idle_add`, rapid changes are
   debounced.
+
+## Flatpak
+
+To build the Flatpak (needs `flatpak-builder` and the GNOME 50
+runtime/SDK), `make flatpak` builds and installs it. `make flatpak-bundle`
+writes a single-file `grawji.flatpak`. The manifest is
+`flatpak/io.github.p5k369.grawji.yaml`, it builds fully offline (the build
+backend is vendored as pinned wheels).
 
 ## Camera protocol changes
 

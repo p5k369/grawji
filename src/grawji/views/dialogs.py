@@ -42,6 +42,25 @@ _SHORTCUT_GROUPS = {
 }
 
 
+def fit_dialog(
+    dialog: Adw.Dialog,
+    parent: Gtk.Widget,
+    *,
+    width_fraction: float = 0.0,
+    height_fraction: float = 0.0,
+) -> None:
+    """Scale a dialog to fractions of its parent window, per axis."""
+    root = parent.get_root()
+    if not isinstance(root, Gtk.Window):
+        return
+    width = round(root.get_width() * width_fraction)
+    height = round(root.get_height() * height_fraction)
+    if width > dialog.get_content_width():
+        dialog.set_content_width(width)
+    if height > dialog.get_content_height():
+        dialog.set_content_height(height)
+
+
 def app_version() -> str:
     """Return grawji's installed version, or a fallback if not packaged."""
     try:
