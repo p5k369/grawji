@@ -14,6 +14,7 @@ from gi.repository import Adw, Gtk
 _SHORTCUT_GROUPS = {
     "Files": [
         ("Export JPEG", "<Ctrl>E"),
+        ("Move to trash", "Delete"),
     ],
     "Recipe": [
         ("Save recipe", "<Ctrl>S"),

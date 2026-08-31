@@ -19,7 +19,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import camera_info, raf, sidecar
+from grawji import camera_info, fileops, raf, sidecar
 from grawji.capabilities import (
     Capabilities,
     capabilities_for,
@@ -134,6 +134,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
         self._raf_path: Path | None = None
+        self._undo_moves: list[tuple[str, str]] = []
         self._stored_ev: float | None = None
         self._image_ev: float | None = None
         self._current_folder: str | None = None
@@ -176,6 +177,7 @@ class MainWindow(Adw.ApplicationWindow):
             bookmarks=self._settings.bookmarks,
             on_bookmarks_changed=self._on_bookmarks_changed,
             on_expansion_changed=self._on_expanded_changed,
+            on_drop_paths=self._on_tree_drop,
         )
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
@@ -268,15 +270,15 @@ class MainWindow(Adw.ApplicationWindow):
         if app is not None:
             app.set_accels_for_action("win.toggle-histogram", ["h"])
 
-        # Enabled only once at least one image is selected in select mode.
-        self._export_selection_action = Gio.SimpleAction.new(
-            "export-selection", None
-        )
-        self._export_selection_action.connect(
+        # Enabled only once at least one image is selected.
+        self._selection_actions: list[Gio.SimpleAction] = []
+        export_selection = Gio.SimpleAction.new("export-selection", None)
+        export_selection.connect(
             "activate", partial(self._activate, self._export_selection)
         )
-        self._export_selection_action.set_enabled(False)
-        self.add_action(self._export_selection_action)
+        export_selection.set_enabled(False)
+        self.add_action(export_selection)
+        self._selection_actions.append(export_selection)
 
         # Compare is available only once a recipe is marked as baseline.
         self._compare_action = Gio.SimpleAction.new_stateful(
@@ -371,6 +373,8 @@ class MainWindow(Adw.ApplicationWindow):
             on_select=self._on_raf_selected,
             on_loading=self._on_thumbs_loading,
             on_selection_changed=self._on_selection_changed,
+            on_file_action=self._on_file_action,
+            drag_action=lambda: self._settings.drag_action,
         )
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
         self._filmstrip.set_hexpand(True)
@@ -782,11 +786,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_export_button()
 
     def _on_selection_changed(self, count: int) -> None:
-        """Reflect the batch selection in the bar label and export action."""
+        """Reflect the batch selection in the bar label and its actions."""
         self.select_label.set_label(
-            "Select images to export" if count == 0 else f"{count} selected"
+            "Select images" if count == 0 else f"{count} selected"
         )
-        self._export_selection_action.set_enabled(count > 0)
+        for action in self._selection_actions:
+            action.set_enabled(count > 0)
 
     def _select_all(self) -> None:
         """Select every image (batch-select mode only)."""
@@ -804,6 +809,178 @@ class MainWindow(Adw.ApplicationWindow):
         complaint = self._batch.begin(self._filmstrip.selected_paths)
         if complaint is not None:
             self.preview_view.set_status(complaint)
+
+    def _on_file_action(self, action: str, paths: list[str]) -> None:
+        """Run a filmstrip context-menu file operation."""
+        if action == "export":
+            complaint = self._batch.begin(paths)
+            if complaint is not None:
+                self.preview_view.set_status(complaint)
+        elif action == "copy":
+            self._copy_paths(paths)
+        elif action == "move":
+            self._move_paths(paths)
+        elif action == "trash":
+            self._trash_paths(paths, confirm=len(paths) > 1)
+
+    def _on_tree_drop(
+        self, paths: list[str], folder: str, copy: bool | None
+    ) -> None:
+        """Move or copy images dropped onto a folder-tree row."""
+        if copy is None:
+            copy = self._settings.drag_action == "copy"
+        self._run_fileop("copy" if copy else "move", paths, folder)
+
+    def _copy_paths(self, paths: list[str]) -> None:
+        """Pick a destination folder and copy paths there."""
+        self._pick_fileop_folder("Copy to folder", "copy", paths)
+
+    def _move_paths(self, paths: list[str]) -> None:
+        """Pick a destination folder and move paths there."""
+        self._pick_fileop_folder("Move to folder", "move", paths)
+
+    def _pick_fileop_folder(
+        self, title: str, kind: str, paths: list[str]
+    ) -> None:
+        """Folder dialog for a copy/move, remembering the destination."""
+        if not paths:
+            return
+        dialog = Gtk.FileDialog()
+        dialog.set_title(title)
+        start = initial_folder(self._settings.last_fileop_dir)
+        if start is not None:
+            dialog.set_initial_folder(start)
+
+        def on_response(dlg: Any, result: Any) -> None:
+            try:
+                gfile = dlg.select_folder_finish(result)
+            except GLib.Error:
+                return
+            folder = gfile.get_path()
+            if folder is None:
+                return
+            self._settings.last_fileop_dir = folder
+            self._save_settings()
+            self._run_fileop(kind, paths, folder)
+
+        dialog.select_folder(self, None, on_response)
+
+    def _trash_paths(self, paths: list[str], *, confirm: bool) -> None:
+        """Trash paths, optionally asking first (multi-image only)."""
+        if not paths:
+            return
+        if not confirm:
+            self._run_fileop("trash", paths, None)
+            return
+        dialog = Adw.AlertDialog(
+            heading=f"Move {len(paths)} images to Trash?",
+            body="They can be restored from the file manager's Trash.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("trash", "Move to Trash")
+        dialog.set_response_appearance(
+            "trash", Adw.ResponseAppearance.DESTRUCTIVE
+        )
+        dialog.connect(
+            "response",
+            lambda _d, response: (
+                self._run_fileop("trash", paths, None)
+                if response == "trash"
+                else None
+            ),
+        )
+        dialog.present(self)
+
+    def _trash_current(self) -> None:
+        """Trash the open image and advance to its neighbor."""
+        if self._raf_path is None:
+            return
+        path = str(self._raf_path)
+        strip_paths = self._filmstrip.paths
+        following = None
+        if path in strip_paths:
+            index = strip_paths.index(path)
+            remaining = strip_paths[index + 1 :] + strip_paths[:index][::-1]
+            following = remaining[0] if remaining else None
+        self._run_fileop("trash", [path], None)
+        if following is not None:
+            self._filmstrip.select_path(following)
+
+    def _run_fileop(
+        self, kind: str, paths: list[str], dest: str | None
+    ) -> None:
+        """Run a file operation off the main thread and toast the result."""
+
+        def work() -> None:
+            moves: list[tuple[str, str]] = []
+            failed = 0
+            for path in paths:
+                try:
+                    if kind == "copy":
+                        fileops.copy_raf(path, dest or "")
+                    elif kind == "move":
+                        target = fileops.move_raf(path, dest or "")
+                        moves.append((path, str(target)))
+                    else:
+                        fileops.trash_raf(path)
+                except (OSError, GLib.Error) as exc:
+                    logging.getLogger("grawji").warning(
+                        "%s failed for %s: %s", kind, path, exc
+                    )
+                    failed += 1
+            done = len(paths) - failed
+            GLib.idle_add(self._on_fileop_done, kind, done, failed, moves)
+
+        threading.Thread(
+            target=work, name="grawji-fileops", daemon=True
+        ).start()
+
+    def _on_fileop_done(
+        self,
+        kind: str,
+        done: int,
+        failed: int,
+        moves: list[tuple[str, str]],
+    ) -> bool:
+        """Toast the outcome; moves get an Undo button."""
+        noun = "image" if done == 1 else "images"
+        text = {
+            "copy": f"Copied {done} {noun}.",
+            "move": f"Moved {done} {noun}.",
+            "trash": f"Moved {done} {noun} to Trash.",
+        }[kind]
+        if failed:
+            text += f" {failed} failed."
+        toast = Adw.Toast.new(text)
+        if kind == "move" and moves:
+            self._undo_moves = moves
+            toast.set_button_label("Undo")
+            toast.connect("button-clicked", self._on_undo_moves)
+        self.toast_overlay.add_toast(toast)
+        return GLib.SOURCE_REMOVE
+
+    def _on_undo_moves(self, _toast: Any) -> None:
+        """Move the last batch of moved images back where they were."""
+        moves, self._undo_moves = self._undo_moves, []
+
+        def work() -> None:
+            for source, target in moves:
+                try:
+                    fileops.move_raf(target, str(Path(source).parent))
+                except (OSError, GLib.Error) as exc:
+                    logging.getLogger("grawji").warning(
+                        "undo move failed for %s: %s", target, exc
+                    )
+            GLib.idle_add(self._on_undo_done)
+
+        threading.Thread(
+            target=work, name="grawji-fileops", daemon=True
+        ).start()
+
+    def _on_undo_done(self) -> bool:
+        """Report the undone move."""
+        self.toast_overlay.add_toast(Adw.Toast.new("Move undone."))
+        return GLib.SOURCE_REMOVE
 
     def _cycle_background(self) -> None:
         """Cycle the preview background and remember the choice."""
@@ -823,14 +1000,34 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_crop_key(
         self, _controller: Any, keyval: int, _code: int, _state: Any
     ) -> bool:
-        """Finish the crop edit from the keyboard."""
-        if not self.preview_view.crop_editing:
+        """Crop-edit keys, plus Delete for trashing while browsing."""
+        if self.preview_view.crop_editing:
+            if keyval == Gdk.KEY_Escape:
+                self.preview_view.cancel_crop()
+                return True
+            if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+                self.preview_view.apply_crop()
+                return True
             return False
-        if keyval == Gdk.KEY_Escape:
-            self.preview_view.cancel_crop()
+        if keyval == Gdk.KEY_Delete and not self._focus_is_editable():
+            return self._on_delete_key()
+        return False
+
+    def _focus_is_editable(self) -> bool:
+        """Whether a text widget owns the focus."""
+        focus = self.get_focus()
+        return isinstance(focus, (Gtk.Editable, Gtk.Text))
+
+    def _on_delete_key(self) -> bool:
+        """Trash the selected images, or the current one if none are."""
+        paths = self._filmstrip.selected_paths
+        if paths:
+            self._trash_paths(paths, confirm=len(paths) > 1)
             return True
-        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            self.preview_view.apply_crop()
+        if self._filmstrip.in_select_mode:
+            return False
+        if self._raf_path is not None:
+            self._trash_current()
             return True
         return False
 
