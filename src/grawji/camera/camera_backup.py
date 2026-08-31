@@ -148,7 +148,7 @@ def setup(cam: Camera) -> DeviceInfo:
 
 
 def read_backup(cam: Camera) -> bytes:
-    """Download the settings backup blob (read-only)."""
+    """Download the settings backup blob."""
     code, _p, _info = cam.send_command(_GET_OBJECT_INFO, [_BACKUP_HANDLE])
     _check(code, "GetObjectInfo")
     code, _p, blob = cam.send_command(_GET_OBJECT, [_BACKUP_HANDLE])
@@ -164,6 +164,66 @@ def restore_backup(cam: Camera, blob: bytes) -> None:
     _check(code, "SendObjectInfo")
     code, _p = cam.send_data_command(_SEND_OBJECT, [], blob)
     _check(code, "SendObject")
+
+
+def download_settings(
+    connect: Callable[[], Camera],
+    disconnect: Callable[[Camera], None],
+    *,
+    run_setup: bool = True,
+) -> bytes:
+    """Download the connected body's full settings blob.
+
+    The blob contains the camera serial in cleartext, so files written
+    from it should be treated as private.
+    """
+    cam = connect()
+    try:
+        if run_setup:
+            setup(cam)
+        return read_backup(cam)
+    finally:
+        disconnect(cam)
+
+
+def restore_settings(
+    connect: Callable[[], Camera],
+    disconnect: Callable[[Camera], None],
+    blob: bytes,
+    *,
+    run_setup: bool = True,
+) -> str:
+    """Restore a full settings blob.
+
+    Refuses anything that is not a Fujifilm backup for exactly the
+    connected body (model and blob size must match the body's own
+    blob). The camera additionally validates the blob's checksum and
+    rejects a corrupted file with 0x200f. Returns the model restored.
+    """
+    want = model_from_blob(blob)
+    if want is None:
+        raise BackupTransferError(
+            "not a Fujifilm settings backup (bad header)"
+        )
+    cam = connect()
+    try:
+        if run_setup:
+            setup(cam)
+        current = read_backup(cam)
+        have = model_from_blob(current)
+        if want != have:
+            raise BackupTransferError(
+                f"backup is for a {want}, the connected body is a {have}"
+            )
+        if len(blob) != len(current):
+            raise BackupTransferError(
+                f"backup size {len(blob)} does not match the body's"
+                f" {len(current)} bytes"
+            )
+        restore_backup(cam, blob)
+    finally:
+        disconnect(cam)
+    return want
 
 
 class _HasVolatile(Protocol):

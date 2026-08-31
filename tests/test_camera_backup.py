@@ -8,7 +8,9 @@ from grawji.camera.backup_recipe import LAYOUTS
 from grawji.camera.camera_backup import (
     BackupTransferError,
     classify_readback,
+    download_settings,
     model_from_blob,
+    restore_settings,
     transfer_fs_recipes,
     transfer_recipes,
 )
@@ -242,3 +244,61 @@ def test_classify_readback_separates_ignored_from_maintained():
     assert layout.sim0 in applied
     assert 176 in maintained
     assert layout.sim0 + 20 in ignored
+
+
+def test_download_settings_returns_blob():
+    """The whole-blob download is a plain read of the settings object."""
+    blob = _make_blob("X-T3", 33404)
+    cam = FakeCamera(blob)
+    got = download_settings(lambda: cam, lambda _c: None, run_setup=False)
+    assert got == blob
+
+
+def test_restore_settings_happy_path():
+    """A matching backup restores and reports the model."""
+    body = _make_blob("X-T3", 33404)
+    cam = FakeCamera(body)
+    backup = bytearray(body)
+    backup[838] = 13  # some setting differs
+    model = restore_settings(
+        lambda: cam, lambda _c: None, bytes(backup), run_setup=False
+    )
+    assert model == "X-T3"
+    assert cam.restores == 1
+    assert cam.blob[838] == 13
+
+
+def test_restore_settings_refuses_foreign_model():
+    """A blob from another body is refused before any write."""
+    cam = FakeCamera(_make_blob("X-T3", 33404))
+    with pytest.raises(BackupTransferError, match="X100F"):
+        restore_settings(
+            lambda: cam,
+            lambda _c: None,
+            _make_blob("X100F", 5660),
+            run_setup=False,
+        )
+    assert cam.restores == 0
+
+
+def test_restore_settings_refuses_non_backup():
+    """Garbage bytes are refused without touching the camera."""
+    cam = FakeCamera(_make_blob("X-T3", 33404))
+    with pytest.raises(BackupTransferError, match="header"):
+        restore_settings(
+            lambda: cam, lambda _c: None, b"not a backup", run_setup=False
+        )
+    assert cam.restores == 0
+
+
+def test_restore_settings_refuses_size_mismatch():
+    """A truncated blob for the right model is refused."""
+    cam = FakeCamera(_make_blob("X-T3", 33404))
+    with pytest.raises(BackupTransferError, match="size"):
+        restore_settings(
+            lambda: cam,
+            lambda _c: None,
+            _make_blob("X-T3", 5660),
+            run_setup=False,
+        )
+    assert cam.restores == 0

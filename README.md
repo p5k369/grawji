@@ -11,8 +11,7 @@ GTK4 frontend for [rawji](https://github.com/pinpox/rawji). Develop Fujifilm
 RAFs natively on Linux through the **real camera engine** (authentic film
 simulations, identical to X RAW STUDIO).
 
-The name is **g**(tk) + **rawji** (/dʒiː ˈrɔː dʒiː/). rawji is command-line only, grawji makes
-*interactive* work on the look practical: set a recipe, see a live preview,
+The name is **g**(tk) + **rawji** (/dʒiː ˈrɔː dʒiː/).
 export.
 
 <p align="center">

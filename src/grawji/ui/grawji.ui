@@ -15,6 +15,16 @@
     </section>
     <section>
       <item>
+        <attribute name="label">Back Up Camera Settings…</attribute>
+        <attribute name="action">win.backup-camera</attribute>
+      </item>
+      <item>
+        <attribute name="label">Restore Camera Settings…</attribute>
+        <attribute name="action">win.restore-camera</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
         <attribute name="label">Show Histogram</attribute>
         <attribute name="action">win.toggle-histogram</attribute>
       </item>

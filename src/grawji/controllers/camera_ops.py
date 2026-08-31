@@ -22,6 +22,41 @@ class CameraOpsController:
         """Bind the controller to the camera session."""
         self._session = session
 
+    def download_settings(
+        self,
+        on_done: Callable[[bytes], Any],
+        on_error: Callable[[Exception], Any],
+    ) -> None:
+        """Download the settings blob on a worker thread."""
+
+        def work() -> None:
+            try:
+                blob = self._session.download_settings_backup()
+            except Exception as exc:
+                GLib.idle_add(on_error, exc)
+                return
+            GLib.idle_add(on_done, blob)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def restore_settings(
+        self,
+        blob: bytes,
+        on_done: Callable[[str], Any],
+        on_error: Callable[[Exception], Any],
+    ) -> None:
+        """Restore a settings blob on a worker thread."""
+
+        def work() -> None:
+            try:
+                model = self._session.restore_settings_backup(blob)
+            except Exception as exc:
+                GLib.idle_add(on_error, exc)
+                return
+            GLib.idle_add(on_done, model)
+
+        threading.Thread(target=work, daemon=True).start()
+
     def load_bank_names(self, on_loaded: Callable[[list[str]], None]) -> None:
         """Read current bank names on a worker thread."""
 
