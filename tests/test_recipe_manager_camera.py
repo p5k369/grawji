@@ -96,6 +96,56 @@ def test_transfer_finished_clears_assignments(tmp_path: Any) -> None:
     assert dialog._bank_recipe == {}
 
 
+def test_drop_into_unnamed_bank_defaults_the_name(tmp_path: Any) -> None:
+    """A drop into a bank with no stored name carries the recipe name.
+
+    Writing the name is what materializes an empty slot on the body
+    (X-E5: a value-only write leaves the bank "empty" in the menu).
+    """
+    captured: dict[str, Any] = {}
+    dialog = _dialog(
+        tmp_path,
+        model="X-E5",
+        on_transfer=lambda a, n, fs: captured.update(names=n),
+    )
+    dialog.set_bank_names(["BW", "", "", "", "", "", ""])
+    dialog._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
+    dialog._on_bank_drop(None, "Acros look", 0.0, 0.0, 4)
+    pump()
+    dialog._on_transfer_clicked(None)
+    assert captured["names"] == {4: "Acros look"}
+
+
+def test_no_default_names_when_none_were_loaded(tmp_path: Any) -> None:
+    """Without loaded bank names (gen3 has none) no defaults are sent."""
+    captured: dict[str, Any] = {}
+    dialog = _dialog(
+        tmp_path,
+        model="X100F",
+        on_transfer=lambda a, n, fs: captured.update(names=n),
+    )
+    dialog._on_bank_drop(None, "Velvia look", 0.0, 0.0, 4)
+    pump()
+    dialog._on_transfer_clicked(None)
+    assert captured["names"] == {}
+
+
+def test_explicit_rename_beats_the_default_name(tmp_path: Any) -> None:
+    """A typed name wins over the recipe-name default."""
+    captured: dict[str, Any] = {}
+    dialog = _dialog(
+        tmp_path,
+        model="X-E5",
+        on_transfer=lambda a, n, fs: captured.update(names=n),
+    )
+    dialog.set_bank_names([""] * 7)
+    dialog._on_bank_drop(None, "Velvia look", 0.0, 0.0, 2)
+    dialog._banks[2]["name_label"].set_label("SUMMER")
+    pump()
+    dialog._on_transfer_clicked(None)
+    assert captured["names"] == {2: "SUMMER"}
+
+
 def test_bank_rename_is_collected(tmp_path: Any) -> None:
     """Only names the user changed are handed to the transfer."""
     captured: dict[str, Any] = {}
