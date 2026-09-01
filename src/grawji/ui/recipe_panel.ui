@@ -63,5 +63,12 @@
       <object class="AdwPreferencesGroup" id="recipe_group">
       </object>
     </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="exposure_group">
+        <property name="title">Exposure</property>
+        <property name="description">Per image, not part of the recipe</property>
+        <property name="margin-top">10</property>
+      </object>
+    </child>
   </template>
 </interface>

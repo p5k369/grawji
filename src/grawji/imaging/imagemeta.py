@@ -124,7 +124,7 @@ def copy_exif(
     try:
         metadata = GExiv2.Metadata()
         metadata.open_buf(source_jpeg)
-        metadata.set_orientation(GExiv2.Orientation.NORMAL)
+        metadata.try_set_orientation(GExiv2.Orientation.NORMAL)
         _stamp(metadata, artist=artist, rights=rights, comment=comment)
         metadata.save_file(dest_path)
     except GLib.Error:

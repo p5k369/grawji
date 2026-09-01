@@ -291,7 +291,7 @@ def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, ThumbMeta] | None:
     if not thumb:
         return None
     try:
-        orientation = int(meta.get_orientation())
+        orientation = int(meta.try_get_orientation())
     except (GLib.Error, ValueError):
         orientation = 1
     return bytes(thumb), orientation, _tags_of(meta)

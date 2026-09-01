@@ -570,8 +570,13 @@ class RecipeLibraryController:
             self._manager.show_toast(message)
 
     def save_current(self) -> None:
-        """Ask for a name and save the panel's controls as a recipe."""
-        self._prompt_save(self._panel.get_recipe())
+        """Ask for a name and save the panel's controls as a recipe.
+
+        A modified saved recipe prefills its own name.
+        """
+        label = self._panel.active_label
+        default = label if self._library.get(label) is not None else ""
+        self._prompt_save(self._panel.get_recipe(), default)
 
     def apply(self, name: str) -> None:
         """Apply a saved recipe to the controls and re-render."""
@@ -742,7 +747,8 @@ class RecipeLibraryController:
             model = self._get_model()
             if model:
                 recipe = replace(recipe, origin_body=model)
-        self._library.add(name, recipe)
+        # Overwriting keeps the recipe in its folder.
+        self._library.add(name, recipe, folder=self._library.folder_of(name))
         self._refresh()
         self._panel.set_active(recipe, name)
         if activate:
