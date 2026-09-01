@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 pytestmark = pytest.mark.gui
-
-SAMPLE = Path(__file__).parent.parent / "samples" / "20230815_0055.RAF"
 
 PRIME = "XF35mmF1.4 R"
 TELE = "XF70-300mmF4-5.6 R LM OIS WR"
@@ -23,7 +20,7 @@ def strip(gtk: Any, tmp_path: Path) -> Any:
     from grawji.views.filmstrip import FilmStrip
 
     for name in ("a.RAF", "b.RAF", "c.RAF"):
-        shutil.copy(SAMPLE, tmp_path / name)
+        (tmp_path / name).write_bytes(b"not a real raf")
     opened: list[str] = []
     built = FilmStrip(on_select=opened.append)
     built.opened = opened
