@@ -72,6 +72,8 @@ _LOAD_DELAY_MS = 50
 _DEFAULT_SIDEBAR_WIDTH = 240
 # Pane positions at or below this count as collapsed.
 _SIDEBAR_COLLAPSED_MAX = 10
+# EVs are thirds of a stop, anything closer than this is the same EV.
+_EV_EPSILON = 1e-6
 
 # App-wide CSS: preview canvas backgrounds, thumbnails, the folder tree.
 _CANVAS_CSS = """
@@ -100,6 +102,10 @@ button.thumb.thumb-marked {
 /* Filmstrip nav buttons: round only the edge facing the window border. */
 .filmstrip-nav-start { border-radius: 0 0 0 8px; }
 .filmstrip-nav-end { border-radius: 0 0 8px 0; }
+/* Subtle tint on recipe rows that differ from the applied recipe. */
+row.recipe-modified {
+    background-color: alpha(@accent_bg_color, 0.08);
+}
 /* Zero tick under the straighten slider. */
 .angle-zero-mark {
     background-color: alpha(currentColor, 0.55);
@@ -148,12 +154,13 @@ class MainWindow(Adw.ApplicationWindow):
         self._raf_path: Path | None = None
         self._stored_ev: float | None = None
         self._image_ev: float | None = None
+        self._shot_ev: float | None = None
         self._current_folder: str | None = None
         self._notified_models: set[str] = set()
         self._exif_rows: list[Any] = []
-        self._render_pending_id = 0
-        self._load_pending_id = 0
+        self._render_pending_id = self._load_pending_id = 0
         self._error_showing = False
+        self._close_confirmed = self._camera_seen = False
         # Bumped on every image selection. Async open/preview callbacks carry
         # the value they were issued under and ignore themselves if a newer
         # selection has superseded them (fast filmstrip scrubbing).
@@ -474,6 +481,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.set_crop(sidecar.load_crop(raf_path))
         self._stored_ev = sidecar.load_exposure(raf_path)
         self._image_ev = None
+        self._shot_ev = None
         # The camera open runs on its own worker. The embedded-preview read
         # and decode run on a short-lived thread. Neither blocks the UI, so
         # the filmstrip animation stays smooth and the image appears as soon
@@ -532,6 +540,11 @@ class MainWindow(Adw.ApplicationWindow):
         """Show the first preview, applying the sticky recipe selection."""
         if generation != self._generation:
             return  # a newer selection has superseded this open
+        carry = (
+            self.recipe_panel.get_recipe()
+            if self.recipe_panel.is_modified
+            else None
+        )
         profile = self._session.profile
         if profile is not None:
             # The RAF is provably from the connected body (a foreign one
@@ -546,6 +559,24 @@ class MainWindow(Adw.ApplicationWindow):
             )
             self._notify_unverified(model)
         render_working = True
+        shot_recipe = (
+            recipe_from_profile(profile) if profile is not None else Recipe()
+        )
+        # EV is per image: the stored override wins, else the shot EV.
+        self._shot_ev = shot_recipe.exposure
+        ev = (
+            self._stored_ev
+            if self._stored_ev is not None
+            else shot_recipe.exposure
+        )
+        if carry is not None:
+            self.recipe_panel.set_recipe(carry)
+            self.recipe_panel.set_exposure(ev)
+            self._image_ev = ev
+            self._render_preview()
+            if self.preview_view.comparing:
+                self._render_baseline(self._generation)
+            return
         selection = self._settings.open_recipe
         saved = (
             None
@@ -553,15 +584,6 @@ class MainWindow(Adw.ApplicationWindow):
             else self._recipe_library.get(selection)
         )
         from_image = selection == FROM_IMAGE or saved is None
-        shot_recipe = (
-            recipe_from_profile(profile) if profile is not None else Recipe()
-        )
-        # EV is per image: the stored override wins, else the shot EV.
-        ev = (
-            self._stored_ev
-            if self._stored_ev is not None
-            else shot_recipe.exposure
-        )
         if profile is not None and from_image:
             self.recipe_panel.set_active(shot_recipe, FROM_IMAGE_LABEL)
             # The loaded recipe is the image's own, so the embedded JPEG
@@ -700,7 +722,10 @@ class MainWindow(Adw.ApplicationWindow):
         if self._image_ev is not None and ev == self._image_ev:
             return
         self._image_ev = ev
-        sidecar.save_exposure(self._raf_path, ev)
+        back_to_shot = (
+            self._shot_ev is not None and abs(ev - self._shot_ev) < _EV_EPSILON
+        )
+        sidecar.save_exposure(self._raf_path, None if back_to_shot else ev)
         self._filmstrip.refresh_badges(str(self._raf_path))
 
     def _on_try_recipes(self) -> None:
@@ -767,6 +792,10 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
+        """Apply the picker's choice, guarding unsaved recipe edits."""
+        self._confirm_recipe_discard(partial(self._apply_choice, name))
+
+    def _apply_choice(self, name: str) -> None:
         """Apply and remember the recipe chosen in the panel's picker."""
         self._settings.open_recipe = name
         self._save_settings()
@@ -774,6 +803,35 @@ class MainWindow(Adw.ApplicationWindow):
             self._apply_from_image()
         else:
             self._library.apply(name)
+
+    def _confirm_recipe_discard(self, proceed: Callable[[], None]) -> None:
+        """Run proceed, first asking about unsaved recipe edits."""
+        if not self.recipe_panel.is_modified:
+            proceed()
+            return
+        dialog = Adw.AlertDialog(
+            heading="Unsaved recipe changes",
+            body=(
+                f"The controls changed since "
+                f"“{self.recipe_panel.active_label}” was applied."
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("discard", "Discard")
+        dialog.add_response("save", "Save…")
+        dialog.set_response_appearance(
+            "discard", Adw.ResponseAppearance.DESTRUCTIVE
+        )
+        dialog.set_default_response("save")
+
+        def on_response(_dialog: Any, response: str) -> None:
+            if response == "discard":
+                proceed()
+            elif response == "save":
+                self._library.save_current()
+
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
     def _apply_from_image(self) -> None:
         """Load the open image's own in-camera recipe into the controls."""
@@ -1144,9 +1202,17 @@ class MainWindow(Adw.ApplicationWindow):
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""
         model = camera_info.detect_camera()
+        appeared = bool(model) and not self._camera_seen
+        self._camera_seen = bool(model)
         self.window_title.set_subtitle(
             f"{model} connected" if model else "No camera"
         )
+        if (
+            appeared
+            and self._raf_path is not None
+            and not self._session.is_open
+        ):
+            self._on_raf_selected(str(self._raf_path))
         return GLib.SOURCE_CONTINUE
 
     def _on_preferences(self) -> None:
@@ -1203,9 +1269,17 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, _window: Any) -> bool:
         """Persist window size, stop the worker, then allow closing."""
+        if self.recipe_panel.is_modified and not self._close_confirmed:
+            self._confirm_recipe_discard(self._close_discarded)
+            return True
         self._settings.window_width = self.get_width()
         self._settings.window_height = self.get_height()
         self._settings.sidebar_width = self.main_paned.get_position()
         self._save_settings()
         self._worker.stop()
         return False
+
+    def _close_discarded(self) -> None:
+        """Close for real after the user discarded the recipe edits."""
+        self._close_confirmed = True
+        self.close()

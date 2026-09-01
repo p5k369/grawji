@@ -77,6 +77,82 @@ def test_recipe_panel_provenance_line() -> None:
     assert panel.provenance == "grawji recipe: Summer (modified)"
 
 
+def test_ev_never_counts_as_modified() -> None:
+    """The per-image EV is not part of the recipe."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(film_simulation="Velvia"), "Summer")
+    panel.set_active(panel.get_recipe(), "Summer")
+    panel.set_exposure(1.0)
+    assert not panel.is_modified
+    assert panel.provenance == "grawji recipe: Summer"
+
+
+def test_modified_rows_get_the_tint() -> None:
+    """Only rows that diverge from the applied recipe are tinted."""
+    from dataclasses import replace
+
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(film_simulation="Velvia"), "Summer")
+    assert not panel.film_row.has_css_class("recipe-modified")
+    panel.set_recipe(
+        replace(panel.get_recipe(), film_simulation="Acros", clarity=2)
+    )
+    assert panel.film_row.has_css_class("recipe-modified")
+    assert panel._clarity_row.has_css_class("recipe-modified")
+    assert not panel.dr_row.has_css_class("recipe-modified")
+    panel.set_active(panel.get_recipe(), "Autumn")
+    assert not panel.film_row.has_css_class("recipe-modified")
+    assert not panel._clarity_row.has_css_class("recipe-modified")
+
+
+def test_panel_starts_unmodified() -> None:
+    """A fresh panel must not count its own defaults as edits."""
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    assert not panel.is_modified
+
+
+def test_set_active_is_never_born_modified() -> None:
+    """Row normalization must not count as a user edit."""
+    from grawji.camera.capabilities import capabilities_for_model
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.apply_capabilities(capabilities_for_model("X-Pro2"))
+    panel.set_active(Recipe(film_simulation="RealaAce"), "Reala look")
+    assert not panel.is_modified
+
+
+def test_modified_recipe_survives_image_open(
+    window: Any, monkeypatch: Any
+) -> None:
+    """Unsaved recipe edits carry across image switches."""
+    from dataclasses import replace
+
+    renders: list[int] = []
+    monkeypatch.setattr(window, "_render_preview", lambda: renders.append(1))
+    panel = window.recipe_panel
+    panel.set_active(panel.get_recipe(), "Summer")
+    panel.set_recipe(replace(panel.get_recipe(), film_simulation="Acros"))
+    assert panel.is_modified
+    window._on_opened(window._generation, None)
+    assert panel.active_label == "Summer"
+    assert panel.is_modified
+    assert renders == [1]
+
+
 def _manager(tmp_path: Any) -> Any:
     """A RecipeManagerDialog over a library holding ampersand names."""
     from grawji.views.recipe_manager import RecipeManagerDialog

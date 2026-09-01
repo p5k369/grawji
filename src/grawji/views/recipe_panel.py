@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from importlib import resources
 from typing import Any, ClassVar
 
@@ -86,6 +87,7 @@ class RecipePanel(Adw.PreferencesPage):
     recipe_row = Gtk.Template.Child()
     recipe_button = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
+    exposure_group = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Build the rows (in Fuji IQ-menu order) and wire their signals."""
@@ -108,6 +110,7 @@ class RecipePanel(Adw.PreferencesPage):
 
         self._build_rows()
         self._connect_signals()
+        self._applied_recipe = self.get_recipe()
         self._update_status()
 
     def _build_rows(self) -> None:
@@ -166,6 +169,7 @@ class RecipePanel(Adw.PreferencesPage):
         wb_box.append(self._wb_grid)
         wb_box.append(self._wb_shift_label)
         grid_row = Adw.ActionRow(title="WB shift")
+        self._wb_shift_row = grid_row
         grid_row.add_suffix(wb_box)
         self._update_wb_shift_label()
 
@@ -219,7 +223,6 @@ class RecipePanel(Adw.PreferencesPage):
             self._temp_row,
             grid_row,
             self.dr_row,
-            self._exposure_row,
             self._highlights_row,
             self._shadows_row,
             self._color_row,
@@ -229,6 +232,31 @@ class RecipePanel(Adw.PreferencesPage):
             self.color_space_row,
         ):
             self.recipe_group.add(row)
+        # EV is per image, not part of the recipe: it lives in its own
+        # group, is not saved into recipes and never counts as modified.
+        self.exposure_group.add(self._exposure_row)
+        self._field_rows: dict[str, Gtk.Widget] = {
+            "film_simulation": self.film_row,
+            "grain": self.grain_row,
+            "grain_size": self.grain_size_row,
+            "color_chrome": self.chrome_row,
+            "color_chrome_blue": self.chrome_blue_row,
+            "smooth_skin": self.smooth_skin_row,
+            "white_balance": self.wb_row,
+            "color_temp": self._temp_row,
+            # Covers wb_shift_b too (one row, checked as a pair).
+            "wb_shift_r": self._wb_shift_row,
+            "dynamic_range": self.dr_row,
+            "highlights": self._highlights_row,
+            "shadows": self._shadows_row,
+            "color": self._color_row,
+            "sharpness": self._sharpness_row,
+            "noise_reduction": self._nr_row,
+            "clarity": self._clarity_row,
+            "mono_warm_cool": self._mono_wc_row,
+            "mono_magenta_green": self._mono_grid_row,
+            "color_space": self.color_space_row,
+        }
         self._update_temp_visibility()
         self._update_grain_size_visibility()
         self._update_mono_visibility()
@@ -335,6 +363,7 @@ class RecipePanel(Adw.PreferencesPage):
             )
         finally:
             self._suppress_signals = False
+        self._update_status()
         self._update_temp_visibility()
         self._update_grain_size_visibility()
         self._update_mono_visibility()
@@ -348,10 +377,10 @@ class RecipePanel(Adw.PreferencesPage):
             self._suppress_signals = False
 
     def set_active(self, recipe: Recipe, label: str) -> None:
-        """Load a recipe and mark it active (for the recipe indicator)."""
-        self._applied_recipe = recipe
+        """Load a recipe and mark it active."""
         self._active_label = label
         self.set_recipe(recipe)
+        self._applied_recipe = self.get_recipe()
         self._update_status()
         self.sync_combo(label)
 
@@ -361,16 +390,21 @@ class RecipePanel(Adw.PreferencesPage):
         return self._active_label
 
     @property
+    def is_modified(self) -> bool:
+        """Whether the controls diverge from the applied recipe."""
+        current = replace(self.get_recipe(), exposure=0.0)
+        return current != replace(self._applied_recipe, exposure=0.0)
+
+    @property
     def provenance(self) -> str:
         """A short provenance line for exports.
 
         An unmodified "From image" state is the camera's own recipe,
         so there is nothing of grawji's to record.
         """
-        modified = self.get_recipe() != self._applied_recipe
-        if self._active_label == FROM_IMAGE_LABEL and not modified:
+        if self._active_label == FROM_IMAGE_LABEL and not self.is_modified:
             return ""
-        suffix = " (modified)" if modified else ""
+        suffix = " (modified)" if self.is_modified else ""
         return f"grawji recipe: {self._active_label}{suffix}"
 
     def apply_capabilities(self, caps: Capabilities) -> None:
@@ -595,11 +629,26 @@ class RecipePanel(Adw.PreferencesPage):
         supported = self._caps is None or self._caps.has_grain_size
         self.grain_size_row.set_visible(supported and grain != "Off")
 
+    def _update_modified_marks(self) -> None:
+        """Tint each row that diverges from the applied recipe."""
+        current = self.get_recipe()
+        for field, row in self._field_rows.items():
+            changed = getattr(current, field) != getattr(
+                self._applied_recipe, field
+            )
+            if field == "wb_shift_r" and not changed:
+                changed = current.wb_shift_b != self._applied_recipe.wb_shift_b
+            if changed:
+                row.add_css_class("recipe-modified")
+            else:
+                row.remove_css_class("recipe-modified")
+
     def _update_status(self) -> None:
         """Show the active recipe/source and whether it has been modified."""
-        if self.get_recipe() == self._applied_recipe:
-            self.recipe_group.set_description(self._active_label)
-        else:
+        self._update_modified_marks()
+        if self.is_modified:
             self.recipe_group.set_description(
                 f"{self._active_label} (modified)"
             )
+        else:
+            self.recipe_group.set_description(self._active_label)
