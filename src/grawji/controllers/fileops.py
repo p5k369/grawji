@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -13,7 +14,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from grawji import fileops
 from grawji.imaging.export import initial_folder
@@ -63,7 +64,9 @@ class FileOpsController:
 
     def on_file_action(self, action: str, paths: list[str]) -> None:
         """Run a filmstrip context-menu file operation."""
-        if action == "export":
+        if action == "open-with":
+            self.open_with(paths[0])
+        elif action == "export":
             complaint = self._begin_export(paths)
             if complaint is not None:
                 self._set_status(complaint)
@@ -73,6 +76,17 @@ class FileOpsController:
             self.move_paths(paths)
         elif action == "trash":
             self.trash_paths(paths, confirm=len(paths) > 1)
+
+    def open_with(self, path: str) -> None:
+        """Offer the system app chooser for one RAF."""
+        launcher = Gtk.FileLauncher(file=Gio.File.new_for_path(path))
+        launcher.set_always_ask(True)
+
+        def done(source: Any, result: Any) -> None:
+            with contextlib.suppress(GLib.Error):
+                source.launch_finish(result)
+
+        launcher.launch(self._parent, None, done)
 
     def on_tree_drop(
         self, paths: list[str], folder: str, copy: bool | None
