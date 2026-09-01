@@ -29,7 +29,7 @@ jobs:
         python3 -m venv --system-site-packages .venv
         .venv/bin/pip install --upgrade pip
         # Same rawji commit as pyproject.toml (guarded by test_rawji_pin.py).
-        .venv/bin/pip install "rawji @ git+https://github.com/pinpox/rawji@5549fdb93028549c2bab8abe963f1a91c50b5368"
+        .venv/bin/pip install "rawji @ git+https://github.com/pinpox/rawji@a702dc8254378974b86785e2654fe57d590fafe4"
         .venv/bin/pip install -e . --no-deps
         .venv/bin/pip install pytest pytest-xvfb \
           pytest-github-actions-annotate-failures

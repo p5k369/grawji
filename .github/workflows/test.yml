@@ -44,7 +44,7 @@ jobs:
     - name: Install test dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install "rawji @ git+https://github.com/pinpox/rawji@5549fdb93028549c2bab8abe963f1a91c50b5368"
+        pip install "rawji @ git+https://github.com/pinpox/rawji@a702dc8254378974b86785e2654fe57d590fafe4"
         pip install -e ".[dev]"
 
     - name: Test with pytest
