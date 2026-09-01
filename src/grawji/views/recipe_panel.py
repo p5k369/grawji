@@ -360,6 +360,19 @@ class RecipePanel(Adw.PreferencesPage):
         """The label of the recipe/source the controls came from."""
         return self._active_label
 
+    @property
+    def provenance(self) -> str:
+        """A short provenance line for exports.
+
+        An unmodified "From image" state is the camera's own recipe,
+        so there is nothing of grawji's to record.
+        """
+        modified = self.get_recipe() != self._applied_recipe
+        if self._active_label == FROM_IMAGE_LABEL and not modified:
+            return ""
+        suffix = " (modified)" if modified else ""
+        return f"grawji recipe: {self._active_label}{suffix}"
+
     def apply_capabilities(self, caps: Capabilities) -> None:
         """Restrict the recipe controls to what the camera supports.
 

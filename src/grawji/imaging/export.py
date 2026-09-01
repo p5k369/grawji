@@ -86,7 +86,7 @@ def initial_folder(path: str) -> Gio.File | None:
     return None
 
 
-def write_jpeg(
+def write_jpeg(  # noqa: PLR0913
     jpeg: bytes,
     path: str,
     *,
@@ -94,6 +94,7 @@ def write_jpeg(
     decode: Callable[[bytes], Any],
     artist: str = "",
     rights: str = "",
+    comment: str = "",
 ) -> None:
     """Write jpeg to path with orientation and rotation baked in.
 
@@ -113,7 +114,9 @@ def write_jpeg(
         pixbuf.savev(tmp_path, "jpeg", ["quality"], [str(quality)])
         # GdkPixbuf re-encoding drops all metadata, so copy the camera's
         # EXIF back on (orientation is now baked into the pixels).
-        imagemeta.copy_exif(jpeg, tmp_path, artist=artist, rights=rights)
+        imagemeta.copy_exif(
+            jpeg, tmp_path, artist=artist, rights=rights, comment=comment
+        )
         Path(path).write_bytes(Path(tmp_path).read_bytes())
     finally:
         Path(tmp_path).unlink(missing_ok=True)

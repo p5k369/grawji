@@ -84,6 +84,8 @@ class Settings:
         export_artist: EXIF Artist written into exports. Empty writes nothing.
         export_copyright: EXIF Copyright written into exports. Empty
             writes nothing.
+        export_provenance: Record the applied recipe's name in the
+            exported JPEG's EXIF user comment.
     """
 
     open_recipe: str = FROM_IMAGE
@@ -113,6 +115,7 @@ class Settings:
     export_max_edge: int = 0
     export_artist: str = ""
     export_copyright: str = ""
+    export_provenance: bool = True
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

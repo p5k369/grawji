@@ -6,7 +6,8 @@
   <ui filename="recipe_panel.ui" sha256="30e5e8c4659cf6b54c0dbce9c2d2eecc69150d6777b3cb03325b5363bc8c2337"/>
   <ui filename="grawji.ui" sha256="f96e9c7592c4a4b7a08d27ff80b8c7ed7725f6da6799fafb6057ed96345487a4"/>
   <ui filename="batch_export.ui" sha256="684f45e4fd429b17511ec6c3dad138195d605a5f3bf6e70491bceec54337273a"/>
-  <ui filename="preferences.ui" sha256="26c4412a04baa7690bb97d7ba5c4afac62333e330163aa9aab18fd36814a8b9f"/>
+  <ui filename="preferences.ui" sha256="41f5c1769d88c0fb81b8f2bb02ce16d0fd67efd4f05eab65f49681113d926f85"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
-  <ui filename="recipe_manager.ui" sha256="573687eedca7a120f464fbd5ef4f1fa1d590c0784385534f84a7b4f25256a93b"/>
+  <ui filename="camera_pane.ui" sha256="51c0aeea0a911b551751560d9390c83a661c45e3d68f6aa0d686cd26916a0563"/>
+  <ui filename="recipe_manager.ui" sha256="ceba515c98f6b3227c58150b61a7ca9481bd869569c8dc663848e011e62500f5"/>
 </cambalache-project>

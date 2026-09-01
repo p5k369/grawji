@@ -165,3 +165,21 @@ def test_with_credits_stamps_exif(tmp_path):
     assert meta.try_get_tag_string("Exif.Image.Copyright") == "CC BY 4.0"
     # no credits configured: bytes pass through untouched
     assert with_credits(jpeg, artist="", rights="") is jpeg
+
+
+def test_with_credits_stamps_provenance(tmp_path):
+    """The recipe provenance lands in the EXIF user comment."""
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 8, 8)
+    source = tmp_path / "plain.jpg"
+    pixbuf.savev(str(source), "jpeg", [], [])
+    jpeg = source.read_bytes()
+
+    stamped = with_credits(
+        jpeg, artist="", rights="", comment="grawji recipe: Portra"
+    )
+    out = tmp_path / "stamped.jpg"
+    out.write_bytes(stamped)
+    meta = GExiv2.Metadata()
+    meta.open_path(str(out))
+    comment = meta.try_get_tag_string("Exif.Photo.UserComment") or ""
+    assert "grawji recipe: Portra" in comment

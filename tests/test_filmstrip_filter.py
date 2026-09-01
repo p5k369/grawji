@@ -171,6 +171,26 @@ def test_sliders_absent_without_two_focals(strip: Any) -> None:
     assert strip._build_focal_sliders() is None
 
 
+def test_edit_badges_are_independent(strip: Any, tmp_path: Path) -> None:
+    """The EV and crop badges track their own sidecar keys."""
+    import json
+
+    from grawji.sidecar import sidecar_path
+
+    target = strip.paths[0]
+    sidecar_path(target).write_text(json.dumps({"exposure": 0.7}))
+    strip.refresh_badges(target)
+    badges = strip._badges[target]
+    assert badges["ev"].get_visible()
+    assert not badges["crop"].get_visible()
+    sidecar_path(target).write_text(
+        json.dumps({"crop": {"angle": 1.0, "rect": [0, 0, 1, 1]}})
+    )
+    strip.refresh_badges(target)
+    assert not badges["ev"].get_visible()
+    assert badges["crop"].get_visible()
+
+
 def test_unknown_metadata_stays_visible(strip: Any) -> None:
     """Cards still decoding keep showing under any filter."""
     del strip._meta[strip.paths[0]]
