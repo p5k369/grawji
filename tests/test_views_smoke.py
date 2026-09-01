@@ -24,6 +24,9 @@ def test_main_window_builds(window: Any) -> None:
     assert window.preview_view is not None
     assert window.recipe_panel is not None
     assert window.export_button is not None
+    assert window._filmstrip.filter_button is window.filter_button
+    window._filmstrip._rebuild_filter_menu(window.filter_button)
+    assert window.filter_button.get_popover() is not None
     # The composite children are the custom template types, proving their
     # own .ui files parsed and registered.
     assert window.preview_view.__gtype_name__ == "GrawjiPreviewView"

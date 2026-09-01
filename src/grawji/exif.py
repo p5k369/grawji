@@ -35,7 +35,7 @@ def _shutter(raw: str) -> str:
     return f"1/{round(1 / value)} s"
 
 
-def _focal(raw: str) -> str:
+def format_focal(raw: str) -> str:
     """Format a focal length, e.g. "3500/100" -> "35 mm"."""
     value = _ratio(raw)
     return f"{value:g} mm" if value is not None else raw
@@ -46,14 +46,32 @@ def _iso(raw: str) -> str:
     return f"ISO {raw}"
 
 
+_EXPOSURE_PROGRAMS = {
+    "1": "Manual",
+    "2": "Program",
+    "3": "Aperture priority",
+    "4": "Shutter priority",
+    "5": "Creative program",
+    "6": "Action program",
+    "7": "Portrait mode",
+    "8": "Landscape mode",
+}
+
+
+def _mode(raw: str) -> str:
+    """Name the shooting mode."""
+    return _EXPOSURE_PROGRAMS.get(raw.strip(), "")
+
+
 # (display label, EXIF tag, optional formatter) in display order.
 EXIF_FIELDS: list[tuple[str, str, _Formatter | None]] = [
     ("Camera", "Exif.Image.Model", None),
     ("Lens", "Exif.Photo.LensModel", None),
-    ("Focal length", "Exif.Photo.FocalLength", _focal),
+    ("Focal length", "Exif.Photo.FocalLength", format_focal),
     ("Aperture", "Exif.Photo.FNumber", _aperture),
     ("Shutter", "Exif.Photo.ExposureTime", _shutter),
     ("ISO", "Exif.Photo.ISOSpeedRatings", _iso),
+    ("Mode", "Exif.Photo.ExposureProgram", _mode),
     ("Taken", "Exif.Photo.DateTimeOriginal", None),
 ]
 
@@ -73,5 +91,7 @@ def format_exif(raw: dict[str, str]) -> list[tuple[str, str]]:
         value = raw.get(tag)
         if not value:
             continue
-        rows.append((label, formatter(value) if formatter else value))
+        shown = formatter(value) if formatter else value
+        if shown:
+            rows.append((label, shown))
     return rows

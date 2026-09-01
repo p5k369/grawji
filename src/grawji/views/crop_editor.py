@@ -89,7 +89,7 @@ class CropEditor:
         view.crop_reset.connect("clicked", lambda *_a: self.reset())
         self._angle_adj = view.angle_spin.get_adjustment()
         view.angle_scale.set_adjustment(self._angle_adj)
-        view.angle_scale.add_mark(0.0, Gtk.PositionType.BOTTOM, None)
+        view.angle_scale.connect("change-value", self._on_angle_scale_change)
         self._angle_adj.connect("value-changed", self._on_angle_changed)
         view.auto_level_button.connect("clicked", self._on_auto_level)
         view.crop_aspect.connect("notify::selected", self._on_aspect_changed)
@@ -221,6 +221,17 @@ class CropEditor:
         self._syncing_angle = True
         self._angle_adj.set_value(value)
         self._syncing_angle = False
+
+    def _on_angle_scale_change(
+        self, scale: Any, _scroll: Any, value: float
+    ) -> bool:
+        """Nudge slider values near zero onto exact zero."""
+        span = self._angle_adj.get_upper() - self._angle_adj.get_lower()
+        width = max(1, scale.get_width())
+        if abs(value) < 3.0 * span / width:
+            value = 0.0
+        self._angle_adj.set_value(value)
+        return True
 
     def _on_angle_changed(self, adj: Any) -> None:
         """Apply a new angle from the slider or spin button."""
