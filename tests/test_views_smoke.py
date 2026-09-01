@@ -56,6 +56,27 @@ def test_recipe_panel_builds_and_signals() -> None:
     assert GObject.signal_lookup("apply-recipe", type(panel)) != 0
 
 
+def test_recipe_panel_provenance_line() -> None:
+    """Provenance is empty in-camera, names the recipe otherwise."""
+    from dataclasses import replace
+
+    from grawji.recipe import Recipe
+    from grawji.settings import FROM_IMAGE_LABEL
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(), FROM_IMAGE_LABEL)
+    panel.set_active(panel.get_recipe(), FROM_IMAGE_LABEL)
+    assert panel.provenance == ""
+    panel.set_active(Recipe(film_simulation="Velvia"), "Summer")
+    panel.set_active(panel.get_recipe(), "Summer")
+    assert panel.provenance == "grawji recipe: Summer"
+    modified = replace(panel.get_recipe(), film_simulation="Acros")
+    panel.set_recipe(modified)
+    assert panel.provenance == "grawji recipe: Summer (modified)"
+
+
 def _manager(tmp_path: Any) -> Any:
     """A RecipeManagerDialog over a library holding ampersand names."""
     from grawji.views.recipe_manager import RecipeManagerDialog

@@ -73,6 +73,16 @@ def save_crop(raf_path: Path | str, crop: CropRotate) -> None:
     _update(raf_path, "crop", None if crop.is_identity else crop.to_dict())
 
 
+def edit_flags(raf_path: Path | str) -> tuple[bool, bool]:
+    """Whether the sidecar holds an edit.
+
+    The two edits are independent: identity crops and cleared EVs are
+    stored as absent keys, so key presence means a real edit.
+    """
+    data = _read(raf_path)
+    return "crop" in data, "exposure" in data
+
+
 def load_exposure(raf_path: Path | str) -> float | None:
     """The RAF's stored per-image EV, or None when never set."""
     value = _read(raf_path).get("exposure")

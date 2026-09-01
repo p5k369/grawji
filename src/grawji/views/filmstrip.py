@@ -27,7 +27,7 @@ from gi.repository import (
 from grawji.imaging.render import texture_for_pixbuf
 from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
 from grawji.settings import cache_dir
-from grawji.sidecar import sidecar_path
+from grawji.sidecar import edit_flags
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_PX_PER_S_DEFAULT = 600
@@ -126,7 +126,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._scan_id = 0
         self._paths: list[str] = []
         self._buttons: list[Gtk.Button] = []
-        self._badges: dict[str, Gtk.Image] = {}
+        self._badges: dict[str, dict[str, Gtk.Image]] = {}
         self._center_pending: Gtk.Button | None = None
         self._recenter_id = 0
         self._current = -1
@@ -479,18 +479,10 @@ class FilmStrip(Gtk.ScrolledWindow):
 
         camera_label = caption("")
         name_label = caption(path.stem)
-        badge = Gtk.Image.new_from_icon_name("grawji-crop-symbolic")
-        badge.set_pixel_size(10)
-        badge.set_halign(Gtk.Align.END)
-        badge.set_valign(Gtk.Align.END)
-        badge.set_margin_end(4)
-        badge.set_margin_bottom(4)
-        badge.set_opacity(0.75)
-        badge.set_tooltip_text("Crop/rotate applied")
-        badge.set_visible(sidecar_path(path).exists())
-        self._badges[str(path)] = badge
+
         thumb = Gtk.Overlay(child=picture)
-        thumb.add_overlay(badge)
+        thumb.add_overlay(self._build_badges(str(path)))
+        self._sync_badges(str(path))
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         card.set_margin_top(2)
         card.set_margin_bottom(2)
@@ -544,11 +536,42 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._badges = {}
         self._center_pending = None
 
-    def set_altered(self, path: str, altered: bool) -> None:
-        """Show or hide the geometry badge on path's card."""
-        badge = self._badges.get(path)
-        if badge is not None:
-            badge.set_visible(altered)
+    def _build_badges(self, path: str) -> Gtk.Widget:
+        """The per-card edit badges, bottom right."""
+
+        def badge(icon: str, tooltip: str) -> Gtk.Image:
+            image = Gtk.Image.new_from_icon_name(icon)
+            image.set_pixel_size(10)
+            image.set_opacity(0.75)
+            image.set_tooltip_text(tooltip)
+            return image
+
+        badges = {
+            "crop": badge("grawji-crop-symbolic", "Crop/rotate applied"),
+            "ev": badge("grawji-ev-symbolic", "Exposure adjusted"),
+        }
+        box = Gtk.Box(spacing=3)
+        box.set_halign(Gtk.Align.END)
+        box.set_valign(Gtk.Align.END)
+        box.set_margin_end(4)
+        box.set_margin_bottom(4)
+        box.append(badges["ev"])
+        box.append(badges["crop"])
+        self._badges[path] = badges
+        return box
+
+    def refresh_badges(self, path: str) -> None:
+        """Re-read path's sidecar and update its edit badges."""
+        self._sync_badges(path)
+
+    def _sync_badges(self, path: str) -> None:
+        """Show each edit badge per the sidecar's current content."""
+        badges = self._badges.get(path)
+        if badges is None:
+            return
+        has_crop, has_ev = edit_flags(path)
+        badges["crop"].set_visible(has_crop)
+        badges["ev"].set_visible(has_ev)
 
     def _restore_current(self, scan_id: int, path: str) -> bool:
         """Re-select path after a same-folder re-scan (on idle)."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import gi
 
@@ -95,31 +96,46 @@ def camera_model(path: str) -> str | None:
         return None
 
 
+def _stamp(metadata: Any, *, artist: str, rights: str, comment: str) -> None:
+    """Write the export credit and provenance tags onto open metadata."""
+    if artist:
+        metadata.try_set_tag_string("Exif.Image.Artist", artist)
+    if rights:
+        metadata.try_set_tag_string("Exif.Image.Copyright", rights)
+    if comment:
+        metadata.try_set_tag_string("Exif.Photo.UserComment", comment)
+
+
 def copy_exif(
-    source_jpeg: bytes, dest_path: str, *, artist: str = "", rights: str = ""
+    source_jpeg: bytes,
+    dest_path: str,
+    *,
+    artist: str = "",
+    rights: str = "",
+    comment: str = "",
 ) -> None:
     """Transplant the camera JPEG's metadata onto the exported file.
 
     The orientation tag is reset to normal because the caller bakes the
-    orientation into the pixels before writing. A non-empty artist or
-    copyright string is written on top of the camera EXIF.
+    orientation into the pixels before writing. A non-empty artist,
+    copyright or provenance comment is written on top of the camera
+    EXIF.
     """
     try:
         metadata = GExiv2.Metadata()
         metadata.open_buf(source_jpeg)
         metadata.set_orientation(GExiv2.Orientation.NORMAL)
-        if artist:
-            metadata.try_set_tag_string("Exif.Image.Artist", artist)
-        if rights:
-            metadata.try_set_tag_string("Exif.Image.Copyright", rights)
+        _stamp(metadata, artist=artist, rights=rights, comment=comment)
         metadata.save_file(dest_path)
     except GLib.Error:
         pass
 
 
-def with_credits(jpeg: bytes, *, artist: str, rights: str) -> bytes:
-    """Return jpeg with artist/copyright stamped, pixels untouched."""
-    if not artist and not rights:
+def with_credits(
+    jpeg: bytes, *, artist: str, rights: str, comment: str = ""
+) -> bytes:
+    """Return jpeg with artist/copyright/comment stamped, pixels as-is."""
+    if not artist and not rights and not comment:
         return jpeg
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -127,10 +143,7 @@ def with_credits(jpeg: bytes, *, artist: str, rights: str) -> bytes:
         tmp_path.write_bytes(jpeg)
         metadata = GExiv2.Metadata()
         metadata.open_path(str(tmp_path))
-        if artist:
-            metadata.try_set_tag_string("Exif.Image.Artist", artist)
-        if rights:
-            metadata.try_set_tag_string("Exif.Image.Copyright", rights)
+        _stamp(metadata, artist=artist, rights=rights, comment=comment)
         metadata.save_file(str(tmp_path))
         return tmp_path.read_bytes()
     except GLib.Error:

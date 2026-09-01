@@ -131,6 +131,12 @@
               </object>
             </child>
             <child>
+              <object class="AdwSwitchRow" id="provenance_row">
+                <property name="title">Record recipe in EXIF</property>
+                <property name="subtitle">Write the applied recipe's name into the exported JPEG's user comment</property>
+              </object>
+            </child>
+            <child>
               <object class="AdwExpanderRow" id="border_row">
                 <property name="title">Border</property>
                 <property name="subtitle">Frame exports with a solid border</property>

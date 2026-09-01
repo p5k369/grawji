@@ -6,8 +6,11 @@ each finished pixbuf back to the strip on the main loop.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -26,6 +29,31 @@ from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 
 # How much of the embedded JPEG to read for the EXIF thumbnail.
 _EXIF_PREFIX_BYTES = 256 * 1024
+
+# Cached thumbnails unused for this long are deleted at startup.
+_CACHE_MAX_AGE_S = 30 * 24 * 3600
+
+
+def prune_cache(
+    cache_dir: Path,
+    max_age_s: float = _CACHE_MAX_AGE_S,
+    now: float | None = None,
+) -> int:
+    """Delete cached thumbnails unused for max_age_s."""
+    if now is None:
+        now = time.time()
+    removed = 0
+    try:
+        entries = list(cache_dir.glob("*.png"))
+    except OSError:
+        return 0
+    for entry in entries:
+        with contextlib.suppress(OSError):
+            if now - entry.stat().st_mtime > max_age_s:
+                entry.unlink()
+                removed += 1
+    return removed
+
 
 # The camera model rides inside the cached PNG as a tEXt chunk, so a warm
 # start needs no RAF reads at all.
@@ -94,6 +122,7 @@ class ThumbnailLoader:
         self._is_stale = is_stale
         self._on_thumb = on_thumb
         self._on_finished = on_finished
+        self._pruned = False
         GExiv2.initialize()
 
     def load(self, cards: list[tuple[str, Any, Any]], scan_id: int) -> None:
@@ -109,6 +138,9 @@ class ThumbnailLoader:
         self, cards: list[tuple[str, Any, Any]], scan_id: int
     ) -> None:
         """Decode this scan's thumbnails in parallel and dispatch each."""
+        if not self._pruned:
+            self._pruned = True
+            prune_cache(self._cache_dir)
         with ThreadPoolExecutor(max_workers=self._workers) as pool:
             for path, picture, camera_label in cards:
                 pool.submit(
@@ -147,6 +179,8 @@ class ThumbnailLoader:
             except GLib.Error:
                 cached = None
             if cached is not None:
+                with contextlib.suppress(OSError):
+                    os.utime(cache)
                 return cached, ThumbMeta(
                     cached.get_option(_MODEL_OPTION) or "",
                     cached.get_option(_LENS_OPTION) or "",

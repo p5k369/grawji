@@ -40,6 +40,7 @@ def single_controller(state, settings=None):
         settings=settings or Settings(),
         save_settings=lambda: None,
         get_recipe=Recipe,
+        get_provenance=lambda: "",
         get_current_raf=lambda: None,
         base_decode=lambda jpeg: GdkPixbuf.Pixbuf.new(
             GdkPixbuf.Colorspace.RGB, False, 8, 4, 3
@@ -105,6 +106,7 @@ def batch_controller(session, settings):
         settings=settings,
         get_paths=list,
         get_recipe=Recipe,
+        get_provenance=lambda: "",
         get_current_raf=lambda: None,
         set_busy=lambda **kw: None,
         on_status=lambda text: None,
@@ -124,7 +126,7 @@ def test_batch_passthrough_writes_camera_bytes(tmp_path):
     out = tmp_path / "a.jpg"
     counts = tally()
     controller._export_one(
-        str(tmp_path / "a.RAF"), out, Recipe(), True, counts
+        str(tmp_path / "a.RAF"), out, Recipe(), "", True, counts
     )
     assert out.read_bytes() == jpeg
     assert counts["exported"] == 1
@@ -138,7 +140,7 @@ def test_batch_resize_forces_a_decode(tmp_path):
     controller = batch_controller(FakeSession(jpeg), settings)
     out = tmp_path / "a.jpg"
     controller._export_one(
-        str(tmp_path / "a.RAF"), out, Recipe(), True, tally()
+        str(tmp_path / "a.RAF"), out, Recipe(), "prov", True, tally()
     )
     pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(out))
     assert max(pixbuf.get_width(), pixbuf.get_height()) == 4
@@ -154,7 +156,7 @@ def test_batch_credits_stamp_the_passthrough(tmp_path):
     controller = batch_controller(FakeSession(small_jpeg()), settings)
     out = tmp_path / "a.jpg"
     controller._export_one(
-        str(tmp_path / "a.RAF"), out, Recipe(), True, tally()
+        str(tmp_path / "a.RAF"), out, Recipe(), "prov", True, tally()
     )
     meta = GExiv2.Metadata()
     meta.open_path(str(out))
@@ -168,10 +170,36 @@ def test_batch_skips_foreign_rafs(tmp_path):
     )
     counts = tally()
     controller._export_one(
-        str(tmp_path / "a.RAF"), tmp_path / "a.jpg", Recipe(), True, counts
+        str(tmp_path / "a.RAF"),
+        tmp_path / "a.jpg",
+        Recipe(),
+        "prov",
+        True,
+        counts,
     )
     assert counts["foreign"] == 1
     assert counts["exported"] == 0
+
+
+def test_batch_export_stamps_provenance(tmp_path):
+    """The provenance comment lands in the exported file's EXIF."""
+    gexiv2 = pytest.importorskip("gi.repository.GExiv2")
+    controller = batch_controller(FakeSession(small_jpeg()), Settings())
+    out = tmp_path / "a.jpg"
+    counts = tally()
+    controller._export_one(
+        str(tmp_path / "a.RAF"),
+        out,
+        Recipe(),
+        "grawji recipe: Test",
+        True,
+        counts,
+    )
+    assert counts["exported"] == 1
+    meta = gexiv2.Metadata()
+    meta.open_path(str(out))
+    comment = meta.try_get_tag_string("Exif.Photo.UserComment") or ""
+    assert "grawji recipe: Test" in comment
 
 
 def test_batch_write_failures_are_tallied(tmp_path, monkeypatch):
@@ -182,6 +210,7 @@ def test_batch_write_failures_are_tallied(tmp_path, monkeypatch):
         str(tmp_path / "a.RAF"),
         tmp_path / "missing-dir" / "a.jpg",
         Recipe(),
+        "prov",
         True,
         counts,
     )

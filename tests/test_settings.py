@@ -12,6 +12,7 @@ def test_defaults():
     """Loading from a non-existent path returns defaults."""
     settings = load_settings_from_missing()
     assert settings.open_recipe == FROM_IMAGE
+    assert settings.export_provenance is True
 
 
 def load_settings_from_missing():

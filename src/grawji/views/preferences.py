@@ -48,6 +48,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     max_edge_row = Gtk.Template.Child()
     artist_row = Gtk.Template.Child()
     copyright_row = Gtk.Template.Child()
+    provenance_row = Gtk.Template.Child()
     border_row = Gtk.Template.Child()
     border_percent_row = Gtk.Template.Child()
     border_color_button = Gtk.Template.Child()
@@ -80,6 +81,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.max_edge_row.set_value(settings.export_max_edge)
         self.artist_row.set_text(settings.export_artist)
         self.copyright_row.set_text(settings.export_copyright)
+        self.provenance_row.set_active(settings.export_provenance)
         self.border_row.set_enable_expansion(settings.export_border_enabled)
         self.border_row.set_expanded(settings.export_border_enabled)
         self.border_row.connect(
@@ -107,6 +109,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.max_edge_row.connect("notify::value", self._on_edited)
         self.artist_row.connect("changed", self._on_edited)
         self.copyright_row.connect("changed", self._on_edited)
+        self.provenance_row.connect("notify::active", self._on_edited)
         self.border_row.connect("notify::enable-expansion", self._on_edited)
         self.border_percent_row.connect("notify::value", self._on_edited)
         self.border_color_button.connect("notify::rgba", self._on_edited)
@@ -139,6 +142,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings.export_max_edge = int(self.max_edge_row.get_value())
         self._settings.export_artist = self.artist_row.get_text().strip()
         self._settings.export_copyright = self.copyright_row.get_text().strip()
+        self._settings.export_provenance = self.provenance_row.get_active()
         self._settings.export_border_enabled = (
             self.border_row.get_enable_expansion()
         )

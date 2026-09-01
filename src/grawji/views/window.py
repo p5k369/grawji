@@ -226,6 +226,7 @@ class MainWindow(Adw.ApplicationWindow):
             settings=self._settings,
             save_settings=self._save_settings,
             get_recipe=self.recipe_panel.get_recipe,
+            get_provenance=self._provenance,
             get_current_raf=(
                 lambda: str(self._raf_path) if self._raf_path else None
             ),
@@ -241,6 +242,7 @@ class MainWindow(Adw.ApplicationWindow):
             settings=self._settings,
             get_paths=lambda: self._filmstrip.paths,
             get_recipe=self.recipe_panel.get_recipe,
+            get_provenance=self._provenance,
             get_current_raf=(
                 lambda: str(self._raf_path) if self._raf_path else None
             ),
@@ -699,6 +701,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._image_ev = ev
         sidecar.save_exposure(self._raf_path, ev)
+        self._filmstrip.refresh_badges(str(self._raf_path))
 
     def _on_try_recipes(self) -> None:
         """Render the open image once per saved recipe, pick from a grid."""
@@ -915,9 +918,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self._raf_path is None:
             return
         sidecar.save_crop(self._raf_path, self.preview_view.crop_rotate)
-        self._filmstrip.set_altered(
-            str(self._raf_path), sidecar.sidecar_path(self._raf_path).exists()
-        )
+        self._filmstrip.refresh_badges(str(self._raf_path))
 
     def _populate_exif_rows(self, rows: list[tuple[str, str]]) -> None:
         """Show already-parsed EXIF (label, value) pairs in the Image group."""
@@ -1193,6 +1194,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _save_settings(self) -> None:
         """Persist the current settings to disk."""
         save_settings(self._settings, settings_path())
+
+    def _provenance(self) -> str:
+        """The recipe provenance for exports, "" when disabled."""
+        if not self._settings.export_provenance:
+            return ""
+        return self.recipe_panel.provenance
 
     def _on_close_request(self, _window: Any) -> bool:
         """Persist window size, stop the worker, then allow closing."""

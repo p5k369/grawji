@@ -53,6 +53,7 @@ class SingleExportController:
         settings: Settings,
         save_settings: Callable[[], None],
         get_recipe: Callable[[], Recipe],
+        get_provenance: Callable[[], str],
         get_current_raf: Callable[[], str | None],
         base_decode: Callable[[bytes], Any],
         set_busy: SetBusy,
@@ -67,6 +68,8 @@ class SingleExportController:
             settings: Live settings (quality, last export folder).
             save_settings: Persists settings after an edit.
             get_recipe: The recipe currently in the panel.
+            get_provenance: A short description of the recipe/source
+                the export was made with.
             get_current_raf: The open RAF's path for the default name.
             base_decode: Decodes the camera JPEG with the current
                 geometry baked in; the framing settings wrap it at
@@ -80,6 +83,7 @@ class SingleExportController:
         self._settings = settings
         self._save_settings = save_settings
         self._get_recipe = get_recipe
+        self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
         self._base_decode = base_decode
         self._set_busy = set_busy
@@ -130,6 +134,7 @@ class SingleExportController:
                 ),
                 artist=self._settings.export_artist,
                 rights=self._settings.export_copyright,
+                comment=self._get_provenance(),
             )
         except (GLib.Error, OSError) as exc:
             self._set_busy(busy=False, status=f"Export failed: {exc}")
@@ -150,6 +155,7 @@ class BatchController:
         settings: Settings,
         get_paths: Callable[[], list[str]],
         get_recipe: Callable[[], Recipe],
+        get_provenance: Callable[[], str],
         get_current_raf: Callable[[], str | None],
         set_busy: SetBusy,
         on_status: Callable[[str], None],
@@ -167,6 +173,8 @@ class BatchController:
             get_paths: Returns the RAF paths to export when begin() is
                 called without an explicit list.
             get_recipe: Returns the recipe to render with.
+            get_provenance: A short description of the recipe/source
+                the batch renders with.
             get_current_raf: Returns the currently open RAF, or None.
             set_busy: The window's busy/status setter, taking the
                 keyword arguments busy and status.
@@ -183,6 +191,7 @@ class BatchController:
         self._settings = settings
         self._get_paths = get_paths
         self._get_recipe = get_recipe
+        self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
         self._set_busy = set_busy
         self._on_status = on_status
@@ -246,6 +255,7 @@ class BatchController:
         self._out_dir = out_dir
         paths = self._pending
         recipe = self._get_recipe()
+        comment = self._get_provenance()
         total = len(paths)
         current = self._get_current_raf()
         cancel = threading.Event()
@@ -263,7 +273,12 @@ class BatchController:
                     tally["existing"] += 1
                 else:
                     self._export_one(
-                        raf_file, out_path, recipe, skip_foreign, tally
+                        raf_file,
+                        out_path,
+                        recipe,
+                        comment,
+                        skip_foreign,
+                        tally,
                     )
                 GLib.idle_add(self._progress, done, total, Path(raf_file).name)
             if current is not None:
@@ -279,6 +294,7 @@ class BatchController:
         raf_file: str,
         out_path: Path,
         recipe: Recipe,
+        comment: str,
         skip_foreign: bool,
         tally: dict[str, int],
     ) -> None:
@@ -311,6 +327,7 @@ class BatchController:
                         jpeg,
                         artist=self._settings.export_artist,
                         rights=self._settings.export_copyright,
+                        comment=comment,
                     )
                 )
             else:
@@ -321,6 +338,7 @@ class BatchController:
                     decode=decode,
                     artist=self._settings.export_artist,
                     rights=self._settings.export_copyright,
+                    comment=comment,
                 )
         except (GLib.Error, OSError) as exc:
             logging.getLogger("grawji").warning(
