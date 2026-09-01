@@ -73,6 +73,12 @@
                 <property name="tooltip-text">Collapse or show the side panel</property>
               </object>
             </child>
+            <child type="start">
+              <object class="GtkMenuButton" id="filter_button">
+                <property name="icon-name">grawji-filter-symbolic</property>
+                <property name="tooltip-text">Filter by camera or focal length</property>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkMenuButton">
                 <property name="icon-name">open-menu-symbolic</property>

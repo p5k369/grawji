@@ -100,6 +100,11 @@ button.thumb.thumb-marked {
 /* Filmstrip nav buttons: round only the edge facing the window border. */
 .filmstrip-nav-start { border-radius: 0 0 0 8px; }
 .filmstrip-nav-end { border-radius: 0 0 8px 0; }
+/* Zero tick under the straighten slider. */
+.angle-zero-mark {
+    background-color: alpha(currentColor, 0.55);
+    border-radius: 1px;
+}
 """
 
 _UI = (
@@ -117,6 +122,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     window_title = Gtk.Template.Child()
     sidebar_button = Gtk.Template.Child()
+    filter_button = Gtk.Template.Child()
     export_button = Gtk.Template.Child()
     main_paned = Gtk.Template.Child()
     preview_view: PreviewView = Gtk.Template.Child()
@@ -418,6 +424,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.filmstrip_slot.append(self._nav.prev_button)
         self.filmstrip_slot.append(self._filmstrip)
         self.filmstrip_slot.append(self._nav.next_button)
+        self._filmstrip.adopt_filter_button(self.filter_button)
 
     def _on_thumbs_loading(self, loading: bool) -> None:
         """Show the activity spinner while the filmstrip decodes thumbs."""

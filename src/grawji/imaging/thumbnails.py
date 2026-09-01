@@ -12,7 +12,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import gi
 
@@ -21,6 +21,7 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import GdkPixbuf, GExiv2, GLib
 
+from grawji.exif import format_focal
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 
 # How much of the embedded JPEG to read for the EXIF thumbnail.
@@ -29,9 +30,20 @@ _EXIF_PREFIX_BYTES = 256 * 1024
 # The camera model rides inside the cached PNG as a tEXt chunk, so a warm
 # start needs no RAF reads at all.
 _MODEL_OPTION = "tEXt::grawji-model"
+_LENS_OPTION = "tEXt::grawji-lens"
+_FOCAL_OPTION = "tEXt::grawji-focal"
+
+
+class ThumbMeta(NamedTuple):
+    """Filter-relevant EXIF of one thumbnail."""
+
+    model: str
+    lens: str
+    focal: str
+
 
 Dispatch = Callable[[Callable[[], None]], Any]
-OnThumb = Callable[[Any, Any, Any, str, int], None]
+OnThumb = Callable[[str, Any, Any, Any, ThumbMeta, int], None]
 OnFinished = Callable[[int], None]
 
 # EXIF orientation.
@@ -71,9 +83,7 @@ class ThumbnailLoader:
             dispatch: Schedules a callback on the main loop.
             is_stale: Whether a scan id has been superseded (results
                 for it are dropped).
-            on_thumb: Called on the main loop with (picture,
-                camera_label, pixbuf, model, scan_id) per finished
-                thumbnail.
+            on_thumb: Called on the main loop per finished thumbnail.
             on_finished: Called on the main loop with the scan id once
                 every thumbnail of that scan is done.
         """
@@ -113,17 +123,23 @@ class ThumbnailLoader:
         if self._is_stale(scan_id):
             return
         try:
-            pixbuf, model = self._thumbnail(path)
+            pixbuf, meta = self._thumbnail(path)
         except (ValueError, OSError, GLib.Error):
             return
         self._dispatch(
             partial(
-                self._on_thumb, picture, camera_label, pixbuf, model, scan_id
+                self._on_thumb,
+                path,
+                picture,
+                camera_label,
+                pixbuf,
+                meta,
+                scan_id,
             )
         )
 
-    def _thumbnail(self, path: str) -> tuple[Any, str]:
-        """Return path's cached when possible."""
+    def _thumbnail(self, path: str) -> tuple[Any, ThumbMeta]:
+        """Return path's pixbuf and meta, cached when possible."""
         cache = self._cache_file(path)
         if cache is not None and cache.exists():
             try:
@@ -131,11 +147,15 @@ class ThumbnailLoader:
             except GLib.Error:
                 cached = None
             if cached is not None:
-                return cached, cached.get_option(_MODEL_OPTION) or ""
-        pixbuf, model = self._decode_thumb(path)
+                return cached, ThumbMeta(
+                    cached.get_option(_MODEL_OPTION) or "",
+                    cached.get_option(_LENS_OPTION) or "",
+                    cached.get_option(_FOCAL_OPTION) or "",
+                )
+        pixbuf, meta = self._decode_thumb(path)
         if cache is not None:
-            self._store_cache(cache, pixbuf, model)
-        return pixbuf, model
+            self._store_cache(cache, pixbuf, meta)
+        return pixbuf, meta
 
     def _cache_file(self, path: str) -> Path | None:
         """Return the cache path for path, keyed by its size and mtime."""
@@ -144,38 +164,50 @@ class ThumbnailLoader:
             stat = target.stat()
         except OSError:
             return None
-        # v4: the cached PNG additionally carries the camera model.
+        # v6: the cached PNG carries camera model, lens and focal length.
         key = (
-            f"v4|{target.resolve()}|{stat.st_mtime_ns}"
+            f"v6|{target.resolve()}|{stat.st_mtime_ns}"
             f"|{stat.st_size}|{self._height}"
         )
         digest = hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
         return self._cache_dir / f"{digest}.png"
 
-    def _store_cache(self, cache: Path, pixbuf: Any, model: str) -> None:
-        """Write a decoded thumbnail to the cache, ignoring failures."""
-        keys, values = ([_MODEL_OPTION], [model]) if model else ([], [])
+    def _store_cache(self, cache: Path, pixbuf: Any, meta: ThumbMeta) -> None:
+        """Write a decoded thumbnail to the cache, ignoring failures.
+
+        Model, lens and focal length travel inside the PNG as tEXt
+        chunks, so the warm path re-reads nothing from the RAF.
+        """
+        options = (
+            (_MODEL_OPTION, meta.model),
+            (_LENS_OPTION, meta.lens),
+            (_FOCAL_OPTION, meta.focal),
+        )
+        keys = [k for k, v in options if v]
+        values = [v for _k, v in options if v]
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
             pixbuf.savev(str(cache), "png", keys, values)
         except (GLib.Error, OSError):
             pass
 
-    def _decode_thumb(self, path: str) -> tuple[Any, str]:
-        """Decode a RAF into a height-tall pixbuf plus camera model."""
+    def _decode_thumb(self, path: str) -> tuple[Any, ThumbMeta]:
+        """Decode a RAF into a pixbuf plus its filter metadata."""
         exif_thumb = self._exif_thumbnail_of(path)
         if exif_thumb is not None:
-            data, orientation, model = exif_thumb
+            data, orientation, meta = exif_thumb
             pixbuf = orient_exif(self._decode_bytes(data), orientation)
         else:
             jpeg = embedded_jpeg(path)
             pixbuf = self._decode_bytes(jpeg, downscale=True)
             pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
-            model = _model_of(jpeg)
-        return self._to_height(pixbuf), model
+            meta = _meta_of(jpeg)
+        return self._to_height(pixbuf), meta
 
     @staticmethod
-    def _exif_thumbnail_of(path: str) -> tuple[bytes, int, str] | None:
+    def _exif_thumbnail_of(
+        path: str,
+    ) -> tuple[bytes, int, ThumbMeta] | None:
         """Read only enough of the RAF to extract its EXIF thumbnail."""
         try:
             prefix = embedded_jpeg_prefix(path, _EXIF_PREFIX_BYTES)
@@ -212,8 +244,8 @@ class ThumbnailLoader:
         loader.set_size(max(1, int(width * scale)), self._height)
 
 
-def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, str] | None:
-    """Return thumbnail bytes, EXIF orientation, camera model."""
+def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, ThumbMeta] | None:
+    """Return thumbnail bytes, EXIF orientation and filter metadata."""
     try:
         meta = GExiv2.Metadata()
         meta.open_buf(jpeg)
@@ -228,21 +260,35 @@ def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, str] | None:
         orientation = int(meta.get_orientation())
     except (GLib.Error, ValueError):
         orientation = 1
-    try:
-        model = meta.try_get_tag_string("Exif.Image.Model") or ""
-    except GLib.Error:
-        model = ""
-    return bytes(thumb), orientation, model
+    return bytes(thumb), orientation, _tags_of(meta)
 
 
-def _model_of(jpeg: bytes) -> str:
-    """Read the camera model from JPEG bytes, or an empty string."""
+def _tag_of(meta: Any, tag: str) -> str:
+    """One EXIF tag as a string."""
     try:
-        meta = GExiv2.Metadata()
-        meta.open_buf(jpeg)
-        return meta.try_get_tag_string("Exif.Image.Model") or ""
+        return meta.try_get_tag_string(tag) or ""
     except GLib.Error:
         return ""
+
+
+def _tags_of(meta: Any) -> ThumbMeta:
+    """The filter metadata of open EXIF metadata."""
+    raw = _tag_of(meta, "Exif.Photo.FocalLength")
+    return ThumbMeta(
+        model=_tag_of(meta, "Exif.Image.Model"),
+        lens=_tag_of(meta, "Exif.Photo.LensModel"),
+        focal=format_focal(raw) if raw else "",
+    )
+
+
+def _meta_of(jpeg: bytes) -> ThumbMeta:
+    """Read the filter metadata from JPEG bytes."""
+    meta = GExiv2.Metadata()
+    try:
+        meta.open_buf(jpeg)
+    except GLib.Error:
+        return ThumbMeta("", "", "")
+    return _tags_of(meta)
 
 
 def orient_exif(pixbuf: Any, orientation: int) -> Any:

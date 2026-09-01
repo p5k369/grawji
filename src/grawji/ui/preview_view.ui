@@ -76,7 +76,7 @@
             </child>
             <child>
               <object class="GtkToggleButton" id="crop_swap">
-                <property name="icon-name">object-flip-vertical-symbolic</property>
+                <property name="icon-name">object-rotate-right-symbolic</property>
                 <property name="tooltip-text">Swap crop orientation (landscape/portrait)</property>
                 <property name="valign">center</property>
                 <style>
@@ -128,10 +128,27 @@
               </object>
             </child>
             <child>
-              <object class="GtkScale" id="angle_scale">
+              <object class="GtkOverlay">
                 <property name="hexpand">true</property>
-                <property name="draw-value">false</property>
-                <property name="tooltip-text">Straighten (drag a line along a horizon with the right mouse button)</property>
+                <property name="child">
+                  <object class="GtkScale" id="angle_scale">
+                    <property name="hexpand">true</property>
+                    <property name="draw-value">false</property>
+                    <property name="tooltip-text">Straighten (drag a line along a horizon with the right mouse button)</property>
+                  </object>
+                </property>
+                <child type="overlay">
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <property name="valign">end</property>
+                    <property name="can-target">false</property>
+                    <property name="width-request">2</property>
+                    <property name="height-request">5</property>
+                    <style>
+                      <class name="angle-zero-mark"/>
+                    </style>
+                  </object>
+                </child>
               </object>
             </child>
             <child>

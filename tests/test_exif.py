@@ -41,3 +41,14 @@ def test_unparseable_rational_falls_back_to_raw():
     """A value that is not a valid rational is shown verbatim."""
     rows = format_exif({"Exif.Photo.FNumber": "weird"})
     assert rows == [("Aperture", "weird")]
+
+
+def test_mode_names_the_exposure_program():
+    """The program shows as a readable mode name."""
+    rows = format_exif({"Exif.Photo.ExposureProgram": "3"})
+    assert rows == [("Mode", "Aperture priority")]
+
+
+def test_undefined_mode_is_hidden():
+    """ExposureProgram 0 produces no row at all."""
+    assert format_exif({"Exif.Photo.ExposureProgram": "0"}) == []

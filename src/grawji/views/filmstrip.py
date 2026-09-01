@@ -25,12 +25,24 @@ from gi.repository import (
 )
 
 from grawji.imaging.render import texture_for_pixbuf
-from grawji.imaging.thumbnails import ThumbnailLoader
+from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
 from grawji.settings import cache_dir
 from grawji.sidecar import sidecar_path
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_PX_PER_S_DEFAULT = 600
+
+
+def _focal_mm(focal: str) -> float | None:
+    """Parse a formatted focal length into millimeters."""
+    try:
+        return float(focal.split(maxsplit=1)[0])
+    except (ValueError, IndexError):
+        return None
+
+
+# The focal sliders need at least two distinct stops to range over.
+_MIN_SLIDER_STOPS = 2
 
 # Folder-change events settle for this long before the strip re-scans.
 _RELOAD_DEBOUNCE_MS = 500
@@ -129,6 +141,10 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._glide_dir = 0
         self._glide_speed = float(_GLIDE_PX_PER_S_DEFAULT)
         self._folder: str | None = None
+        self._meta: dict[str, ThumbMeta] = {}
+        self._filter_model: str | None = None
+        self._filter_lens: str | None = None
+        self._filter_focal: tuple[float, float] | None = None
         self._monitor: Any = None
         self._reload_pending_id = 0
         self._thumbs = ThumbnailLoader(
@@ -156,6 +172,152 @@ class FilmStrip(Gtk.ScrolledWindow):
         scroll.connect("scroll", self._on_scroll)
         self.add_controller(scroll)
         self.get_hadjustment().connect("changed", self._on_range_changed)
+        self.filter_button: Gtk.MenuButton | None = None
+        self._filter_actions: dict[str, Gio.SimpleAction] = {}
+
+    def adopt_filter_button(self, button: Gtk.MenuButton) -> None:
+        """Drive the window's funnel button with the filter menu."""
+        group = Gio.SimpleActionGroup()
+        for axis in ("model", "lens"):
+            action = Gio.SimpleAction.new_stateful(
+                axis,
+                GLib.VariantType.new("s"),
+                GLib.Variant.new_string(""),
+            )
+            action.connect("change-state", self._on_filter_action, axis)
+            group.add_action(action)
+            self._filter_actions[axis] = action
+        clear = Gio.SimpleAction.new("clear", None)
+        clear.connect("activate", self._on_filter_cleared)
+        group.add_action(clear)
+        button.insert_action_group("filter", group)
+        button.set_create_popup_func(self._rebuild_filter_menu)
+        self.filter_button = button
+
+    def _rebuild_filter_menu(self, button: Gtk.MenuButton) -> None:
+        """Build the menu from the folder's metadata on every open."""
+        menu = Gio.Menu()
+        axes = (
+            ("Camera", "model", self.known_models()),
+            ("Lens", "lens", self.known_lenses()),
+        )
+        for title, axis, values in axes:
+            section = Gio.Menu()
+            for label, value in [("All", ""), *((v, v) for v in values)]:
+                item = Gio.MenuItem.new(label, None)
+                item.set_action_and_target_value(
+                    f"filter.{axis}", GLib.Variant.new_string(value)
+                )
+                section.append_item(item)
+            menu.append_section(title, section)
+        slider = self._build_focal_sliders()
+        if slider is not None:
+            section = Gio.Menu()
+            item = Gio.MenuItem.new(None, None)
+            item.set_attribute_value(
+                "custom", GLib.Variant.new_string("focal")
+            )
+            section.append_item(item)
+            menu.append_section("Focal length", section)
+        footer = Gio.Menu()
+        footer.append("Clear filter", "filter.clear")
+        menu.append_section(None, footer)
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        if slider is not None:
+            popover.add_child(slider, "focal")
+        button.set_popover(popover)
+
+    def _build_focal_sliders(self) -> Gtk.Widget | None:
+        """The from/to focal-length sliders, snapping to folder values."""
+        focals = [f for f in self.known_focals() if _focal_mm(f) is not None]
+        if len(focals) < _MIN_SLIDER_STOPS:
+            return None
+        top = len(focals) - 1
+        lo_idx, hi_idx = self._focal_indices(focals)
+        grid = Gtk.Grid(column_spacing=8, row_spacing=2)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        grid.set_margin_top(4)
+        grid.set_margin_bottom(4)
+        summary = Gtk.Label(xalign=0)
+        summary.add_css_class("dim-label")
+        grid.attach(summary, 0, 0, 2, 1)
+        scales: list[Gtk.Scale] = []
+        for row, (label, index) in enumerate(
+            (("From", lo_idx), ("To", hi_idx)), start=1
+        ):
+            scale = Gtk.Scale.new_with_range(
+                Gtk.Orientation.HORIZONTAL, 0, top, 1
+            )
+            scale.set_round_digits(0)
+            scale.set_draw_value(False)
+            scale.set_hexpand(True)
+            scale.set_size_request(180, -1)
+            scale.set_value(index)
+            grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
+            grid.attach(scale, 1, row, 1, 1)
+            scales.append(scale)
+        low, high = scales
+        syncing = [False]
+
+        def refresh(source: Gtk.Scale) -> None:
+            if syncing[0]:
+                return
+            lo = round(low.get_value())
+            hi = round(high.get_value())
+            if lo > hi:
+                syncing[0] = True
+                if source is low:
+                    high.set_value(lo)
+                    hi = lo
+                else:
+                    low.set_value(hi)
+                    lo = hi
+                syncing[0] = False
+            summary.set_text(f"{focals[lo]}  to  {focals[hi]}")
+            wanted = None
+            if (lo, hi) != (0, top):
+                mm_lo = _focal_mm(focals[lo])
+                mm_hi = _focal_mm(focals[hi])
+                if mm_lo is not None and mm_hi is not None:
+                    wanted = (mm_lo, mm_hi)
+            if wanted != self._filter_focal:
+                self.set_filter(
+                    model=self._filter_model,
+                    lens=self._filter_lens,
+                    focal=wanted,
+                )
+
+        low.connect("value-changed", refresh)
+        high.connect("value-changed", refresh)
+        summary.set_text(f"{focals[lo_idx]}  to  {focals[hi_idx]}")
+        return grid
+
+    def _focal_indices(self, focals: list[str]) -> tuple[int, int]:
+        """The slider positions matching the active focal filter."""
+        top = len(focals) - 1
+        if self._filter_focal is None:
+            return 0, top
+        lo_mm, hi_mm = self._filter_focal
+        values = [_focal_mm(f) or 0.0 for f in focals]
+        lo = next((i for i, v in enumerate(values) if v >= lo_mm), 0)
+        hi = next((i for i in range(top, -1, -1) if values[i] <= hi_mm), top)
+        return lo, max(lo, hi)
+
+    def _on_filter_action(
+        self, action: Gio.SimpleAction, value: GLib.Variant, _axis: str
+    ) -> None:
+        """Apply a radio pick from the filter menu."""
+        action.set_state(value)
+        self.set_filter(
+            model=self._filter_actions["model"].get_state().get_string(),
+            lens=self._filter_actions["lens"].get_state().get_string(),
+            focal=self._filter_focal,
+        )
+
+    def _on_filter_cleared(self, *_args: object) -> None:
+        """Reset every filter axis."""
+        self.set_filter(model=None, lens=None, focal=None)
 
     def _init_file_actions(self) -> None:
         """Install the context-menu action group for file operations."""
@@ -261,10 +423,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         if folder == self._folder and 0 <= self._current < len(self._paths):
             keep = self._paths[self._current]
         self._clear()
+        self._meta = {}
         if folder != self._folder:
-            # A new folder invalidates any in-progress selection.
             self._select_mode = False
             self.clear_selection()
+            self.set_filter(model=None, lens=None, focal=None)
             self._folder = folder
             self._watch(folder)
 
@@ -551,10 +714,10 @@ class FilmStrip(Gtk.ScrolledWindow):
         return [p for p in self._paths if p in self._selected]
 
     def select_all(self) -> None:
-        """Select every thumbnail (batch-select mode only)."""
+        """Select every visible thumbnail (batch-select mode only)."""
         if not self._select_mode:
             return
-        self._selected = set(self._paths)
+        self._selected = {self._paths[i] for i in self._visible_indices()}
         self._apply_selection_style()
         self._notify_selection()
 
@@ -582,6 +745,91 @@ class FilmStrip(Gtk.ScrolledWindow):
         """Report the current selection size to the listener."""
         if self._on_selection_changed is not None:
             self._on_selection_changed(len(self._selected))
+
+    def set_filter(
+        self,
+        *,
+        model: str | None,
+        lens: str | None,
+        focal: tuple[float, float] | None,
+    ) -> None:
+        """Show only cards matching the active filter axes."""
+        self._filter_model = model or None
+        self._filter_lens = lens or None
+        self._filter_focal = focal
+        self._apply_filter()
+        states = (("model", self._filter_model), ("lens", self._filter_lens))
+        for axis, value in states:
+            action = self._filter_actions.get(axis)
+            if action is not None:
+                action.set_state(GLib.Variant.new_string(value or ""))
+        if self.filter_button is not None:
+            active = bool(
+                self._filter_model or self._filter_lens or self._filter_focal
+            )
+            if active:
+                self.filter_button.add_css_class("accent")
+            else:
+                self.filter_button.remove_css_class("accent")
+
+    def known_models(self) -> list[str]:
+        """Camera models present in the folder, sorted."""
+        return sorted({m.model for m in self._meta.values() if m.model})
+
+    def known_lenses(self) -> list[str]:
+        """Lens models present in the folder, sorted."""
+        return sorted({m.lens for m in self._meta.values() if m.lens})
+
+    def known_focals(self) -> list[str]:
+        """Focal lengths present in the folder, sorted numerically."""
+        focals = {m.focal for m in self._meta.values() if m.focal}
+        return sorted(
+            focals,
+            key=lambda f: (_focal_mm(f) is None, _focal_mm(f) or 0.0, f),
+        )
+
+    def _focal_passes(self, focal: str) -> bool:
+        """Whether a card's focal length passes the focal filter."""
+        if self._filter_focal is None:
+            return True
+        value = _focal_mm(focal)
+        if value is None:
+            return False
+        lo, hi = self._filter_focal
+        return lo <= value <= hi
+
+    def _matches_filter(self, path: str) -> bool:
+        """Whether a card passes the active filter."""
+        meta = self._meta.get(path)
+        if meta is None:
+            return True
+        if self._filter_model is not None and meta.model != self._filter_model:
+            return False
+        if self._filter_lens is not None and meta.lens != self._filter_lens:
+            return False
+        return self._focal_passes(meta.focal)
+
+    def _apply_filter(self) -> None:
+        """Show/hide cards per the filter, dropping hidden marks."""
+        visible: set[str] = set()
+        for path, button in zip(self._paths, self._buttons, strict=False):
+            match = self._matches_filter(path)
+            button.set_visible(match)
+            if match:
+                visible.add(path)
+        hidden_marks = self._selected - visible
+        if hidden_marks:
+            self._selected &= visible
+            self._apply_selection_style()
+            self._notify_selection()
+
+    def _visible_indices(self) -> list[int]:
+        """Indices of the cards the filter currently shows."""
+        return [
+            i
+            for i, path in enumerate(self._paths)
+            if self._matches_filter(path)
+        ]
 
     def scroll_step(self, direction: int) -> None:
         """Scroll the strip by one thumbnail card, keeping the selection.
@@ -643,30 +891,38 @@ class FilmStrip(Gtk.ScrolledWindow):
         return True
 
     def select_relative(self, delta: int) -> None:
-        """Select the image delta positions away (for keyboard nav)."""
-        if not self._paths:
+        """Select the image delta positions away."""
+        visible = self._visible_indices()
+        if not visible:
             return
-        if self._current < 0:
-            index = 0
+        if self._current in visible:
+            position = visible.index(self._current)
+            position = max(0, min(position + delta, len(visible) - 1))
+            index = visible[position]
         else:
-            index = max(0, min(self._current + delta, len(self._paths) - 1))
+            index = visible[0]
         if index != self._current:
             self._set_current(index)
             self._on_select(self._paths[index])
 
     def _apply_thumb(
         self,
+        path: str,
         picture: Any,
         camera_label: Any,
         pixbuf: Any,
-        model: str,
+        meta: ThumbMeta,
         scan_id: int,
     ) -> None:
-        """Set the thumbnail and camera caption of one card."""
-        if scan_id == self._scan_id:
-            picture.set_size_request(pixbuf.get_width(), self._thumb_height)
-            picture.set_paintable(texture_for_pixbuf(pixbuf))
-            camera_label.set_text(model)
+        """Set the thumbnail, caption and filter metadata of one card."""
+        if scan_id != self._scan_id:
+            return
+        picture.set_size_request(pixbuf.get_width(), self._thumb_height)
+        picture.set_paintable(texture_for_pixbuf(pixbuf))
+        camera_label.set_text(meta.model)
+        self._meta[path] = meta
+        if self._filter_model or self._filter_lens or self._filter_focal:
+            self._apply_filter()
 
     def _loading_done(self, scan_id: int) -> None:
         """Signal that this scan's thumbnails have finished decoding."""
