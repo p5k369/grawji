@@ -147,6 +147,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self._dragged: str | None = None
         self._groups: list[Adw.PreferencesGroup] = []
         self._banks: list[dict[str, Any]] = []
+        self._bank_names_loaded = False
         self._bank_recipe: dict[int, str] = {}
         self._fs_cards: list[dict[str, Any]] = []
         self._fs_recipe: dict[int, str] = {}
@@ -422,6 +423,7 @@ class RecipeManagerDialog(Adw.Dialog):
         """Reveal each bank's name row and fill it from the camera."""
         if not names:
             return
+        self._bank_names_loaded = True
         for bank, name in zip(self._banks, names, strict=False):
             bank["name_row"].set_visible(True)
             bank["name_label"].set_label(name)
@@ -437,6 +439,16 @@ class RecipeManagerDialog(Adw.Dialog):
             if text and text != bank["loaded"]:
                 out[slot] = text
         return out
+
+    def _transfer_names(self) -> dict[int, str]:
+        """Renames, plus default names for drops into unnamed banks."""
+        names = self._names_by_slot()
+        if not self._bank_names_loaded:
+            return names
+        for slot, recipe_name in self._bank_recipe.items():
+            if slot not in names and not self._banks[slot]["loaded"]:
+                names[slot] = recipe_name
+        return names
 
     def set_busy(self, busy: bool) -> None:
         """Disable Transfer while a transfer runs."""
@@ -463,10 +475,11 @@ class RecipeManagerDialog(Adw.Dialog):
         """Hand the bank/FS assignments and renames to the controller."""
         if self._on_transfer is None:
             return
-        if self._bank_recipe or self._fs_recipe or self._names_by_slot():
+        names = self._transfer_names()
+        if self._bank_recipe or self._fs_recipe or names:
             self._on_transfer(
                 dict(self._bank_recipe),
-                self._names_by_slot(),
+                names,
                 dict(self._fs_recipe),
             )
 
