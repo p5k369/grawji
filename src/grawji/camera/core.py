@@ -94,15 +94,6 @@ DEFAULT_TIMEOUT = 30
 # How long a USB device reset needs before the camera answers again.
 _USB_RESET_SETTLE_S = 2.0
 
-# Standard PTP opcodes for the thumbnail download path.
-_PTP_OK = 0x2001
-_GET_OBJECT_HANDLES = 0x1007
-_GET_OBJECT = 0x1009
-_GET_THUMB = 0x100A
-_DELETE_OBJECT = 0x100B
-# GetObjectHandles payload: u32 count + at least one u32 handle.
-_HANDLES_MIN_BYTES = 8
-
 
 def _reset_camera_usb() -> None:
     """Reset the camera's USB device to recover a wedged interface.
@@ -505,12 +496,11 @@ class CameraSession:
             try:
                 camera, base = self._open_attempt(raf_path)
             except ForeignRafError:
-                raise  # the camera is fine; a reset would not help
+                raise
             except Exception:
                 # A wedged USB interface (failed claim, bulk-write
-                # timeout) often recovers with one device reset; retry
-                # the whole open once after it. Opening is safe to retry
-                # - no conversion is in flight yet.
+                # timeout) often recovers with one device reset.
+                # Opening is safe to retry - no conversion is in flight yet.
                 self._usb_reset()
                 camera, base = self._open_attempt(raf_path)
             self._camera = camera
@@ -564,10 +554,8 @@ class CameraSession:
 
         Renders the camera's fast preview but downloads only its
         thumbnail. On the X-E5 that is a 640x480 letterboxed JPEG of ~40 KB in
-        ~12 ms, against a 4 MB preview. Falls back to the full preview
-        download on bodies where GetThumb is refused.
-
-        TODO: update that if rawji has implemented this function
+        ~12 ms, against a 4 MB preview. rawji falls back to the full
+        preview download on bodies where GetThumb is refused.
 
         Raises:
             SessionStateError: If no RAF is open.
@@ -578,36 +566,10 @@ class CameraSession:
             profile = apply_recipe(self._base_profile, recipe)
             self._camera.set_profile(profile)
             self._camera.trigger_conversion(full_resolution=False)
-            handle = self._wait_result_handle(self._camera)
-            if handle is None:
-                raise CameraError("conversion produced no result object")
-            code, _params, thumb = self._camera.send_command(
-                _GET_THUMB, [handle]
+            return cast(
+                "bytes",
+                self._camera.wait_for_result(self._timeout, thumbnail=True),
             )
-            if code != _PTP_OK or not thumb:
-                jpeg = cast(
-                    "bytes",
-                    self._camera.send_command(_GET_OBJECT, [handle])[2],
-                )
-                self._camera.send_command(_DELETE_OBJECT, [handle])
-                return jpeg
-            self._camera.send_command(_DELETE_OBJECT, [handle])
-            return bytes(thumb)
-
-    def _wait_result_handle(self, camera: Any) -> int | None:
-        """Poll for the conversion result's object handle."""
-        deadline = time.time() + self._timeout
-        while time.time() < deadline:
-            code, _params, data = camera.send_command(
-                _GET_OBJECT_HANDLES, [0xFFFFFFFF, 0x0000, 0x00000000]
-            )
-            if code == _PTP_OK and len(data) >= _HANDLES_MIN_BYTES:
-                count = struct.unpack("<I", data[:4])[0]
-                if count > 0:
-                    handle: int = struct.unpack("<I", data[4:8])[0]
-                    return handle
-            time.sleep(0.05)
-        return None
 
     def transfer_bank_recipes(
         self,

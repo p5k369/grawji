@@ -12,7 +12,6 @@ RAFs natively on Linux through the **real camera engine** (authentic film
 simulations, identical to X RAW STUDIO).
 
 The name is **g**(tk) + **rawji** (/dʒiː ˈrɔː dʒiː/).
-export.
 
 <p align="center">
   <img src="docs/screenshot.png" alt="grawji main window: original + EXIF on the
