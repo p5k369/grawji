@@ -75,7 +75,7 @@ UNSET_SENTINEL = 0x8000
 _GRAIN_OFF_WRITE = 1
 _GRAIN_OFF_STORED = frozenset({6, 7})
 
-_DR_PERCENT = {"DR100": 100, "DR200": 200, "DR400": 400}
+_DR_PERCENT = {"Auto": 0xFFFF, "DR100": 100, "DR200": 200, "DR400": 400}
 
 # Only the Acros/Monochrome families take the mono toning values. Those
 # plus Sepia lock the color axis (the camera greys it out), so the

@@ -391,7 +391,7 @@ def _set_dr(value: str, fields: dict[str, object], notes: list[str]) -> None:
             fields["dynamic_range"] = f"DR{amount}"
             return
     if "auto" in key:
-        notes.append("Dynamic Range Auto is capture-time; kept DR100")
+        fields["dynamic_range"] = "Auto"
         return
     notes.append(f"unknown dynamic range: {value}")
 

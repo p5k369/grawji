@@ -31,7 +31,7 @@ from grawji.views.widgets import MonoColorGrid, SliderRow, WBShiftGrid
 
 _FILM_SIMULATIONS = list(FILM_SIMULATIONS)
 _WHITE_BALANCES = [e.name for e in rawji.WhiteBalance]
-_DYNAMIC_RANGES = [e.name for e in rawji.DynamicRange]
+_DYNAMIC_RANGES = ["Auto", *(e.name for e in rawji.DynamicRange)]
 _GRAINS = [e.name for e in GrainEffect]
 _GRAIN_SIZES = [e.name for e in GrainEffectSize]
 _CHROME = [e.name for e in ChromeEffect]

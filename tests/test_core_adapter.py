@@ -566,6 +566,18 @@ def test_context_manager_closes():
     assert "disconnect" in cam.calls
 
 
+def test_dr_auto_leaves_the_shot_dr_untouched():
+    """dynamic_range="Auto" must not patch the DR slot."""
+    from grawji.camera.core import _PARAM_OFFSETS, apply_recipe
+
+    base = bytes(FULL_PROFILE)
+    offset = _PARAM_OFFSETS["DynamicRange"]
+    patched = apply_recipe(base, Recipe(dynamic_range="Auto"))
+    assert patched[offset : offset + 4] == base[offset : offset + 4]
+    patched = apply_recipe(base, Recipe(dynamic_range="DR400"))
+    assert patched[offset : offset + 4] != base[offset : offset + 4]
+
+
 def test_render_thumb_requests_the_thumbnail():
     """render_thumb triggers a preview and asks rawji for the thumb."""
     camera = FakeCamera(profile=bytes(FULL_PROFILE))

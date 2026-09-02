@@ -64,7 +64,12 @@ _WHITE_BALANCE = {
 _GRAIN = {"OFF": "Off", "WEAK": "Weak", "STRONG": "Strong"}
 _GRAIN_SIZE = {"SMALL": "Small", "LARGE": "Large"}
 _CHROME = {"OFF": "Off", "WEAK": "Weak", "STRONG": "Strong"}
-_DYNAMIC_RANGE = {"100": "DR100", "200": "DR200", "400": "DR400"}
+_DYNAMIC_RANGE = {
+    "AUTO": "Auto",
+    "100": "DR100",
+    "200": "DR200",
+    "400": "DR400",
+}
 _COLOR_SPACE = {"sRGB": "sRGB", "AdobeRGB": "AdobeRGB"}
 # Two-digit thirds in an exposure token map to 0, 1/3 or 2/3 of an EV.
 _THIRDS = {"": 0, "0": 0, "00": 0, "33": 1, "67": 2}

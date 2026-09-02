@@ -82,12 +82,12 @@ def test_film_sim_spellings():
         assert parsed.recipe.film_simulation == expected, spelled
 
 
-def test_dr_auto_keeps_default_with_note():
-    """DR Auto cannot be converted and keeps DR100."""
+def test_dr_auto_is_a_first_class_value():
+    """DR Auto parses as "Auto"."""
     parsed = parse_recipe_text("Dynamic Range: DR-Auto\nColor: 0")
     assert parsed is not None
-    assert parsed.recipe.dynamic_range == "DR100"
-    assert any("Auto" in note for note in parsed.notes)
+    assert parsed.recipe.dynamic_range == "Auto"
+    assert parsed.notes == []
 
 
 def test_monochromatic_color():
@@ -187,7 +187,7 @@ def test_table_style_recipe():
     assert parsed is not None
     recipe = parsed.recipe
     assert recipe.film_simulation == "ClassicNeg"
-    assert recipe.dynamic_range == "DR100"
+    assert recipe.dynamic_range == "Auto"
     assert recipe.grain == "Weak"
     assert recipe.grain_size == "Small"
     assert recipe.color_chrome == "Weak"
