@@ -120,6 +120,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._on_file_action = on_file_action
         self._drag_action = drag_action
         self._menu_paths: list[str] = []
+        self._menu_click_path: str | None = None
         self._init_file_actions()
         self._dispatch = dispatch
         self._thumb_height = thumb_height
@@ -322,7 +323,7 @@ class FilmStrip(Gtk.ScrolledWindow):
     def _init_file_actions(self) -> None:
         """Install the context-menu action group for file operations."""
         group = Gio.SimpleActionGroup()
-        for kind in ("export", "copy", "move", "trash"):
+        for kind in ("open-with", "export", "copy", "move", "trash"):
             action = Gio.SimpleAction.new(kind, None)
             action.connect("activate", partial(self._on_menu_action, kind))
             group.add_action(action)
@@ -330,7 +331,13 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _on_menu_action(self, kind: str, *_args: object) -> None:
         """Forward a context-menu choice with its captured paths."""
-        if self._on_file_action is not None and self._menu_paths:
+        if self._on_file_action is None:
+            return
+        if kind == "open-with":
+            if self._menu_click_path is not None:
+                self._on_file_action(kind, [self._menu_click_path])
+            return
+        if self._menu_paths:
             self._on_file_action(kind, self._menu_paths)
 
     def _card_paths(self, path: str) -> list[str]:
@@ -351,9 +358,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         """Open the file-operations menu for the right-clicked card."""
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._menu_paths = self._card_paths(path)
+        self._menu_click_path = path
         count = len(self._menu_paths)
         suffix = f" ({count})" if count > 1 else ""
         menu = Gio.Menu()
+        menu.append("Open With…", "fileops.open-with")
         menu.append(f"Export{suffix}…", "fileops.export")
         menu.append(f"Copy to…{suffix}", "fileops.copy")
         menu.append(f"Move to…{suffix}", "fileops.move")

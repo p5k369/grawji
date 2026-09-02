@@ -83,6 +83,27 @@ def make_controller(
     return controller, strip, state
 
 
+def test_open_with_launches_the_app_chooser(monkeypatch):
+    """Open With asks the portal chooser for exactly that file."""
+    launched: list[tuple[str, bool]] = []
+
+    class FakeLauncher:
+        def __init__(self, *, file):
+            self._file = file
+            self._ask = False
+
+        def set_always_ask(self, ask):
+            self._ask = ask
+
+        def launch(self, _parent, _cancellable, _done):
+            launched.append((self._file.get_path(), self._ask))
+
+    monkeypatch.setattr(module.Gtk, "FileLauncher", FakeLauncher)
+    controller, _strip, _state = make_controller()
+    controller.on_file_action("open-with", ["/pics/a.RAF", "/pics/b.RAF"])
+    assert launched == [("/pics/a.RAF", True)]
+
+
 def test_export_action_routes_to_batch():
     """The context menu's export starts a batch with those paths."""
     controller, _strip, state = make_controller()

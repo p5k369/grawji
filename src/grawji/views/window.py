@@ -639,17 +639,18 @@ class MainWindow(Adw.ApplicationWindow):
         ).launch(self, None, None)
 
     def open_raf(self, path: str) -> None:
-        """Open a RAF from outside (file manager or command line).
-
-        Scans the file's folder into the filmstrip and selects it,
-        driving the normal selection pipeline.
-        """
-        folder = str(Path(path).parent)
+        """Open a RAF or a folder from outside."""
+        target = Path(path)
+        if target.is_dir():
+            self._scan_folder(str(target))
+            self._foldertree.reveal_path(str(target))
+            return
+        folder = str(target.parent)
         self._scan_folder(folder)
         self._foldertree.reveal_path(folder)
         if not self._filmstrip.select_path(path):
             self.preview_view.set_status(
-                f"{Path(path).name} is not in the filmstrip."
+                f"{target.name} is not in the filmstrip."
             )
 
     def _read_iopcode(self) -> int | None:

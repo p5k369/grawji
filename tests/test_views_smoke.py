@@ -171,6 +171,30 @@ def test_modified_recipe_survives_image_open(
     assert renders == [1]
 
 
+def test_open_raf_routes_files_and_folders(
+    window: Any, monkeypatch: Any, tmp_path: Any
+) -> None:
+    """A folder argument scans, a file scans its folder and selects."""
+    scans: list[str] = []
+    selected: list[str] = []
+    monkeypatch.setattr(window, "_scan_folder", scans.append)
+    monkeypatch.setattr(window._foldertree, "reveal_path", lambda _p: None)
+
+    def fake_select(path: str) -> bool:
+        selected.append(path)
+        return True
+
+    monkeypatch.setattr(window._filmstrip, "select_path", fake_select)
+    window.open_raf(str(tmp_path))
+    assert scans == [str(tmp_path)]
+    assert selected == []
+    raf = tmp_path / "a.RAF"
+    raf.write_bytes(b"raf")
+    window.open_raf(str(raf))
+    assert scans == [str(tmp_path), str(tmp_path)]
+    assert selected == [str(raf)]
+
+
 def _manager(tmp_path: Any) -> Any:
     """A RecipeManagerDialog over a library holding ampersand names."""
     from grawji.views.recipe_manager import RecipeManagerDialog
