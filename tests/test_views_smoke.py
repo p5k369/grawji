@@ -113,6 +113,24 @@ def test_modified_rows_get_the_tint() -> None:
     assert not panel._clarity_row.has_css_class("recipe-modified")
 
 
+def test_unsaved_recipe_arms_the_guards_without_row_marks() -> None:
+    """A pasted recipe needs saving but shows no per-row edits."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(
+        Recipe(film_simulation="Velvia"), "Kodachrome 64", unsaved=True
+    )
+    assert panel.needs_save
+    assert not panel.is_modified
+    assert not panel.film_row.has_css_class("recipe-modified")
+    assert "(unsaved)" in panel.recipe_group.get_description()
+    panel.set_active(panel.get_recipe(), "Kodachrome 64")
+    assert not panel.needs_save
+
+
 def test_panel_starts_unmodified() -> None:
     """A fresh panel must not count its own defaults as edits."""
     from grawji.views.recipe_panel import RecipePanel
@@ -186,7 +204,6 @@ def _manager(tmp_path: Any) -> Any:
     noop1 = lambda *_a: None  # noqa: E731
     dialog = RecipeManagerDialog(
         library=library,
-        on_import=noop1,
         on_export=noop1,
         on_delete=noop1,
         on_rename=noop1,

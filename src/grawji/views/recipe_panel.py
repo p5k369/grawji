@@ -82,6 +82,7 @@ class RecipePanel(Adw.PreferencesPage):
     __gsignals__: ClassVar[dict[str, Any]] = {
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "apply-recipe": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "paste-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     recipe_row = Gtk.Template.Child()
@@ -99,6 +100,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._suppress_signals = False
         self._recipe_names: list[str] = []
         self._applied_recipe = Recipe()
+        self._active_unsaved = False
         self._active_label = FROM_IMAGE_LABEL
         self.recipe_button.set_label(FROM_IMAGE_LABEL)
 
@@ -106,6 +108,9 @@ class RecipePanel(Adw.PreferencesPage):
         apply_action = Gio.SimpleAction.new("apply", GLib.VariantType.new("s"))
         apply_action.connect("activate", self._on_apply_action)
         self._apply_actions.add_action(apply_action)
+        paste_action = Gio.SimpleAction.new("paste", None)
+        paste_action.connect("activate", lambda *_a: self.emit("paste-recipe"))
+        self._apply_actions.add_action(paste_action)
         self.insert_action_group("recipe", self._apply_actions)
 
         self._build_rows()
@@ -376,9 +381,12 @@ class RecipePanel(Adw.PreferencesPage):
         finally:
             self._suppress_signals = False
 
-    def set_active(self, recipe: Recipe, label: str) -> None:
+    def set_active(
+        self, recipe: Recipe, label: str, *, unsaved: bool = False
+    ) -> None:
         """Load a recipe and mark it active."""
         self._active_label = label
+        self._active_unsaved = unsaved
         self.set_recipe(recipe)
         self._applied_recipe = self.get_recipe()
         self._update_status()
@@ -388,6 +396,16 @@ class RecipePanel(Adw.PreferencesPage):
     def active_label(self) -> str:
         """The label of the recipe/source the controls came from."""
         return self._active_label
+
+    @property
+    def active_unsaved(self) -> bool:
+        """Whether the active recipe is not stored in the library yet."""
+        return self._active_unsaved
+
+    @property
+    def needs_save(self) -> bool:
+        """Whether switching away would lose work."""
+        return self.is_modified or self._active_unsaved
 
     @property
     def is_modified(self) -> bool:
@@ -454,6 +472,7 @@ class RecipePanel(Adw.PreferencesPage):
         # The dynamic "From image" selection is the default.
         special = Gio.Menu()
         special.append_item(self._apply_item(FROM_IMAGE_LABEL, FROM_IMAGE))
+        special.append("Paste from Clipboard…", "recipe.paste")
         menu.append_section(None, special)
         top = Gio.Menu()
         for name in ungrouped:
@@ -649,6 +668,10 @@ class RecipePanel(Adw.PreferencesPage):
         if self.is_modified:
             self.recipe_group.set_description(
                 f"{self._active_label} (modified)"
+            )
+        elif self._active_unsaved:
+            self.recipe_group.set_description(
+                f"{self._active_label} (unsaved)"
             )
         else:
             self.recipe_group.set_description(self._active_label)

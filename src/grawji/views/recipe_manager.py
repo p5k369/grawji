@@ -18,6 +18,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 from grawji.camera import compatibility as compat
 from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
+from grawji.recipe_text import parse_recipe_text
 from grawji.recipes import UNGROUPED, RecipeLibrary
 from grawji.views import dialogs
 from grawji.views.camera_pane import CameraPane
@@ -40,7 +41,6 @@ class RecipeManagerDialog(Adw.Dialog):
     __gtype_name__ = "GrawjiRecipeManagerDialog"
 
     toasts = Gtk.Template.Child()
-    import_button = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
     transfer_button = Gtk.Template.Child()
     content = Gtk.Template.Child()
@@ -51,7 +51,6 @@ class RecipeManagerDialog(Adw.Dialog):
         self,
         *,
         library: RecipeLibrary,
-        on_import: Callable[[], None],
         on_export: Callable[[str], None],
         on_delete: Callable[[str], None],
         on_rename: Callable[[str, str], None],
@@ -77,7 +76,6 @@ class RecipeManagerDialog(Adw.Dialog):
         self._library = library
         self._get_capabilities = get_capabilities
         self._caps = get_capabilities() if get_capabilities else None
-        self._on_import = on_import
         self._on_export = on_export
         self._on_delete = on_delete
         self._on_rename = on_rename
@@ -95,7 +93,6 @@ class RecipeManagerDialog(Adw.Dialog):
         self._groups: list[Adw.PreferencesGroup] = []
         self._toast: Adw.Toast | None = None
 
-        self.import_button.connect("clicked", lambda *_a: self._on_import())
         self.new_folder_button.connect("clicked", self._on_new_folder)
         self.transfer_button.connect("clicked", self._on_transfer_clicked)
         self.refresh()
@@ -497,7 +494,6 @@ class RecipeLibraryController:
         """Open the recipe manager modal."""
         self._manager = RecipeManagerDialog(
             library=self._library,
-            on_import=self.import_fp,
             on_export=self.export_fp,
             on_delete=self._delete,
             on_rename=self._rename,
@@ -575,7 +571,8 @@ class RecipeLibraryController:
         A modified saved recipe prefills its own name.
         """
         label = self._panel.active_label
-        default = label if self._library.get(label) is not None else ""
+        known = self._library.get(label) is not None
+        default = label if known or self._panel.active_unsaved else ""
         self._prompt_save(self._panel.get_recipe(), default)
 
     def apply(self, name: str) -> None:
@@ -599,6 +596,39 @@ class RecipeLibraryController:
         if verdict.level == compat.DEGRADED:
             return f" On this body: {'; '.join(verdict.issues)}."
         return ""
+
+    def paste_text(self) -> None:
+        """Create a recipe from community text on the clipboard."""
+        clipboard = self._parent.get_clipboard()
+        clipboard.read_text_async(None, self._on_paste_text)
+
+    def _on_paste_text(self, clipboard: Any, result: Any) -> None:
+        """Parse the clipboard text and apply it right away."""
+        try:
+            text = clipboard.read_text_finish(result)
+        except GLib.Error:
+            text = None
+        parsed = parse_recipe_text(text or "")
+        if parsed is None:
+            self._on_status("The clipboard holds no recognizable recipe text.")
+            if self._manager is not None:
+                self._manager.show_toast("No recipe found in the clipboard.")
+            return
+        self._apply_unsaved(parsed.recipe, parsed.title or "Pasted recipe")
+        if parsed.notes:
+            skipped = "; ".join(parsed.notes[:3])
+            self._on_status(f"Pasted with notes: {skipped}")
+
+    def _apply_unsaved(self, recipe: Recipe, title: str) -> None:
+        """Apply an imported/pasted recipe right away, marked unsaved."""
+        self._panel.set_active(recipe, title, unsaved=True)
+        self._on_render()
+        self._on_status(
+            f"Applied “{title}” (not saved yet — the save button "
+            "stores it)."
+        )
+        if self._manager is not None:
+            self._manager.show_toast(f"Applied “{title}” (unsaved).")
 
     def import_fp(self) -> None:
         """Pick an X RAW Studio FP file and import its recipe."""
@@ -770,7 +800,7 @@ class RecipeLibraryController:
         except (OSError, ValueError) as exc:
             self._on_status(f"Could not import recipe: {exc}")
             return
-        self._prompt_save(recipe, Path(path).stem, activate=True)
+        self._apply_unsaved(recipe, Path(path).stem)
 
     def _on_export_response(
         self, dialog: Any, result: Any, name: str, recipe: Recipe

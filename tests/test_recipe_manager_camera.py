@@ -29,7 +29,6 @@ def _dialog(tmp_path, *, model, on_transfer=_NOOP):
     library.add("Acros look", Recipe(film_simulation="Acros"))
     dialog = RecipeManagerDialog(
         library=library,
-        on_import=_NOOP,
         on_export=_NOOP,
         on_delete=_NOOP,
         on_rename=_NOOP,
