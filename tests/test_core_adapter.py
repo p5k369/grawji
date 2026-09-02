@@ -173,14 +173,16 @@ def test_apply_recipe_patches_film_sim():
 
 
 def test_apply_recipe_patches_enums():
-    """White balance and dynamic range use rawji's enum profile values."""
+    """White balance uses rawji's enum, DR the raw percentage."""
     base = bytes(608)
     patched = apply_recipe(
         base, Recipe(white_balance="Daylight", dynamic_range="DR400")
     )
     assert _u32(patched, OFF_WHITE_BALANCE) == 4  # WhiteBalance.Daylight
     assert _u32(patched, OFF_WB_SHOOTCOND) == 2  # gating: use manual WB
-    assert _u32(patched, OFF_DYNAMIC_RANGE) == 3  # DynamicRange.DR400
+    # todo: raw percentage, not the 1/2/3 codes upstream rawji still carries
+    #  (silently ignored by the engine, pinpox/rawji#16).
+    assert _u32(patched, OFF_DYNAMIC_RANGE) == 400
 
 
 def test_apply_recipe_asshot_leaves_white_balance_untouched():

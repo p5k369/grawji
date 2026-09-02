@@ -100,6 +100,65 @@ def test_monochromatic_color():
     assert parsed.recipe.mono_magenta_green == -3
 
 
+def test_british_colour_spellings():
+    """British "Colour" labels fold to their American handler keys."""
+    parsed = parse_recipe_text(
+        "Film Simulation    Acros+R\n"
+        "Grain Effect    Strong / Large\n"
+        "Monochromatic Colour    WC: -1, MG: 0\n"
+        "Highlights    +4\n"
+        "Shadows    +4\n"
+        "Sharpness    +1\n"
+        "Noise Reduction    -4\n"
+        "Clarity    +3"
+    )
+    assert parsed is not None
+    assert parsed.notes == []
+    recipe = parsed.recipe
+    assert recipe.film_simulation == "AcrosR"
+    assert recipe.grain == "Strong"
+    assert recipe.grain_size == "Large"
+    assert recipe.mono_warm_cool == -1
+    assert recipe.mono_magenta_green == 0
+    assert recipe.highlights == 4.0
+    assert recipe.shadows == 4.0
+    assert recipe.sharpness == 1
+    assert recipe.noise_reduction == -4
+    assert recipe.clarity == 3
+
+
+def test_unset_wb_and_dr_default_to_auto():
+    """A paste without WB or DR lines means Auto, not AsShot/DR100."""
+    parsed = parse_recipe_text("Film Simulation: Classic Chrome")
+    assert parsed is not None
+    assert parsed.recipe.white_balance == "Auto"
+    assert parsed.recipe.dynamic_range == "Auto"
+
+
+def test_explicit_wb_and_dr_beat_the_auto_default():
+    """Stated WB and DR values still win over the paste defaults."""
+    parsed = parse_recipe_text(
+        "Film Simulation: Classic Chrome\n"
+        "White Balance: Daylight\n"
+        "Dynamic Range: DR400"
+    )
+    assert parsed is not None
+    assert parsed.recipe.white_balance == "Daylight"
+    assert parsed.recipe.dynamic_range == "DR400"
+
+
+def test_colour_saturation_label():
+    """A bare "Colour" label routes to the color value."""
+    parsed = parse_recipe_text(
+        "Film Simulation: Classic Chrome\n"
+        "Colour: +2\n"
+        "Colour Chrome FX Blue: Weak"
+    )
+    assert parsed is not None
+    assert parsed.recipe.color == 2
+    assert parsed.recipe.color_chrome_blue == "Weak"
+
+
 def test_toning_single_value_is_warm_cool():
     """An old-style single Toning value lands on warm-cool."""
     parsed = parse_recipe_text("Film Simulation: Acros\nToning: +1 (warm)")
