@@ -231,7 +231,7 @@ LAYOUTS: dict[str, BankLayout] = {
 _BYTE_MAX = 255
 _GRAIN_CODES = {"Strong": 0, "Weak": 1, "Off": 2}
 _CHROME_CODES = {"Off": 0, "Weak": 1, "Strong": 2}
-_DR_CODES = {"DR100": 1, "DR200": 2, "DR400": 3}
+_DR_CODES = {"Auto": 0, "DR100": 1, "DR200": 2, "DR400": 3}
 
 
 def _normalize_model(model: str) -> str:

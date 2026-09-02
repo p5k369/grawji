@@ -18,7 +18,7 @@ class Recipe:
         film_simulation: Film simulation, e.g. "Velvia".
         white_balance: White-balance mode, e.g. "Daylight". Use
             "Temperature" to drive color_temp.
-        dynamic_range: Dynamic range: "DR100", "DR200" or
+        dynamic_range: Dynamic range: "Auto", "DR100", "DR200" or
             "DR400".
         grain: Grain effect: "Off", "Weak" or "Strong".
         grain_size: Grain size: "Small" or "Large" (ignored when grain is

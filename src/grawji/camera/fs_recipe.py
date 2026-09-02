@@ -64,7 +64,7 @@ _WB_CODES = {
 }
 
 # DR codes: Auto=0, DR100=1, DR200=2 hardware-measured on the X-E5
-_DR_CODES = {"DR100": 1, "DR200": 2, "DR400": 3}
+_DR_CODES = {"Auto": 0, "DR100": 1, "DR200": 2, "DR400": 3}
 
 _CHROME_CODES = {"Off": 0, "Weak": 1, "Strong": 2}
 _GRAIN_ROUGH_CODES = {"Strong": 0, "Weak": 1, "Off": 2}

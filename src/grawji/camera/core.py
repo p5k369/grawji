@@ -253,9 +253,6 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
     changes = {
         "FilmSimulation": film_sim,
         "ExposureBias": ev_to_int(recipe.exposure),
-        "DynamicRange": _enum_value(
-            rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
-        ),
         # Grain effect and size share one slot (@545); see _grain_code.
         "GrainEffect": _grain_code(recipe.grain, recipe.grain_size),
         "ColorChromeEffect": _enum_value(
@@ -268,17 +265,25 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
             ColorChromeBlue, recipe.color_chrome_blue, "color chrome blue"
         ),
         "Clarity": _clamp_clarity(recipe.clarity),
-        "HighlightTone": recipe.highlights,
-        "ShadowTone": recipe.shadows,
-        "Color": recipe.color,
-        "Sharpness": recipe.sharpness,
-        "NoiseReduction": encode_noise_reduction(recipe.noise_reduction),
-        "ColorSpace": _enum_value(
-            ColorSpace, recipe.color_space, "color space"
-        ),
-        "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
-        "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
     }
+    if recipe.dynamic_range != "Auto":
+        changes["DynamicRange"] = _enum_value(
+            rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
+        )
+    changes.update(
+        {
+            "HighlightTone": recipe.highlights,
+            "ShadowTone": recipe.shadows,
+            "Color": recipe.color,
+            "Sharpness": recipe.sharpness,
+            "NoiseReduction": encode_noise_reduction(recipe.noise_reduction),
+            "ColorSpace": _enum_value(
+                ColorSpace, recipe.color_space, "color space"
+            ),
+            "WBShiftR": validate_wb_shift(recipe.wb_shift_r),
+            "WBShiftB": validate_wb_shift(recipe.wb_shift_b),
+        }
+    )
     # "AsShot" leaves the RAF's own white balance untouched.
     if recipe.white_balance != "AsShot":
         changes["WBShootCond"] = 2
