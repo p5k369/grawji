@@ -176,9 +176,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._install_assets()
 
         self._init_preview_wiring()
-        self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
-        self.recipe_panel.connect("changed", self._on_recipe_changed)
-        self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
+        self._connect_recipe_panel()
         self.export_button.connect("clicked", self._on_export_clicked)
 
         self._navigator = Navigator(
@@ -280,6 +278,12 @@ class MainWindow(Adw.ApplicationWindow):
         specs: tuple[tuple[str, Callable[[], None], tuple[str, ...]], ...] = (
             ("export", lambda: self._on_export_clicked(None), ("<Ctrl>e",)),
             ("save-recipe", self._library.save_current, ("<Ctrl>s",)),
+            ("import-recipe", self._library.import_fp, ()),
+            (
+                "paste-recipe",
+                self._library.paste_text,
+                ("<Ctrl><Shift>v",),
+            ),
             ("reset", self._reset_recipe, ("<Ctrl>r",)),
             ("preferences", self._on_preferences, ("<Ctrl>comma",)),
             ("batch-export", self._on_batch_export, ()),
@@ -542,7 +546,7 @@ class MainWindow(Adw.ApplicationWindow):
             return  # a newer selection has superseded this open
         carry = (
             self.recipe_panel.get_recipe()
-            if self.recipe_panel.is_modified
+            if self.recipe_panel.needs_save
             else None
         )
         profile = self._session.profile
@@ -791,6 +795,15 @@ class MainWindow(Adw.ApplicationWindow):
         )
         dialog.present(self)
 
+    def _connect_recipe_panel(self) -> None:
+        """Wire the recipe panel's settings and signals."""
+        self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
+        self.recipe_panel.connect("changed", self._on_recipe_changed)
+        self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
+        self.recipe_panel.connect(
+            "paste-recipe", lambda *_a: self._library.paste_text()
+        )
+
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
         """Apply the picker's choice, guarding unsaved recipe edits."""
         self._confirm_recipe_discard(partial(self._apply_choice, name))
@@ -806,16 +819,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _confirm_recipe_discard(self, proceed: Callable[[], None]) -> None:
         """Run proceed, first asking about unsaved recipe edits."""
-        if not self.recipe_panel.is_modified:
+        if not self.recipe_panel.needs_save:
             proceed()
             return
-        dialog = Adw.AlertDialog(
-            heading="Unsaved recipe changes",
-            body=(
-                f"The controls changed since "
-                f"“{self.recipe_panel.active_label}” was applied."
-            ),
+        label = self.recipe_panel.active_label
+        body = (
+            f"The controls changed since “{label}” was applied."
+            if self.recipe_panel.is_modified
+            else f"“{label}” has not been saved yet."
         )
+        dialog = Adw.AlertDialog(heading="Unsaved recipe changes", body=body)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("discard", "Discard")
         dialog.add_response("save", "Save…")
@@ -1269,7 +1282,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, _window: Any) -> bool:
         """Persist window size, stop the worker, then allow closing."""
-        if self.recipe_panel.is_modified and not self._close_confirmed:
+        if self.recipe_panel.needs_save and not self._close_confirmed:
             self._confirm_recipe_discard(self._close_discarded)
             return True
         self._settings.window_width = self.get_width()
