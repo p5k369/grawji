@@ -114,7 +114,7 @@ def test_as_shot_echoes_the_slot_wb_or_omits_the_cluster():
 
 
 def test_mono_sims_swap_color_for_the_toning_axes():
-    """Acros/Monochrome write WC/MG (when set) and never color."""
+    """Acros/Monochrome write WC/MG as value*10 and no color."""
     recipe = Recipe(
         film_simulation="AcrosYe", mono_warm_cool=4, mono_magenta_green=-2
     )

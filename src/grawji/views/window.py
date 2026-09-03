@@ -902,19 +902,17 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_busy(busy=False, status="Ready.")
 
     def _render_recipe_thumb(
-        self, recipe: Recipe, on_done: Callable[[bytes], None]
+        self, recipe: Recipe, on_done: Callable[[bytes | None], None]
     ) -> None:
         """Render a recipe against the current RAF into a small thumbnail.
 
         Renders the given recipe (not the panel's current controls) so a
         saved recipe's picture always matches the recipe itself. The
-        manager's bank pane closes the live session on open, so re-open
-        the RAF first when needed.
+        manager's bank pane closes the live session on open, so the job
+        re-opens the RAF first when needed.
         """
         if self._raf_path is None:
-            self.preview_view.set_status(
-                "Open an image to generate a recipe picture."
-            )
+            on_done(None)
             return
         generation = self._generation
         raf = str(self._raf_path)
@@ -922,28 +920,25 @@ class MainWindow(Adw.ApplicationWindow):
         # to the RAF's own so portrait shots are not stored sideways.
         orientation = imagemeta.exif_orientation(raf)
 
+        def task() -> bytes:
+            if not self._session.is_open:
+                self._session.open(raf)
+            return self._session.render_thumb(recipe)
+
         def finished(jpeg: bytes) -> None:
             if generation != self._generation:
                 return
             try:
-                small = thumb_jpeg(
-                    trim_letterbox(oriented_jpeg(jpeg, orientation))
-                )
+                upright = oriented_jpeg(jpeg, orientation)
+                on_done(thumb_jpeg(trim_letterbox(upright)))
             except GLib.Error:
-                return
-            on_done(small)
+                on_done(None)
 
-        def render(_result: object = None) -> None:
-            if generation != self._generation:
-                return
-            self._worker.render_thumb(
-                recipe, on_done=finished, on_error=self._on_error
-            )
+        def failed(exc: Exception) -> None:
+            self._on_error(exc)
+            on_done(None)
 
-        if self._session.is_open:
-            render()
-        else:
-            self._worker.open(raf, on_done=render, on_error=self._on_error)
+        self._worker.submit(task, on_done=finished, on_error=failed)
 
     def _on_recipe_manager_closed(self) -> None:
         """Re-open the current RAF if the manager closed its session."""

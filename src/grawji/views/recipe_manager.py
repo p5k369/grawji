@@ -554,7 +554,7 @@ class RecipeLibraryController:
         ) = None,
         run_transfer: Callable[..., None] | None = None,
         render_thumb: (
-            Callable[[Recipe, Callable[[bytes], None]], None] | None
+            Callable[[Recipe, Callable[[bytes | None], None]], None] | None
         ) = None,
     ) -> None:
         """Wire the controller.
@@ -850,13 +850,24 @@ class RecipeLibraryController:
         recipe = self._library.get(name)
         if recipe is None or self._render_thumb is None:
             return
-        self._render_thumb(recipe, lambda jpeg: self._store_thumb(name, jpeg))
+        if self._manager is not None:
+            self._manager.show_toast(f"Rendering picture for “{name}”…")
 
-    def _store_thumb(self, name: str, jpeg: bytes | None) -> None:
-        """Persist a rendered thumbnail and refresh the views."""
-        if jpeg and self._library.set_thumb(name, jpeg):
-            self._refresh()
-            self._on_status(f"Set the picture of “{name}”.")
+        def done(jpeg: bytes | None) -> None:
+            if jpeg and self._library.set_thumb(name, jpeg):
+                self._refresh()
+                self._toast(f"Set the picture of “{name}”.")
+            elif jpeg is None:
+                self._toast("Open an image to generate a recipe picture.")
+
+        self._render_thumb(recipe, done)
+
+    def _toast(self, message: str) -> None:
+        """Report to the manager toast if open, else the status line."""
+        if self._manager is not None:
+            self._manager.show_toast(message)
+        else:
+            self._on_status(message)
 
     def _clear_thumb(self, name: str) -> None:
         """Drop a recipe's thumbnail and refresh the views."""
@@ -936,14 +947,15 @@ class RecipeLibraryController:
         # Overwriting keeps the recipe in its folder.
         self._library.add(name, recipe, folder=self._library.folder_of(name))
         self._refresh()
-        # First save renders the recipe against the open RAF as its
-        # picture; a picture set earlier is never replaced without asking.
         if self._render_thumb is not None and (
             self._library.thumb_jpeg(name) is None
         ):
-            self._render_thumb(
-                recipe, lambda jpeg: self._store_thumb(name, jpeg)
-            )
+
+            def store(jpeg: bytes | None) -> None:
+                if jpeg and self._library.set_thumb(name, jpeg):
+                    self._refresh()
+
+            self._render_thumb(recipe, store)
         self._panel.set_active(recipe, name)
         if activate:
             self._on_render()
