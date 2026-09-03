@@ -13,7 +13,12 @@ gi.require_version("GExiv2", "0.10")
 from gi.repository import GdkPixbuf, GExiv2
 
 from grawji.imaging.imagemeta import camera_model, exif_orientation, exif_rows
-from grawji.imaging.render import gray_rows, parse_aspect, texture_for_pixbuf
+from grawji.imaging.render import (
+    gray_rows,
+    parse_aspect,
+    texture_for_pixbuf,
+    thumb_jpeg,
+)
 
 
 def _flat_pixbuf(width: int, height: int, value: int) -> GdkPixbuf.Pixbuf:
@@ -95,3 +100,24 @@ def test_exif_rows_formats_known_tags(tmp_path: Path) -> None:
 def test_exif_rows_tolerates_garbage() -> None:
     """Unparseable bytes yield an empty list, not an exception."""
     assert exif_rows(b"not a jpeg") == []
+
+
+def test_thumb_jpeg_downscales_and_encodes():
+    """thumb_jpeg yields a real JPEG capped at the requested edge."""
+    jpeg = thumb_jpeg(_flat_pixbuf(1600, 900, 128), max_edge=256)
+    assert jpeg[:2] == b"\xff\xd8"
+    loader = GdkPixbuf.PixbufLoader()
+    loader.write(jpeg)
+    loader.close()
+    decoded = loader.get_pixbuf()
+    assert max(decoded.get_width(), decoded.get_height()) == 256
+
+
+def test_thumb_jpeg_keeps_small_images_unscaled():
+    """An image already within the edge is encoded at its own size."""
+    jpeg = thumb_jpeg(_flat_pixbuf(120, 80, 128), max_edge=256)
+    loader = GdkPixbuf.PixbufLoader()
+    loader.write(jpeg)
+    loader.close()
+    decoded = loader.get_pixbuf()
+    assert (decoded.get_width(), decoded.get_height()) == (120, 80)

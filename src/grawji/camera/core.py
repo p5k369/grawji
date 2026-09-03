@@ -72,6 +72,29 @@ _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 _DR_PERCENTAGES = {"DR100": 100, "DR200": 200, "DR400": 400}
 _DR_NAMES = {v: k for k, v in _DR_PERCENTAGES.items()}
 
+
+def shot_dynamic_range(base: bytes) -> str | None:
+    """The dynamic range the RAF was captured at."""
+    offset = _PARAM_OFFSETS["DynamicRange"]
+    if offset + 4 > len(base):
+        return None
+    value = int(struct.unpack("<i", base[offset : offset + 4])[0])
+    return _DR_NAMES.get(value)
+
+
+def clamp_dynamic_range(base: bytes, requested: str) -> str:
+    """Lower a requested DR to the shot's ceiling."""
+    if requested == "Auto":
+        return requested
+    ceiling = shot_dynamic_range(base)
+    if ceiling is None:
+        return requested
+    want = _DR_PERCENTAGES.get(requested)
+    if want is None or want <= _DR_PERCENTAGES[ceiling]:
+        return requested
+    return ceiling
+
+
 # Params that use the value*10 tone encoding.
 _TONE_PARAMS = frozenset(TONE_PARAMS)
 
@@ -329,7 +352,16 @@ def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
             profile is too short to hold a parameter's offset.
     """
     out = bytearray(base)
-    for name, value in recipe_changes(recipe).items():
+    changes = recipe_changes(recipe)
+    if "DynamicRange" in changes:
+        # Never ask for more DR than the RAF was shot at: the engine
+        # renders a too-high request as green garbage.
+        effective = clamp_dynamic_range(base, recipe.dynamic_range)
+        if effective == "Auto":
+            del changes["DynamicRange"]
+        else:
+            changes["DynamicRange"] = _DR_PERCENTAGES[effective]
+    for name, value in changes.items():
         offset = _PARAM_OFFSETS[name]
         if offset + 4 > len(out):
             if name in _OPTIONAL_PARAMS:

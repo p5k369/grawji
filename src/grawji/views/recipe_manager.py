@@ -70,6 +70,9 @@ class RecipeManagerDialog(Adw.Dialog):
             Callable[[dict[int, str], dict[int, str], dict[int, str]], None]
             | None
         ) = None,
+        on_render_image: Callable[[str], None] | None = None,
+        on_clear_image: Callable[[str], None] | None = None,
+        on_edit_comment: Callable[[str], None] | None = None,
     ) -> None:
         """Wire the dialog to the library (read) and intent callbacks."""
         super().__init__()
@@ -89,9 +92,13 @@ class RecipeManagerDialog(Adw.Dialog):
         self._get_model = get_model
         self._load_bank_names = load_bank_names
         self._on_transfer = on_transfer
+        self._on_render_image = on_render_image
+        self._on_clear_image = on_clear_image
+        self._on_edit_comment = on_edit_comment
         self._dragged: str | None = None
         self._groups: list[Adw.PreferencesGroup] = []
         self._toast: Adw.Toast | None = None
+        self._thumb_textures: dict[str, Any] = {}
 
         self.new_folder_button.connect("clicked", self._on_new_folder)
         self.transfer_button.connect("clicked", self._on_transfer_clicked)
@@ -111,6 +118,7 @@ class RecipeManagerDialog(Adw.Dialog):
         for group in self._groups:
             self.content.remove(group)
         self._groups = []
+        self._thumb_textures = {}
 
         has_recipes = bool(self._library.names)
         self.stack.set_visible_child_name("list" if has_recipes else "empty")
@@ -174,7 +182,70 @@ class RecipeManagerDialog(Adw.Dialog):
         drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
         drop.connect("drop", self._on_recipe_drop, name)
         row.add_controller(drop)
+
+        row.set_has_tooltip(True)
+        row.connect("query-tooltip", self._on_row_tooltip, name)
         return row
+
+    def _on_row_tooltip(
+        self,
+        _row: Any,
+        _x: int,
+        _y: int,
+        _keyboard: bool,
+        tooltip: Gtk.Tooltip,
+        name: str,
+    ) -> bool:
+        """Fill a row's hover tooltip: recipe image and its comment."""
+        if self._library.get(name) is None:
+            return False
+        texture = self._thumb_texture(name)
+        comment = self._library.comment(name)
+        if texture is None and not comment:
+            return False
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        if texture is not None:
+            picture = Gtk.Picture.new_for_paintable(texture)
+            picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+            picture.set_can_shrink(True)
+            picture.set_halign(Gtk.Align.CENTER)
+            width, height = self._thumb_display_size(texture)
+            picture.set_size_request(width, height)
+            box.append(picture)
+        if comment:
+            label = Gtk.Label(label=comment)
+            label.set_wrap(True)
+            label.set_max_width_chars(34)
+            label.set_xalign(0.0)
+            box.append(label)
+        tooltip.set_custom(box)
+        return True
+
+    @staticmethod
+    def _thumb_display_size(
+        texture: Any, max_edge: int = 180
+    ) -> tuple[int, int]:
+        """Display size for a thumb texture, capped to max_edge on aspect."""
+        width, height = texture.get_width(), texture.get_height()
+        longer = max(width, height)
+        if longer <= max_edge:
+            return width, height
+        scale = max_edge / longer
+        return max(1, round(width * scale)), max(1, round(height * scale))
+
+    def _thumb_texture(self, name: str) -> Any:
+        """The recipe's cached thumbnail texture, or None."""
+        if name in self._thumb_textures:
+            return self._thumb_textures[name]
+        texture = None
+        jpeg = self._library.thumb_jpeg(name)
+        if jpeg is not None:
+            try:
+                texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(jpeg))
+            except GLib.Error:
+                texture = None
+        self._thumb_textures[name] = texture
+        return texture
 
     def _fit_badge(self, recipe: Recipe) -> Gtk.Widget | None:
         """A compatibility chip for the connected body, or None if full fit."""
@@ -243,6 +314,7 @@ class RecipeManagerDialog(Adw.Dialog):
             self._separator(box)
         self._entry(box, popover, "Rename…", lambda: self._rename(name))
         self._entry(box, popover, "Export…", lambda: self._on_export(name))
+        self._image_entries(box, popover, name)
         self._entry(
             box,
             popover,
@@ -251,6 +323,33 @@ class RecipeManagerDialog(Adw.Dialog):
             destructive=True,
         )
         return popover
+
+    def _image_entries(
+        self, box: Gtk.Box, popover: Gtk.Popover, name: str
+    ) -> None:
+        """Append the recipe-image and comment actions to a row's menu."""
+        entries: list[tuple[str, Callable[[], None]]] = []
+        render = self._on_render_image
+        has_image = self._library.thumb_jpeg(name) is not None
+        if render is not None:
+            label = "Update Image" if has_image else "Generate Image"
+            entries.append((label, lambda: render(name)))
+        clear = self._on_clear_image
+        if clear is not None and has_image:
+            entries.append(("Remove Image", lambda: clear(name)))
+        comment = self._on_edit_comment
+        if comment is not None:
+            label = (
+                "Edit Comment…"
+                if self._library.comment(name)
+                else "Add Comment…"
+            )
+            entries.append((label, lambda: comment(name)))
+        if not entries:
+            return
+        self._separator(box)
+        for label, handler in entries:
+            self._entry(box, popover, label, handler)
 
     def _folder_header(self, folder: str) -> Gtk.Widget:
         """A folder header menu: reorder (up/down), rename, delete."""
@@ -447,12 +546,16 @@ class RecipeLibraryController:
         on_status: Callable[[str], None],
         get_iopcode: Callable[[], int | None],
         on_baseline_changed: Callable[[], None] = lambda: None,
+        on_closed: Callable[[], None] = lambda: None,
         get_capabilities: Callable[[], Any] | None = None,
         get_model: Callable[[], str | None] | None = None,
         load_bank_names: (
             Callable[[Callable[[list[str]], None]], None] | None
         ) = None,
         run_transfer: Callable[..., None] | None = None,
+        render_thumb: (
+            Callable[[Recipe, Callable[[bytes], None]], None] | None
+        ) = None,
     ) -> None:
         """Wire the controller.
 
@@ -466,6 +569,8 @@ class RecipeLibraryController:
                 None when no image is open.
             on_baseline_changed: Called when the compare baseline is set
                 or cleared, so the window can update the compare state.
+            on_closed: Called when the manager dialog is dismissed, so the
+                window can re-open a session the bank pane closed.
             get_capabilities: Returns the connected body's Capabilities for
                 recipe-compatibility badges, or None to disable them.
             get_model: Returns the connected body's model, used to tag a
@@ -475,6 +580,9 @@ class RecipeLibraryController:
             run_transfer: Performs the USB bank transfer off the main
                 thread (recipes, names, fs_recipes, on_done, on_error),
                 or None.
+            render_thumb: Renders a recipe against the open RAF and calls
+                back with a small thumbnail JPEG. Does nothing when no
+                image is open. None disables recipe thumbnails entirely.
         """
         self._parent = parent
         self._library = library
@@ -483,10 +591,12 @@ class RecipeLibraryController:
         self._on_status = on_status
         self._get_iopcode = get_iopcode
         self._on_baseline_changed = on_baseline_changed
+        self._on_closed = on_closed
         self._get_capabilities = get_capabilities
         self._get_model = get_model
         self._load_bank_names = load_bank_names
         self._run_transfer = run_transfer
+        self._render_thumb = render_thumb
         self._manager: RecipeManagerDialog | None = None
         self._refresh()
 
@@ -508,6 +618,9 @@ class RecipeLibraryController:
             get_model=self._get_model,
             load_bank_names=self._load_bank_names,
             on_transfer=self._transfer_banks,
+            on_render_image=self._render_thumb_for,
+            on_clear_image=self._clear_thumb,
+            on_edit_comment=self._edit_comment,
         )
         self._manager.connect("closed", self._on_manager_closed)
         dialogs.fit_dialog(
@@ -674,8 +787,9 @@ class RecipeLibraryController:
             self._manager.refresh()
 
     def _on_manager_closed(self, _dialog: Any) -> None:
-        """Forget the manager once it is dismissed."""
+        """Forget the manager and let the window recover the session."""
         self._manager = None
+        self._on_closed()
 
     def _delete(self, name: str) -> None:
         """Remove a saved recipe and persist the change."""
@@ -731,6 +845,48 @@ class RecipeLibraryController:
         if self._library.delete_folder(name):
             self._refresh()
 
+    def _render_thumb_for(self, name: str) -> None:
+        """Render the saved recipe against the open RAF as its image."""
+        recipe = self._library.get(name)
+        if recipe is None or self._render_thumb is None:
+            return
+        self._render_thumb(recipe, lambda jpeg: self._store_thumb(name, jpeg))
+
+    def _store_thumb(self, name: str, jpeg: bytes | None) -> None:
+        """Persist a rendered thumbnail and refresh the views."""
+        if jpeg and self._library.set_thumb(name, jpeg):
+            self._refresh()
+            self._on_status(f"Set the picture of “{name}”.")
+
+    def _clear_thumb(self, name: str) -> None:
+        """Drop a recipe's thumbnail and refresh the views."""
+        if self._library.set_thumb(name, None):
+            self._refresh()
+            self._on_status(f"Removed the picture of “{name}”.")
+
+    def _edit_comment(self, name: str) -> None:
+        """Prompt for a recipe's hover comment and store it."""
+
+        def done(text: str) -> None:
+            if self._library.set_comment(name, text):
+                self._refresh()
+
+        dialog = Adw.AlertDialog(
+            heading="Recipe comment",
+            body="A short note shown when hovering this recipe:",
+        )
+        entry = Gtk.Entry(text=self._library.comment(name))
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("ok", "Save")
+        dialog.set_default_response("ok")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect(
+            "response",
+            lambda _d, resp: done(entry.get_text()) if resp == "ok" else None,
+        )
+        dialog.present(self._parent)
+
     def _prompt_save(
         self, recipe: Recipe, default_name: str = "", *, activate: bool = False
     ) -> None:
@@ -780,6 +936,14 @@ class RecipeLibraryController:
         # Overwriting keeps the recipe in its folder.
         self._library.add(name, recipe, folder=self._library.folder_of(name))
         self._refresh()
+        # First save renders the recipe against the open RAF as its
+        # picture; a picture set earlier is never replaced without asking.
+        if self._render_thumb is not None and (
+            self._library.thumb_jpeg(name) is None
+        ):
+            self._render_thumb(
+                recipe, lambda jpeg: self._store_thumb(name, jpeg)
+            )
         self._panel.set_active(recipe, name)
         if activate:
             self._on_render()

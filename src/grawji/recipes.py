@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,8 @@ class RecipeLibrary:
         self._path = path
         self._recipes: dict[str, Recipe] = {}
         self._folder_of: dict[str, str] = {}
+        self._thumb_of: dict[str, str] = {}
+        self._comment_of: dict[str, str] = {}
         self._folders: list[str] = []
         self._baseline: str | None = None
         self._load()
@@ -92,11 +96,52 @@ class RecipeLibrary:
         return self._recipes.get(self._baseline) if self._baseline else None
 
     def add(self, name: str, recipe: Recipe, folder: str = UNGROUPED) -> None:
-        """Store recipe under name (replacing any previous one)."""
+        """Store recipe under name."""
         self._recipes[name] = recipe
         self._folder_of[name] = folder
         self._ensure_folder(folder)
         self._save()
+
+    def thumb_jpeg(self, name: str) -> bytes | None:
+        """The recipe's stored thumbnail as JPEG bytes, or None."""
+        encoded = self._thumb_of.get(name)
+        if encoded is None:
+            return None
+        try:
+            return base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+
+    def set_thumb(self, name: str, jpeg: bytes | None) -> bool:
+        """Store or clear a recipe's thumbnail JPEG."""
+        if name not in self._recipes:
+            return False
+        if not jpeg:
+            if self._thumb_of.pop(name, None) is None:
+                return False
+        else:
+            self._thumb_of[name] = base64.b64encode(jpeg).decode("ascii")
+        self._save()
+        return True
+
+    def comment(self, name: str) -> str:
+        """The recipe's hover comment."""
+        return self._comment_of.get(name, "")
+
+    def set_comment(self, name: str, text: str) -> bool:
+        """Store or clear a recipe's hover comment."""
+        if name not in self._recipes:
+            return False
+        text = text.strip()
+        if not text:
+            if self._comment_of.pop(name, None) is None:
+                return False
+        elif self._comment_of.get(name) == text:
+            return False
+        else:
+            self._comment_of[name] = text
+        self._save()
+        return True
 
     def delete(self, name: str) -> bool:
         """Remove the named recipe; False if it did not exist."""
@@ -104,6 +149,8 @@ class RecipeLibrary:
             return False
         del self._recipes[name]
         self._folder_of.pop(name, None)
+        self._thumb_of.pop(name, None)
+        self._comment_of.pop(name, None)
         if self._baseline == name:
             self._baseline = None
         self._save()
@@ -129,6 +176,14 @@ class RecipeLibrary:
         self._folder_of.pop(old, None)
         self._folder_of.pop(new, None)
         self._folder_of[new] = folder
+        thumb = self._thumb_of.pop(old, None)
+        self._thumb_of.pop(new, None)
+        if thumb is not None:
+            self._thumb_of[new] = thumb
+        comment = self._comment_of.pop(old, None)
+        self._comment_of.pop(new, None)
+        if comment is not None:
+            self._comment_of[new] = comment
         if self._baseline in (old, new):
             self._baseline = new
         self._save()
@@ -248,9 +303,16 @@ class RecipeLibrary:
             if not (isinstance(name, str) and isinstance(value, dict)):
                 continue
             folder = value.get("folder")
-            fields = {k: v for k, v in value.items() if k != "folder"}
+            thumb = value.get("thumb")
+            comment = value.get("comment")
+            skip = ("folder", "thumb", "comment")
+            fields = {k: v for k, v in value.items() if k not in skip}
             self._recipes[name] = Recipe.from_dict(fields)
             self._folder_of[name] = folder if isinstance(folder, str) else ""
+            if isinstance(thumb, str) and thumb:
+                self._thumb_of[name] = thumb
+            if isinstance(comment, str) and comment:
+                self._comment_of[name] = comment
         self._folders = [
             f for f in data.get("folders", []) if isinstance(f, str)
         ]
@@ -272,6 +334,12 @@ class RecipeLibrary:
             folder = self._folder_of.get(name, UNGROUPED)
             if folder:
                 entry["folder"] = folder
+            thumb = self._thumb_of.get(name)
+            if thumb:
+                entry["thumb"] = thumb
+            comment = self._comment_of.get(name)
+            if comment:
+                entry["comment"] = comment
             encoded[name] = entry
         data = {
             "version": 2,

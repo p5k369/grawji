@@ -1,5 +1,7 @@
 """Tests for recipe storage."""
 
+import json
+
 from grawji.recipe import Recipe
 from grawji.recipes import (
     RecipeLibrary,
@@ -190,3 +192,87 @@ def test_library_migrates_flat_format(tmp_path):
     assert library.names == ["Old"]
     assert library.folder_of("Old") == ""
     assert library.baseline is None
+
+
+def test_library_thumb_round_trip(tmp_path):
+    """A stored thumbnail survives reload byte-exact."""
+    library = _library(tmp_path)
+    assert library.thumb_jpeg("Punchy") is None
+    assert library.set_thumb("Punchy", b"\xff\xd8jpeg-bytes") is True
+    reloaded = RecipeLibrary(tmp_path / "recipes.json")
+    assert reloaded.thumb_jpeg("Punchy") == b"\xff\xd8jpeg-bytes"
+    assert reloaded.thumb_jpeg("Mono") is None
+
+
+def test_library_thumb_requires_known_recipe(tmp_path):
+    """Thumbs cannot be attached to unknown names."""
+    library = _library(tmp_path)
+    assert library.set_thumb("Nope", b"x") is False
+
+
+def test_library_thumb_clear(tmp_path):
+    """Setting None drops the thumbnail."""
+    library = _library(tmp_path)
+    library.set_thumb("Punchy", b"x")
+    assert library.set_thumb("Punchy", None) is True
+    assert library.thumb_jpeg("Punchy") is None
+    assert library.set_thumb("Punchy", None) is False
+
+
+def test_library_thumb_survives_overwrite(tmp_path):
+    """Re-saving a recipe under its name keeps the stored picture."""
+    library = _library(tmp_path)
+    library.set_thumb("Punchy", b"x")
+    library.add("Punchy", Recipe(film_simulation="Provia"))
+    assert library.thumb_jpeg("Punchy") == b"x"
+
+
+def test_library_thumb_follows_rename_and_delete(tmp_path):
+    """Rename moves the thumbnail with the recipe."""
+    library = _library(tmp_path)
+    library.set_thumb("Punchy", b"x")
+    library.rename("Punchy", "Portra")
+    assert library.thumb_jpeg("Portra") == b"x"
+    assert library.thumb_jpeg("Punchy") is None
+    library.delete("Portra")
+    library.add("Portra", Recipe())
+    assert library.thumb_jpeg("Portra") is None
+
+
+def test_library_thumb_bad_base64_reads_none(tmp_path):
+    """A corrupted stored thumb decodes to None instead of raising."""
+    library = _library(tmp_path)
+    library.set_thumb("Punchy", b"x")
+    path = tmp_path / "recipes.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["recipes"]["Punchy"]["thumb"] = "not base64 !!!"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    reloaded = RecipeLibrary(path)
+    assert reloaded.thumb_jpeg("Punchy") is None
+
+
+def test_library_comment_round_trip(tmp_path):
+    """A comment survives reload and clears with an empty string."""
+    library = _library(tmp_path)
+    assert library.comment("Punchy") == ""
+    assert library.set_comment("Punchy", "  Sunny day look  ") is True
+    reloaded = RecipeLibrary(tmp_path / "recipes.json")
+    assert reloaded.comment("Punchy") == "Sunny day look"  # trimmed
+    assert reloaded.set_comment("Punchy", "") is True
+    assert reloaded.comment("Punchy") == ""
+
+
+def test_library_comment_requires_known_recipe(tmp_path):
+    """Comments cannot be attached to unknown names."""
+    assert _library(tmp_path).set_comment("Nope", "x") is False
+
+
+def test_library_comment_follows_rename_and_delete(tmp_path):
+    """Rename carries the comment."""
+    library = _library(tmp_path)
+    library.set_comment("Punchy", "note")
+    library.rename("Punchy", "Portra")
+    assert library.comment("Portra") == "note"
+    library.delete("Portra")
+    library.add("Portra", Recipe())
+    assert library.comment("Portra") == ""
