@@ -77,6 +77,27 @@ def test_recipe_panel_provenance_line() -> None:
     assert panel.provenance == "grawji recipe: Summer (modified)"
 
 
+def test_recipe_panel_dr_ceiling_note() -> None:
+    """The DR row warns only when the selection exceeds the shot's DR."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_recipe(Recipe(dynamic_range="DR400"))
+    panel.set_dr_ceiling("DR200")
+    pump()
+    assert "DR200" in panel.dr_row.get_subtitle()
+    panel.set_recipe(Recipe(dynamic_range="DR200"))
+    pump()
+    assert panel.dr_row.get_subtitle() == ""
+    # No ceiling known: never warns.
+    panel.set_recipe(Recipe(dynamic_range="DR400"))
+    panel.set_dr_ceiling(None)
+    pump()
+    assert panel.dr_row.get_subtitle() == ""
+
+
 def test_ev_never_counts_as_modified() -> None:
     """The per-image EV is not part of the recipe."""
     from grawji.recipe import Recipe

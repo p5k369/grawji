@@ -12,9 +12,11 @@ from grawji.camera.core import (
     ForeignRafError,
     SessionStateError,
     apply_recipe,
+    clamp_dynamic_range,
     film_simulation_byte,
     recipe_from_profile,
     rmw_patch,
+    shot_dynamic_range,
 )
 from grawji.recipe import Recipe
 
@@ -615,3 +617,42 @@ def test_render_thumb_times_out_without_a_result():
     session.open("/tmp/shot.RAF")
     with pytest.raises(TimeoutError):
         session.render_thumb(Recipe())
+
+
+def _profile_with_dr(percent: int) -> bytes:
+    """A 608-byte base profile whose DR slot holds a percentage."""
+    from grawji.camera.core import _PARAM_OFFSETS
+
+    base = bytearray(608)
+    struct.pack_into("<I", base, _PARAM_OFFSETS["DynamicRange"], percent)
+    return bytes(base)
+
+
+def test_shot_dynamic_range_reads_percentage():
+    """The shot's DR is decoded from its profile slot."""
+    assert shot_dynamic_range(_profile_with_dr(200)) == "DR200"
+    assert shot_dynamic_range(_profile_with_dr(0)) is None
+    assert shot_dynamic_range(bytes(100)) is None
+
+
+def test_clamp_dynamic_range_lowers_to_the_shot():
+    """A request above the shot's DR clamps down."""
+    dr200 = _profile_with_dr(200)
+    assert clamp_dynamic_range(dr200, "DR400") == "DR200"
+    assert clamp_dynamic_range(dr200, "DR200") == "DR200"
+    assert clamp_dynamic_range(dr200, "DR100") == "DR100"
+    assert clamp_dynamic_range(dr200, "Auto") == "Auto"
+
+
+def test_clamp_dynamic_range_unknown_shot_passes_through():
+    """When the shot's DR is unknown, the request is left alone."""
+    assert clamp_dynamic_range(_profile_with_dr(0), "DR400") == "DR400"
+
+
+def test_apply_recipe_clamps_dr_to_the_shot():
+    """apply_recipe never writes a DR higher than the RAF was shot at."""
+    dr200 = _profile_with_dr(200)
+    patched = apply_recipe(dr200, Recipe(dynamic_range="DR400"))
+    assert _u32(patched, OFF_DYNAMIC_RANGE) == 200  # clamped, not 400
+    patched = apply_recipe(dr200, Recipe(dynamic_range="DR100"))
+    assert _u32(patched, OFF_DYNAMIC_RANGE) == 100

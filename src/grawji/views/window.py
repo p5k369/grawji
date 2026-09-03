@@ -33,6 +33,7 @@ from grawji.camera.core import (
     CameraSession,
     ForeignRafError,
     recipe_from_profile,
+    shot_dynamic_range,
 )
 from grawji.camera.preview import CameraWorker
 from grawji.controllers.camera_ops import CameraOpsController
@@ -43,7 +44,12 @@ from grawji.controllers.exports import (
 from grawji.controllers.fileops import FileOpsController
 from grawji.imaging import imagemeta
 from grawji.imaging.export import initial_folder
-from grawji.imaging.render import texture_for_pixbuf
+from grawji.imaging.render import (
+    oriented_jpeg,
+    texture_for_pixbuf,
+    thumb_jpeg,
+    trim_letterbox,
+)
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
 from grawji.settings import (
@@ -224,6 +230,8 @@ class MainWindow(Adw.ApplicationWindow):
             get_model=camera_info.detect_camera,
             load_bank_names=self._camera_ops.load_bank_names,
             run_transfer=self._camera_ops.run_bank_transfer,
+            render_thumb=self._render_recipe_thumb,
+            on_closed=self._on_recipe_manager_closed,
         )
         self._single_export = SingleExportController(
             parent=self,
@@ -561,7 +569,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.recipe_panel.apply_capabilities(
                 capabilities_for(profile, model=model)
             )
+            self.recipe_panel.set_dr_ceiling(shot_dynamic_range(profile))
             self._notify_unverified(model)
+        else:
+            self.recipe_panel.set_dr_ceiling(None)
         render_working = True
         shot_recipe = (
             recipe_from_profile(profile) if profile is not None else Recipe()
@@ -740,21 +751,6 @@ class MainWindow(Adw.ApplicationWindow):
             return
         exposure = self.recipe_panel.get_recipe().exposure
         groups: list[tuple[str, list[tuple[str, str, Recipe]]]] = []
-        profile = self._session.profile
-        if profile is not None:
-            from_image = recipe_from_profile(profile)
-            groups.append(
-                (
-                    "",
-                    [
-                        (
-                            FROM_IMAGE,
-                            FROM_IMAGE_LABEL,
-                            replace(from_image, exposure=exposure),
-                        )
-                    ],
-                )
-            )
         folders = [UNGROUPED, *self._recipe_library.folders()]
         for folder in folders:
             members: list[tuple[str, str, Recipe]] = []
@@ -904,6 +900,50 @@ class MainWindow(Adw.ApplicationWindow):
             return  # a newer selection has superseded this render
         self.preview_view.show_jpeg(jpeg)
         self._set_busy(busy=False, status="Ready.")
+
+    def _render_recipe_thumb(
+        self, recipe: Recipe, on_done: Callable[[bytes | None], None]
+    ) -> None:
+        """Render a recipe against the current RAF into a small thumbnail.
+
+        Renders the given recipe (not the panel's current controls) so a
+        saved recipe's picture always matches the recipe itself. The
+        manager's bank pane closes the live session on open, so the job
+        re-opens the RAF first when needed.
+        """
+        if self._raf_path is None:
+            on_done(None)
+            return
+        generation = self._generation
+        raf = str(self._raf_path)
+        # The camera thumbnail carries no EXIF orientation, so fall back
+        # to the RAF's own so portrait shots are not stored sideways.
+        orientation = imagemeta.exif_orientation(raf)
+
+        def task() -> bytes:
+            if not self._session.is_open:
+                self._session.open(raf)
+            return self._session.render_thumb(recipe)
+
+        def finished(jpeg: bytes) -> None:
+            if generation != self._generation:
+                return
+            try:
+                upright = oriented_jpeg(jpeg, orientation)
+                on_done(thumb_jpeg(trim_letterbox(upright)))
+            except GLib.Error:
+                on_done(None)
+
+        def failed(exc: Exception) -> None:
+            self._on_error(exc)
+            on_done(None)
+
+        self._worker.submit(task, on_done=finished, on_error=failed)
+
+    def _on_recipe_manager_closed(self) -> None:
+        """Re-open the current RAF if the manager closed its session."""
+        if self._raf_path is not None and not self._session.is_open:
+            self._on_raf_selected(str(self._raf_path))
 
     def _on_export_clicked(self, _button: Any) -> None:
         """Start a single full-resolution export."""

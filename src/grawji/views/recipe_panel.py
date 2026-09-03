@@ -101,6 +101,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._recipe_names: list[str] = []
         self._applied_recipe = Recipe()
         self._active_unsaved = False
+        self._dr_ceiling: str | None = None
         self._active_label = FROM_IMAGE_LABEL
         self.recipe_button.set_label(FROM_IMAGE_LABEL)
 
@@ -293,7 +294,26 @@ class RecipePanel(Adw.PreferencesPage):
         self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
         self.grain_row.connect("notify::selected", self._on_grain_changed)
         self.film_row.connect("notify::selected", self._update_mono_visibility)
+        self.dr_row.connect("notify::selected", self._update_dr_note)
         self._mono_grid.connect_changed(self._on_mono_grid_changed)
+
+    def set_dr_ceiling(self, ceiling: str | None) -> None:
+        """Set the shot's dynamic-range ceiling and refresh the DR note."""
+        self._dr_ceiling = ceiling
+        self._update_dr_note()
+
+    def _update_dr_note(self, *_args: object) -> None:
+        """Show a subtitle when the selected DR exceeds the shot's."""
+        ceiling = self._dr_ceiling
+        selected = _DYNAMIC_RANGES[self.dr_row.get_selected()]
+        order = {"DR100": 100, "DR200": 200, "DR400": 400}
+        want, limit = order.get(selected), order.get(ceiling or "")
+        if want is not None and limit is not None and want > limit:
+            self.dr_row.set_subtitle(
+                f"Shot at {ceiling}. Renders as {ceiling}"
+            )
+        else:
+            self.dr_row.set_subtitle("")
 
     def get_recipe(self) -> Recipe:
         """Read the current selector values into a Recipe."""
@@ -372,6 +392,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._update_temp_visibility()
         self._update_grain_size_visibility()
         self._update_mono_visibility()
+        self._update_dr_note()
 
     def set_exposure(self, value: float) -> None:
         """Move only the exposure control, without emitting changed."""

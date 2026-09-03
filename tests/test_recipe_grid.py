@@ -11,11 +11,11 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import GdkPixbuf, GExiv2
 
+from grawji.imaging.render import trim_letterbox as _trim_letterbox
 from grawji.recipe import Recipe
 from grawji.views.recipe_grid import (
     RecipeGridDialog,
     _decode_scaled,
-    _trim_letterbox,
 )
 
 pytestmark = pytest.mark.gui
@@ -223,6 +223,40 @@ def test_master_checks_all_from_none() -> None:
     dialog._master.set_active(True)
     assert all(check.get_active() for check in dialog._checks)
     assert not dialog._master.get_inconsistent()
+
+
+def test_folder_check_toggles_only_its_folder() -> None:
+    """A folder header check adds/removes just that folder's recipes."""
+    groups = [
+        ("Color", [("a", "a", Recipe()), ("b", "b", Recipe())]),
+        ("B&W", [("c", "c", Recipe())]),
+    ]
+    dialog = RecipeGridDialog(
+        groups=groups, render=lambda *a: None, on_pick=lambda _k: None
+    )
+    color_check, _ = dialog._group_checks[0]
+    bw_check, _ = dialog._group_checks[1]
+    color_check.set_active(False)
+    assert [c.get_active() for c in dialog._checks] == [False, False, True]
+    assert bw_check.get_active()
+    assert dialog._master.get_inconsistent()
+    color_check.set_active(True)
+    assert all(c.get_active() for c in dialog._checks)
+    assert dialog._master.get_active()
+
+
+def test_folder_check_reflects_member_state() -> None:
+    """Toggling members drives the folder check to mixed/all/none."""
+    groups = [("Color", [("a", "a", Recipe()), ("b", "b", Recipe())])]
+    dialog = RecipeGridDialog(
+        groups=groups, render=lambda *a: None, on_pick=lambda _k: None
+    )
+    folder_check, members = dialog._group_checks[0]
+    members[0].set_active(False)
+    assert folder_check.get_inconsistent()
+    members[1].set_active(False)
+    assert not folder_check.get_active()
+    assert not folder_check.get_inconsistent()
 
 
 def test_ampersand_titles_survive() -> None:

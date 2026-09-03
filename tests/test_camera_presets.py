@@ -20,6 +20,8 @@ from grawji.camera.preset_recipe import (
     PROP_COLOR,
     PROP_FILM_SIMULATION,
     PROP_GRAIN,
+    PROP_MONO_MG,
+    PROP_MONO_WC,
     PROP_PRESET_NAME,
     PROP_PRESET_SLOT,
     PROP_WB_SHIFT_R,
@@ -198,6 +200,19 @@ def test_rejected_clarity_is_dropped_not_fatal():
     result = transfer_presets(cam, {0: Recipe(clarity=3)})
     assert "clarity" in " ".join(result.dropped[0])
     assert cam.slots[0].props[PROP_FILM_SIMULATION] == 1
+
+
+def test_rejected_mono_toning_is_dropped_not_fatal():
+    """The X-E5 rejects 0xD193/0xD194. The transfer still completes."""
+    cam = FakePresetCamera(reject={PROP_MONO_WC, PROP_MONO_MG})
+    result = transfer_presets(
+        cam,
+        {0: Recipe(film_simulation="AcrosR", mono_warm_cool=-1)},
+        model="X-E5",
+    )
+    assert result.slots == (0,)
+    assert "monochromatic color toning" in " ".join(result.dropped[0])
+    assert cam.slots[0].props[PROP_FILM_SIMULATION] == 14
 
 
 def test_other_rejections_are_fatal():

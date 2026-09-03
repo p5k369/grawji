@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, GdkPixbuf, GLib, Gtk, Pango
 
-from grawji.imaging.render import texture_for_pixbuf
+from grawji.imaging.render import texture_for_pixbuf, trim_letterbox
 from grawji.imaging.thumbnails import orient_exif
 from grawji.recipe import Recipe
 
@@ -70,7 +70,7 @@ class RecipeGridDialog(Adw.Dialog):
         self._closed = False
         self._stopped = False
         self.connect("closed", self._on_closed)
-        self._syncing_master = False
+        self._syncing = False
         master_row = Adw.ActionRow(title="All recipes")
         self._master = Gtk.CheckButton()
         self._master.set_active(True)
@@ -83,12 +83,39 @@ class RecipeGridDialog(Adw.Dialog):
         self.pick_box.append(master_list)
 
         self._checks: list[Gtk.CheckButton] = []
+        self._group_checks: list[
+            tuple[Gtk.CheckButton, list[Gtk.CheckButton]]
+        ] = []
+        self._build_groups(groups)
+        self._sync()
+        for check in self._checks:
+            check.connect("toggled", self._on_member_toggled)
+        for folder_check, members_checks in self._group_checks:
+            folder_check.connect(
+                "toggled", self._on_folder_toggled, members_checks
+            )
+        self._master.connect("toggled", self._on_master_toggled)
+
+        self.start_button.connect("clicked", lambda *_a: self._on_start())
+        self.stop_button.connect("clicked", lambda *_a: self._on_stop())
+
+    def _build_groups(
+        self, groups: list[tuple[str, list[tuple[str, str, Recipe]]]]
+    ) -> None:
+        """Add one titled section per folder, each with a select-all check."""
         for title, members in groups:
             if not members:
                 continue
             group = Adw.PreferencesGroup()
             if title:
                 group.set_title(GLib.markup_escape_text(title))
+            folder_check = Gtk.CheckButton()
+            folder_check.set_active(True)
+            folder_check.set_tooltip_text(
+                "Add or remove every recipe in this folder"
+            )
+            group.set_header_suffix(folder_check)
+            members_checks: list[Gtk.CheckButton] = []
             for _key, label, _recipe in members:
                 row = Adw.ActionRow()
                 row.set_use_markup(False)
@@ -99,36 +126,54 @@ class RecipeGridDialog(Adw.Dialog):
                 row.set_activatable_widget(check)
                 group.add(row)
                 self._checks.append(check)
+                members_checks.append(check)
             self.pick_box.append(group)
-        self._sync_master()
-        for check in self._checks:
-            check.connect("toggled", lambda *_a: self._sync_master())
-        self._master.connect("toggled", self._on_master_toggled)
+            self._group_checks.append((folder_check, members_checks))
 
-        self.start_button.connect("clicked", lambda *_a: self._on_start())
-        self.stop_button.connect("clicked", lambda *_a: self._on_stop())
+    def _on_member_toggled(self, _check: Gtk.CheckButton) -> None:
+        """A single row changed: refresh the folder and master states."""
+        if not self._syncing:
+            self._sync()
+
+    def _on_folder_toggled(
+        self,
+        folder_check: Gtk.CheckButton,
+        members_checks: list[Gtk.CheckButton],
+    ) -> None:
+        """Add or remove every recipe in one folder from its header check."""
+        if self._syncing:
+            return
+        active = folder_check.get_active()
+        folder_check.set_inconsistent(False)
+        self._syncing = True
+        for check in members_checks:
+            check.set_active(active)
+        self._syncing = False
+        self._sync()
 
     def _on_master_toggled(self, master: Gtk.CheckButton) -> None:
         """Check or uncheck every recipe row from the master row."""
-        if self._syncing_master:
+        if self._syncing:
             return
         active = master.get_active()
         master.set_inconsistent(False)
-        self._syncing_master = True
+        self._syncing = True
         for check in self._checks:
             check.set_active(active)
-        self._syncing_master = False
-        self._sync_master()
+        self._syncing = False
+        self._sync()
 
-    def _sync_master(self) -> None:
-        """Mirror the rows on the master check and count."""
-        if self._syncing_master:
-            return
+    def _sync(self) -> None:
+        """Mirror row states onto each folder check, the master and count."""
+        self._syncing = True
+        for folder_check, members_checks in self._group_checks:
+            picked = sum(1 for c in members_checks if c.get_active())
+            folder_check.set_inconsistent(0 < picked < len(members_checks))
+            folder_check.set_active(picked == len(members_checks))
         count = sum(1 for check in self._checks if check.get_active())
-        self._syncing_master = True
         self._master.set_inconsistent(0 < count < len(self._checks))
         self._master.set_active(count == len(self._checks))
-        self._syncing_master = False
+        self._syncing = False
         self.progress_label.set_label(
             f"{count} of {len(self._checks)} recipes picked"
         )
@@ -232,42 +277,4 @@ def _decode_scaled(jpeg: bytes, width: int, orientation: int = 1) -> Any:
         pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
     else:
         pixbuf = orient_exif(pixbuf, orientation)
-    return _trim_letterbox(pixbuf)
-
-
-def _trim_letterbox(pixbuf: Any, threshold: int = 24) -> Any:
-    """Cut near-black letterbox bars off every edge of a pixbuf."""
-    width = pixbuf.get_width()
-    height = pixbuf.get_height()
-    data = pixbuf.get_pixels()
-    stride = pixbuf.get_rowstride()
-    channels = pixbuf.get_n_channels()
-
-    def row_dark(y: int) -> bool:
-        row = data[y * stride : y * stride + width * channels]
-        return max(row) < threshold
-
-    def col_dark(x: int) -> bool:
-        return all(
-            max(
-                data[y * stride + x * channels : y * stride + x * channels + 3]
-            )
-            < threshold
-            for y in range(0, height, 4)
-        )
-
-    top = 0
-    while top < height // 3 and row_dark(top):
-        top += 1
-    bottom = height
-    while bottom > height * 2 // 3 and row_dark(bottom - 1):
-        bottom -= 1
-    left = 0
-    while left < width // 3 and col_dark(left):
-        left += 1
-    right = width
-    while right > width * 2 // 3 and col_dark(right - 1):
-        right -= 1
-    if (left, top, right, bottom) == (0, 0, width, height):
-        return pixbuf
-    return pixbuf.new_subpixbuf(left, top, right - left, bottom - top)
+    return trim_letterbox(pixbuf)

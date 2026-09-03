@@ -25,6 +25,8 @@ from grawji.camera.preset_recipe import (
     NUM_SLOTS,
     PASSTHROUGH_DEFAULTS,
     PROP_CLARITY,
+    PROP_MONO_MG,
+    PROP_MONO_WC,
     PROP_PRESET_NAME,
     PROP_PRESET_SLOT,
     PROP_WB_COLOR_TEMP,
@@ -36,6 +38,14 @@ from grawji.camera.preset_recipe import (
     unsupported_fields,
 )
 from grawji.recipe import Recipe
+
+# Properties some bodies reject (0x201c) that must not abort the whole
+# transfer.
+_SOFT_REJECT = {
+    PROP_CLARITY: "clarity (set it on the camera and resave)",
+    PROP_MONO_WC: "monochromatic color toning (set it on the camera)",
+    PROP_MONO_MG: "monochromatic color toning (set it on the camera)",
+}
 
 _log = logging.getLogger(__name__)
 
@@ -208,8 +218,10 @@ def _write_slot(
                     prop,
                     value,
                 )
-        elif code != _PTP_OK and prop == PROP_CLARITY:
-            notes.append("clarity (set it on the camera and resave)")
+        elif code != _PTP_OK and prop in _SOFT_REJECT:
+            note = _SOFT_REJECT[prop]
+            if note not in notes:
+                notes.append(note)
         elif code != _PTP_OK:
             raise BackupTransferError(
                 f"camera rejected property 0x{prop:04x}=0x{value:04x} "

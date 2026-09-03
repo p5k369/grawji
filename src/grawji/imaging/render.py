@@ -13,6 +13,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GdkPixbuf, GLib
 
 from grawji.crop import FULL_RECT, CropRotate, rotated_size
+from grawji.imaging.thumbnails import orient_exif
 
 _ROTATIONS = {
     90: GdkPixbuf.PixbufRotation.CLOCKWISE,
@@ -109,6 +110,65 @@ def add_border(
         0, 0, w, h, framed, (total_w - w) // 2, (total_h - h) // 2
     )
     return framed
+
+
+def oriented_jpeg(jpeg: bytes, fallback_orientation: int = 1) -> Any:
+    """Decode JPEG bytes upright."""
+    loader = GdkPixbuf.PixbufLoader()
+    loader.write(jpeg)
+    loader.close()
+    pixbuf = loader.get_pixbuf()
+    if pixbuf.get_option("orientation") is not None:
+        return pixbuf.apply_embedded_orientation() or pixbuf
+    return orient_exif(pixbuf, fallback_orientation)
+
+
+def trim_letterbox(pixbuf: Any, threshold: int = 24) -> Any:
+    """Cut near-black letterbox bars off every edge of a pixbuf."""
+    width = pixbuf.get_width()
+    height = pixbuf.get_height()
+    data = pixbuf.get_pixels()
+    stride = pixbuf.get_rowstride()
+    channels = pixbuf.get_n_channels()
+
+    def row_dark(y: int) -> bool:
+        row = data[y * stride : y * stride + width * channels]
+        return max(row) < threshold
+
+    def col_dark(x: int) -> bool:
+        return all(
+            max(
+                data[y * stride + x * channels : y * stride + x * channels + 3]
+            )
+            < threshold
+            for y in range(0, height, 4)
+        )
+
+    top = 0
+    while top < height // 3 and row_dark(top):
+        top += 1
+    bottom = height
+    while bottom > height * 2 // 3 and row_dark(bottom - 1):
+        bottom -= 1
+    left = 0
+    while left < width // 3 and col_dark(left):
+        left += 1
+    right = width
+    while right > width * 2 // 3 and col_dark(right - 1):
+        right -= 1
+    if (left, top, right, bottom) == (0, 0, width, height):
+        return pixbuf
+    return pixbuf.new_subpixbuf(left, top, right - left, bottom - top)
+
+
+def thumb_jpeg(pixbuf: Any, max_edge: int = 256, quality: int = 82) -> bytes:
+    """Encode a pixbuf as a small JPEG."""
+    scaled = scale_to_edge(pixbuf, max_edge)
+    ok, data = scaled.save_to_bufferv("jpeg", ["quality"], [str(quality)])
+    if not ok:
+        msg = "JPEG encoding failed"
+        raise GLib.Error(msg)
+    return bytes(data)
 
 
 def scale_to_edge(pixbuf: Any, max_edge: int) -> Any:
