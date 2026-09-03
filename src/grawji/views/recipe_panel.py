@@ -318,12 +318,15 @@ class RecipePanel(Adw.PreferencesPage):
     def get_recipe(self) -> Recipe:
         """Read the current selector values into a Recipe."""
         red, blue = self._wb_grid.get_values()
+        grain_size = _GRAIN_SIZES[self.grain_size_row.get_selected()]
+        if self._caps is not None and not self._caps.has_grain_size:
+            grain_size = "Small"
         return Recipe(
             film_simulation=self._film_sims[self.film_row.get_selected()],
             white_balance=_WHITE_BALANCES[self.wb_row.get_selected()],
             dynamic_range=_DYNAMIC_RANGES[self.dr_row.get_selected()],
             grain=_GRAINS[self.grain_row.get_selected()],
-            grain_size=_GRAIN_SIZES[self.grain_size_row.get_selected()],
+            grain_size=grain_size,
             color_chrome=_CHROME[self.chrome_row.get_selected()],
             color_chrome_blue=_CHROME[self.chrome_blue_row.get_selected()],
             smooth_skin=_CHROME[self.smooth_skin_row.get_selected()],
