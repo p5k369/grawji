@@ -66,6 +66,12 @@ OFFSET_FILM_SIM = _PARAM_OFFSETS["FilmSimulation"]
 FILM_SIM_CODES: dict[str, int] = {e.name: int(e) for e in rawji.FilmSimulation}
 _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 
+# todo: the 1/2/3 codes in upstream rawji's DynamicRange enum are silently
+#  ignored by the engine, so the names are mapped here instead of deriving
+#  from that enum.
+_DR_PERCENTAGES = {"DR100": 100, "DR200": 200, "DR400": 400}
+_DR_NAMES = {v: k for k, v in _DR_PERCENTAGES.items()}
+
 # Params that use the value*10 tone encoding.
 _TONE_PARAMS = frozenset(TONE_PARAMS)
 
@@ -267,9 +273,11 @@ def recipe_changes(recipe: Recipe) -> dict[str, float]:
         "Clarity": _clamp_clarity(recipe.clarity),
     }
     if recipe.dynamic_range != "Auto":
-        changes["DynamicRange"] = _enum_value(
-            rawji.DynamicRange, recipe.dynamic_range, "dynamic range"
-        )
+        try:
+            changes["DynamicRange"] = _DR_PERCENTAGES[recipe.dynamic_range]
+        except KeyError as e:
+            msg = f"unknown dynamic range: {recipe.dynamic_range}"
+            raise ValueError(msg) from e
     changes.update(
         {
             "HighlightTone": recipe.highlights,
@@ -388,10 +396,8 @@ def recipe_from_profile(base: bytes) -> Recipe:
         white_balance=_enum_name(
             rawji.WhiteBalance, signed("WhiteBalance"), defaults.white_balance
         ),
-        dynamic_range=_enum_name(
-            rawji.DynamicRange,
-            signed("DynamicRange", 1),
-            defaults.dynamic_range,
+        dynamic_range=_DR_NAMES.get(
+            signed("DynamicRange", 100), defaults.dynamic_range
         ),
         grain=_grain_effect_name(signed("GrainEffect", 1), defaults.grain),
         grain_size=_grain_size_name(

@@ -149,7 +149,8 @@ class ParsedText:
 
 def _key(text: str) -> str:
     """Normalize a label or value word: lowercase alphanumerics only."""
-    return "".join(c for c in text.lower() if c.isalnum())
+    joined = "".join(c for c in text.lower() if c.isalnum())
+    return joined.replace("colour", "color")
 
 
 def _number(value: str) -> float | None:
@@ -199,6 +200,8 @@ def parse_recipe_text(text: str) -> ParsedText | None:
     recognized += _pair_bare_lines(bare, fields, parsed)
     if recognized == 0:
         return None
+    fields.setdefault("white_balance", "Auto")
+    fields.setdefault("dynamic_range", "Auto")
     parsed.recipe = replace(parsed.recipe, **fields)  # type: ignore[arg-type]
     return parsed
 
