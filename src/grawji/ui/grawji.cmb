@@ -2,7 +2,7 @@
 <!DOCTYPE cambalache-project SYSTEM "cambalache-project.dtd">
 <!-- Created with Cambalache 1.0.3 -->
 <cambalache-project version="1.0.0" target_tk="gtk-4.0" depends="libadwaita-1">
-  <ui filename="preview_view.ui" sha256="bd12e0d77205d9a804c8b4efd3d6c01df96ca2bcc9de95b312ac7363ec58681c"/>
+  <ui filename="preview_view.ui" sha256="991cd735e47b820830b0f4b35796553e01bc2d20d71ed7396ced5715c93f19a5"/>
   <ui filename="recipe_panel.ui" sha256="f6060cd5c53dd6c4041d54079bd589a060de683093699f1ff7d5401960891af9"/>
   <ui filename="grawji.ui" sha256="f96e9c7592c4a4b7a08d27ff80b8c7ed7725f6da6799fafb6057ed96345487a4"/>
   <ui filename="batch_export.ui" sha256="684f45e4fd429b17511ec6c3dad138195d605a5f3bf6e70491bceec54337273a"/>

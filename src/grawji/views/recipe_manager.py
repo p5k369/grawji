@@ -18,6 +18,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 from grawji.camera import compatibility as compat
 from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
+from grawji.recipe_dedup import find_duplicate_recipes
 from grawji.recipe_text import parse_recipe_text
 from grawji.recipes import UNGROUPED, RecipeLibrary
 from grawji.views import dialogs
@@ -119,6 +120,7 @@ class RecipeManagerDialog(Adw.Dialog):
             self.content.remove(group)
         self._groups = []
         self._thumb_textures = {}
+        self._duplicates = self._duplicate_map()
 
         has_recipes = bool(self._library.names)
         self.stack.set_visible_child_name("list" if has_recipes else "empty")
@@ -158,6 +160,10 @@ class RecipeManagerDialog(Adw.Dialog):
             badge = self._fit_badge(recipe)
             if badge is not None:
                 row.add_suffix(badge)
+
+        twins = self._duplicates.get(name)
+        if twins:
+            row.add_suffix(self._duplicate_badge(twins))
 
         star = Gtk.ToggleButton(valign=Gtk.Align.CENTER)
         star.set_icon_name("starred-symbolic")
@@ -262,6 +268,28 @@ class RecipeManagerDialog(Adw.Dialog):
         chip.add_css_class("caption")
         chip.add_css_class(css)
         chip.set_tooltip_text("\n".join(verdict.issues))
+        return chip
+
+    def _duplicate_map(self) -> dict[str, list[str]]:
+        """Map each recipe to the others sharing its look."""
+        recipes = {
+            name: recipe
+            for name in self._library.names
+            if (recipe := self._library.get(name)) is not None
+        }
+        mapping: dict[str, list[str]] = {}
+        for group in find_duplicate_recipes(recipes):
+            for name in group:
+                mapping[name] = [other for other in group if other != name]
+        return mapping
+
+    def _duplicate_badge(self, twins: list[str]) -> Gtk.Widget:
+        """A chip flagging a recipe that duplicates others' look."""
+        chip = Gtk.Label(label="duplicate", valign=Gtk.Align.CENTER)
+        chip.add_css_class("caption")
+        chip.add_css_class("dim-label")
+        joined = ", ".join(twins)
+        chip.set_tooltip_text(f"Same look as: {joined}")
         return chip
 
     def set_busy(self, busy: bool) -> None:

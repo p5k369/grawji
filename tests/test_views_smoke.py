@@ -46,6 +46,40 @@ def test_preview_view_builds_standalone() -> None:
     assert view.rotation == 0
 
 
+def test_clipping_toggle_changes_the_shown_pixbuf() -> None:
+    """Turning zebras on recomposites the preview."""
+    from gi.repository import GdkPixbuf
+
+    from grawji.views.preview_view import PreviewView
+
+    view = PreviewView()
+    pump()
+    scheduled: list[tuple[Any, int]] = []
+    view._schedule_clip = lambda base, gen: scheduled.append((base, gen))
+    view._clip_dispatch = lambda fn: (fn(), False)[1]
+    pb = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 16, 16)
+    pb.fill(0xFFFFFFFF)
+    black = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 16, 8)
+    black.fill(0x000000FF)
+    black.copy_area(0, 0, 16, 8, pb, 0, 8)
+    view.show_pixbuf(pb)
+    pump()
+    clean = view._pixbuf.get_pixels()
+
+    view.set_show_clipping(True)
+    pump()
+    assert scheduled
+    assert view._pixbuf.get_pixels() == clean
+    base, generation = scheduled[-1]
+    view._clip_worker(base, generation)
+    zebra = view._pixbuf.get_pixels()
+    assert zebra != clean
+
+    view.set_show_clipping(False)
+    pump()
+    assert view._pixbuf.get_pixels() == clean
+
+
 def test_recipe_panel_builds_and_signals() -> None:
     """RecipePanel builds and carries its changed/apply-recipe signals."""
     from grawji.views.recipe_panel import RecipePanel
@@ -161,6 +195,22 @@ def test_panel_starts_unmodified() -> None:
     assert not panel.is_modified
 
 
+def test_grain_size_clamped_without_grain_size_support() -> None:
+    """Gen3/4 bodies ignore the Large grain codes, so never report Large."""
+    from grawji.camera.capabilities import capabilities_for_model
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.apply_capabilities(capabilities_for_model("X100F"))
+    panel.set_recipe(Recipe(grain="Strong", grain_size="Large"))
+    assert panel.get_recipe().grain_size == "Small"
+    panel.apply_capabilities(capabilities_for_model("X-E5"))
+    panel.set_recipe(Recipe(grain="Strong", grain_size="Large"))
+    assert panel.get_recipe().grain_size == "Large"
+
+
 def test_set_active_is_never_born_modified() -> None:
     """Row normalization must not count as a user edit."""
     from grawji.camera.capabilities import capabilities_for_model
@@ -263,6 +313,37 @@ def test_recipe_manager_escapes_ampersand_names(tmp_path: Any) -> None:
     recipe_row = next((r for r in rows if r.get_title() == "R&D"), None)
     assert recipe_row is not None, "recipe row title must be raw text"
     assert recipe_row.get_use_markup() is False
+
+
+def test_recipe_manager_badges_duplicates(tmp_path: Any) -> None:
+    """Recipes sharing a look get a 'duplicate' chip."""
+    from grawji.views.recipe_manager import RecipeManagerDialog
+
+    library = RecipeLibrary(tmp_path / "recipes.json")
+    library.add("Punchy", Recipe(film_simulation="Velvia", color=2))
+    library.add("Vivid", Recipe(film_simulation="Velvia", color=2))
+    library.add("Soft", Recipe(film_simulation="Astia"))
+    noop = lambda *_a: None  # noqa: E731
+    dialog = RecipeManagerDialog(
+        library=library,
+        on_export=noop,
+        on_delete=noop,
+        on_rename=noop,
+        on_move=noop,
+        on_set_baseline=noop,
+        on_place_recipe=noop,
+        on_create_folder=noop,
+        on_rename_folder=noop,
+        on_delete_folder=noop,
+        on_reorder_folder=noop,
+    )
+    pump()
+    root = dialog.get_child()
+    labels = [
+        w for w in (walk(root) if root else []) if isinstance(w, Gtk.Label)
+    ]
+    dup_chips = [w for w in labels if w.get_text() == "duplicate"]
+    assert len(dup_chips) == 2
 
 
 def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:

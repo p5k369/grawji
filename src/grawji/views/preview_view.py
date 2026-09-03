@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
+from functools import partial
 from importlib import resources
 from typing import Any, ClassVar
 
@@ -22,6 +24,7 @@ from gi.repository import (
 )
 
 from grawji import crop
+from grawji.imaging.clipping import clip_overlay
 from grawji.imaging.render import (
     add_border,
     bake_pixbuf,
@@ -102,6 +105,7 @@ class PreviewView(Gtk.Box):
     zoom_label = Gtk.Template.Child()
     size_label = Gtk.Template.Child()
     peek_button = Gtk.Template.Child()
+    clip_button = Gtk.Template.Child()
     rotate_left = Gtk.Template.Child()
     rotate_right = Gtk.Template.Child()
     crop_button = Gtk.Template.Child()
@@ -146,9 +150,15 @@ class PreviewView(Gtk.Box):
         self._split_fraction = 0.5
         self._dragging_divider = False
         self._shown_size: tuple[int, int] | None = None
+        self._show_clipping = False
+        self._clip_base: Any = None
+        self._clip_overlay: Any = None
+        self._clip_generation = 0
+        self._clip_dispatch = GLib.idle_add
 
         self.rotate_left.connect("clicked", lambda *_a: self.rotate(-90))
         self.rotate_right.connect("clicked", lambda *_a: self.rotate(90))
+        self.clip_button.connect("toggled", self._on_clip_toggled)
         self.status.connect("activate-link", self._on_status_link)
         self._crop_editor = CropEditor(self)
 
@@ -318,6 +328,7 @@ class PreviewView(Gtk.Box):
         self._original_pixbuf = None
         self._peek = False
         self.peek_button.set_sensitive(True)
+        self.clip_button.set_sensitive(True)
         self.rotate_left.set_sensitive(True)
         self.rotate_right.set_sensitive(True)
         self.crop_button.set_sensitive(True)
@@ -385,10 +396,82 @@ class PreviewView(Gtk.Box):
                 if histogram:
                     # The histogram describes the image, not the border.
                     self._histogram.update(self._display_base)
-            self._pixbuf = self._bordered(self._display_base)
+            self._pixbuf = self._bordered(
+                self._with_zebras(self._display_base)
+            )
         self._refresh_display()
         self._update_size_label()
         self.crop_overlay.queue_draw()
+
+    def _with_zebras(self, base: Any) -> Any:
+        """Return base with the clipping overlay composited, if ready."""
+        if not self._show_clipping:
+            return base
+        if base is not self._clip_base:
+            self._request_clip(base)
+            return base
+        if self._clip_overlay is None:
+            return base
+        return self._composite_overlay(base, self._clip_overlay)
+
+    @staticmethod
+    def _composite_overlay(base: Any, overlay: Any) -> Any:
+        """Alpha-composite the overlay onto a copy of base."""
+        width, height = base.get_width(), base.get_height()
+        out = base.copy()
+        overlay.composite(
+            out,
+            0,
+            0,
+            width,
+            height,
+            0.0,
+            0.0,
+            width / overlay.get_width(),
+            height / overlay.get_height(),
+            GdkPixbuf.InterpType.NEAREST,
+            255,
+        )
+        return out
+
+    def _request_clip(self, base: Any) -> None:
+        """Compute the clipping overlay for base off-thread."""
+        self._clip_generation += 1
+        self._schedule_clip(base, self._clip_generation)
+
+    def _schedule_clip(self, base: Any, generation: int) -> None:
+        """Run the overlay scan on a worker thread."""
+        threading.Thread(
+            target=self._clip_worker,
+            args=(base, generation),
+            name="grawji-clip",
+            daemon=True,
+        ).start()
+
+    def _clip_worker(self, base: Any, generation: int) -> None:
+        """Scan for clipping and hand the overlay back to the UI thread."""
+        overlay = clip_overlay(base)
+        self._clip_dispatch(
+            partial(self._store_clip, base, overlay, generation)
+        )
+
+    def _store_clip(self, base: Any, overlay: Any, generation: int) -> None:
+        """Adopt a fresh overlay and redraw, unless superseded."""
+        if generation != self._clip_generation:
+            return
+        self._clip_base = base
+        self._clip_overlay = overlay
+        if self._show_clipping:
+            self._redisplay(histogram=False)
+
+    def _on_clip_toggled(self, button: Gtk.ToggleButton) -> None:
+        """Turn the clipping overlay on or off and refresh."""
+        self._show_clipping = button.get_active()
+        self._redisplay(histogram=False)
+
+    def set_show_clipping(self, on: bool) -> None:
+        """Set the clipping overlay state."""
+        self.clip_button.set_active(on)
 
     def set_native_size(self, dims: tuple[int, int] | None) -> None:
         """Set the image's native (oriented) pixel size from metadata."""
