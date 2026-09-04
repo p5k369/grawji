@@ -21,26 +21,6 @@
             </child>
             <child>
               <object class="GtkButton">
-                <property name="icon-name">document-open-symbolic</property>
-                <property name="tooltip-text">Import an X RAW Studio recipe</property>
-                <property name="action-name">win.import-recipe</property>
-                <style>
-                  <class name="flat"/>
-                </style>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton">
-                <property name="icon-name">edit-paste-symbolic</property>
-                <property name="tooltip-text">Paste recipe from clipboard (Ctrl+Shift+V)</property>
-                <property name="action-name">win.paste-recipe</property>
-                <style>
-                  <class name="flat"/>
-                </style>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton">
                 <property name="icon-name">grawji-save-symbolic</property>
                 <property name="tooltip-text">Save current as recipe</property>
                 <property name="action-name">win.save-recipe</property>

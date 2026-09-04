@@ -286,7 +286,6 @@ class MainWindow(Adw.ApplicationWindow):
         specs: tuple[tuple[str, Callable[[], None], tuple[str, ...]], ...] = (
             ("export", lambda: self._on_export_clicked(None), ("<Ctrl>e",)),
             ("save-recipe", self._library.save_current, ("<Ctrl>s",)),
-            ("import-recipe", self._library.import_fp, ()),
             (
                 "paste-recipe",
                 self._library.paste_text,

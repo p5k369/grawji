@@ -361,10 +361,6 @@ class Histogram(Gtk.DrawingArea):
     # RGB channel fill colors.
     _RGB_COLOURS = ((0.9, 0.32, 0.32), (0.34, 0.85, 0.4), (0.4, 0.55, 1.0))
     _LUMA_COLOUR = (0.85, 0.85, 0.85)
-    # A channel is "clipped" once this fraction of pixels sits at 0 or 255.
-    _CLIP_FRACTION = 0.002
-    # Width of the full-height edge bar shown when a channel clips.
-    _CLIP_BAR = 5.0
 
     def __init__(self, *, dispatch: Dispatch = GLib.idle_add) -> None:
         """Create the histogram; dispatch schedules a redraw on the UI loop."""
@@ -476,60 +472,6 @@ class Histogram(Gtk.DrawingArea):
             cx.line_to(width, height)
             cx.close_path()
             cx.fill()
-        self._draw_clipping(cx, width, height, self._bins)
-
-    def _draw_clipping(
-        self,
-        cx: Any,
-        width: int,
-        height: int,
-        bins: tuple[list[int], ...],
-    ) -> None:
-        """Full-height edge bars for shadow/highlight clipping."""
-        red, green, blue, luma = bins
-        total = max(1, sum(red))
-        if self._luma:
-            shadow = self._LUMA_COLOUR if self._clips(luma[0], total) else None
-            highlight = (
-                self._LUMA_COLOUR if self._clips(luma[255], total) else None
-            )
-        else:
-            shadow = self._rgb_clip(red[0], green[0], blue[0], total)
-            highlight = self._rgb_clip(red[255], green[255], blue[255], total)
-        if shadow is not None:
-            self._edge_bar(cx, width, height, shadow, left=True)
-        if highlight is not None:
-            self._edge_bar(cx, width, height, highlight, left=False)
-
-    def _clips(self, count: int, total: int) -> bool:
-        """Return True if count is a clipping-worthy share of total."""
-        return count / total > self._CLIP_FRACTION
-
-    def _rgb_clip(
-        self, r: int, g: int, b: int, total: int
-    ) -> tuple[float, float, float] | None:
-        """Combine per-channel clipping into one marker color, or None."""
-        color = (
-            float(self._clips(r, total)),
-            float(self._clips(g, total)),
-            float(self._clips(b, total)),
-        )
-        return color if any(color) else None
-
-    def _edge_bar(
-        self,
-        cx: Any,
-        width: int,
-        height: int,
-        color: tuple[float, float, float],
-        *,
-        left: bool,
-    ) -> None:
-        """Fill a full-height bar down the clipped edge."""
-        bar = self._CLIP_BAR
-        cx.set_source_rgb(*color)
-        cx.rectangle(0.0 if left else width - bar, 0.0, bar, height)
-        cx.fill()
 
     @staticmethod
     def _rounded_rect(cx: Any, width: int, height: int, r: float) -> None:

@@ -32,8 +32,12 @@ jobs:
           bundle: grawji.flatpak
           manifest-path: flatpak/io.github.p5k369.grawji.yaml
           cache-key: flatpak-builder-${{ github.ref_name }}
+      - name: Build the release notes from the metainfo
+        run: python3 scripts/release_notes.py --tag "${{ github.ref_name }}"
+          > release_body.md
       - name: Create the release and attach the bundle
         uses: softprops/action-gh-release@v3
         with:
           files: grawji.flatpak
+          body_path: release_body.md
           generate_release_notes: true

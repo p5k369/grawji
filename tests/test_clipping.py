@@ -40,6 +40,14 @@ def test_no_clipping_on_a_midtone():
     assert clip_overlay(_flat(120)) is None
 
 
+def test_downscales_above_max_edge():
+    """An image larger than max_edge is scaled down before scanning."""
+    high, low = clip_fractions(_flat(255, 64, 48), max_edge=16)
+    assert high == 1.0
+    assert low == 0.0
+    assert clip_overlay(_flat(255, 64, 48), max_edge=16) is not None
+
+
 def test_all_white_is_all_highlight():
     """A white image reports every pixel as a blown highlight."""
     high, low = clip_fractions(_flat(255))

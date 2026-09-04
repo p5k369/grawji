@@ -19,7 +19,12 @@
         range, tone, colour, sharpness, grain, noise reduction, clarity,
         Color Chrome and monochromatic colour toning</li>
       <li>Save, apply and import/export recipes in X RAW Studio's FP
-        format</li>
+        format, with a try-them-all comparison grid and duplicate
+        detection</li>
+      <li>Crop and straighten with automatic horizon detection</li>
+      <li>Write recipes into the camera's custom banks and FS dial, and
+        back up and restore camera settings over USB</li>
+      <li>Browse, filter and cull RAFs in the filmstrip</li>
       <li>Single and full-folder batch export at full resolution</li>
     </ul>
   </description>
@@ -40,6 +45,35 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-09-04">
+      <description>
+        <p>
+          A large update that adds in-app editing, camera-side recipe
+          features and new preview tools.
+        </p>
+        <ul>
+          <li>Crop and straighten images, with automatic horizon
+            detection to level a tilted shot in one click</li>
+          <li>Per-image exposure and crop are saved next to each RAF and
+            restored the next time you open it</li>
+          <li>Try several recipes side by side in a comparison grid, each
+            rendered by the camera</li>
+          <li>Give saved recipes a thumbnail and a comment in the recipe
+            manager, and spot duplicate recipes automatically</li>
+          <li>Paste community recipes straight from the clipboard</li>
+          <li>Write recipes into the camera's C1 to C7 custom banks and
+            the FS dial over USB</li>
+          <li>Back up the camera's settings to a file and restore them
+            later over USB</li>
+          <li>Filter the filmstrip by camera metadata and cull directly
+            from it by copying, moving or trashing RAFs</li>
+          <li>A clipping overlay marks blown highlights and crushed
+            shadows directly on the preview</li>
+          <li>Dynamic range now includes Auto and is limited to what the
+            shot itself supports</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-07-08"/>
   </releases>
 </component>

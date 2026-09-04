@@ -22,10 +22,10 @@ finish-args:
   # The camera talks PTP over raw USB (usb), the UI wants the GPU (dri).
   - --device=dri
   - --device=usb
-  # Read RAFs from anywhere (cards under /run/media, external drives, ...).
-  # Read-only: exported JPEGs are written through the file-chooser portal,
-  # which grants write access to just the chosen file/folder.
-  - --filesystem=host:ro
+  # Read and write files anywhere (cards under /run/media, external
+  # drives, ...). Write access is needed for the per-image sidecars
+  # that grawji stores next to each RAF, and for exports written outside the file-chooser portal.
+  - --filesystem=host
 
 modules:
   - name: libusb
