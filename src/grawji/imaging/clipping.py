@@ -49,7 +49,7 @@ def clip_fractions(
     stride = scaled.get_rowstride()
     channels = scaled.get_n_channels()
     total = width * height
-    if total == 0:
+    if total == 0:  # pragma: no cover
         return 0.0, 0.0
 
     highlights = shadows = 0

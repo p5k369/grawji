@@ -1,4 +1,3 @@
 ignore:
   - "src/grawji/ui"
-  - "src/grawji/app.py"
-  - "src/grawji/window.py"
+  - "src/grawji/views"

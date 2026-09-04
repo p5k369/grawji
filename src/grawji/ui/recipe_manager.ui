@@ -12,6 +12,12 @@
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar">
+            <child type="start">
+              <object class="GtkButton" id="import_button">
+                <property name="icon-name">document-open-symbolic</property>
+                <property name="tooltip-text">Import an X RAW Studio recipe</property>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkButton" id="transfer_button">
                 <property name="label">Transfer to camera</property>

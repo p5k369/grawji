@@ -43,6 +43,7 @@ class RecipeManagerDialog(Adw.Dialog):
 
     toasts = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
+    import_button = Gtk.Template.Child()
     transfer_button = Gtk.Template.Child()
     content = Gtk.Template.Child()
     stack = Gtk.Template.Child()
@@ -74,6 +75,7 @@ class RecipeManagerDialog(Adw.Dialog):
         on_render_image: Callable[[str], None] | None = None,
         on_clear_image: Callable[[str], None] | None = None,
         on_edit_comment: Callable[[str], None] | None = None,
+        on_import: Callable[[], None] | None = None,
     ) -> None:
         """Wire the dialog to the library (read) and intent callbacks."""
         super().__init__()
@@ -96,6 +98,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self._on_render_image = on_render_image
         self._on_clear_image = on_clear_image
         self._on_edit_comment = on_edit_comment
+        self._on_import = on_import
         self._dragged: str | None = None
         self._groups: list[Adw.PreferencesGroup] = []
         self._toast: Adw.Toast | None = None
@@ -103,6 +106,12 @@ class RecipeManagerDialog(Adw.Dialog):
 
         self.new_folder_button.connect("clicked", self._on_new_folder)
         self.transfer_button.connect("clicked", self._on_transfer_clicked)
+        if self._on_import is not None:
+            self.import_button.connect(
+                "clicked", lambda *_a: self._on_import()
+            )
+        else:
+            self.import_button.set_visible(False)
         self.refresh()
         self.camera_pane.wire(
             library=library,
@@ -649,6 +658,7 @@ class RecipeLibraryController:
             on_render_image=self._render_thumb_for,
             on_clear_image=self._clear_thumb,
             on_edit_comment=self._edit_comment,
+            on_import=self.import_fp,
         )
         self._manager.connect("closed", self._on_manager_closed)
         dialogs.fit_dialog(

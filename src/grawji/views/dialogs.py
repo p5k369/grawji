@@ -18,6 +18,7 @@ _SHORTCUT_GROUPS = {
     ],
     "Recipe": [
         ("Save recipe", "<Ctrl>S"),
+        ("Paste recipe from clipboard", "<Ctrl><Shift>V"),
         ("Reset to default", "<Ctrl>R"),
     ],
     "Navigation": [

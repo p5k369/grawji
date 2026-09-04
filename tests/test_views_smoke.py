@@ -346,6 +346,34 @@ def test_recipe_manager_badges_duplicates(tmp_path: Any) -> None:
     assert len(dup_chips) == 2
 
 
+def test_recipe_manager_import_button_fires_callback(tmp_path: Any) -> None:
+    """The manager's Import button invokes on_import when clicked."""
+    from grawji.views.recipe_manager import RecipeManagerDialog
+
+    library = RecipeLibrary(tmp_path / "recipes.json")
+    library.add("A", Recipe())
+    noop = lambda *_a: None  # noqa: E731
+    imported: list[int] = []
+    dialog = RecipeManagerDialog(
+        library=library,
+        on_export=noop,
+        on_delete=noop,
+        on_rename=noop,
+        on_move=noop,
+        on_set_baseline=noop,
+        on_place_recipe=noop,
+        on_create_folder=noop,
+        on_rename_folder=noop,
+        on_delete_folder=noop,
+        on_reorder_folder=noop,
+        on_import=lambda: imported.append(1),
+    )
+    pump()
+    assert dialog.import_button.get_visible()
+    dialog.import_button.emit("clicked")
+    assert imported == [1]
+
+
 def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:
     """Building the picker menu with '&' names does not crash or garble."""
     from grawji.views.recipe_panel import RecipePanel
