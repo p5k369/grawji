@@ -45,6 +45,18 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.1" date="2026-09-07">
+      <description>
+        <p>
+          A small fix for desktop integration.
+        </p>
+        <ul>
+          <li>The grawji window now identifies itself with the
+            application id, so desktop panels can match it to the
+            launcher again.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-09-04">
       <description>
         <p>
