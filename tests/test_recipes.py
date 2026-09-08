@@ -7,6 +7,7 @@ from grawji.recipes import (
     RecipeLibrary,
     decode_recipes,
     load_recipes,
+    recipe_matches,
     save_recipes,
 )
 
@@ -276,3 +277,27 @@ def test_library_comment_follows_rename_and_delete(tmp_path):
     library.delete("Portra")
     library.add("Portra", Recipe())
     assert library.comment("Portra") == ""
+
+
+def test_recipe_matches_is_case_insensitive():
+    """Query words match regardless of case."""
+    assert recipe_matches("velvia", "Landscape", "", "Velvia")
+    assert recipe_matches("LAND", "Landscape", "", "Velvia")
+    assert not recipe_matches("acros", "Landscape", "", "Velvia")
+
+
+def test_recipe_matches_requires_every_word():
+    """All query words must match, across any of the fields."""
+    assert recipe_matches("velvia land", "Landscape", "punchy", "Velvia")
+    assert not recipe_matches("velvia sea", "Landscape", "punchy", "Velvia")
+
+
+def test_recipe_matches_searches_the_comment():
+    """The comment is part of the searched text."""
+    assert recipe_matches("punchy", "Landscape", "punchy greens", "Velvia")
+
+
+def test_recipe_matches_empty_query_matches_everything():
+    """An empty or blank query never filters anything out."""
+    assert recipe_matches("", "Landscape", "", "Velvia")
+    assert recipe_matches("   ", "anything", "", "")

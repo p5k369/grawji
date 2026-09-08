@@ -20,7 +20,7 @@ from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
 from grawji.recipe_dedup import find_duplicate_recipes
 from grawji.recipe_text import parse_recipe_text
-from grawji.recipes import UNGROUPED, RecipeLibrary
+from grawji.recipes import UNGROUPED, RecipeLibrary, recipe_matches
 from grawji.views import dialogs
 from grawji.views.camera_pane import CameraPane
 from grawji.views.recipe_panel import RecipePanel
@@ -44,6 +44,7 @@ class RecipeManagerDialog(Adw.Dialog):
     toasts = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
     import_button = Gtk.Template.Child()
+    search_entry = Gtk.Template.Child()
     transfer_button = Gtk.Template.Child()
     content = Gtk.Template.Child()
     stack = Gtk.Template.Child()
@@ -101,10 +102,14 @@ class RecipeManagerDialog(Adw.Dialog):
         self._on_import = on_import
         self._dragged: str | None = None
         self._groups: list[Adw.PreferencesGroup] = []
+        self._search_rows: list[
+            tuple[Adw.PreferencesGroup, Adw.ActionRow, str]
+        ] = []
         self._toast: Adw.Toast | None = None
         self._thumb_textures: dict[str, Any] = {}
 
         self.new_folder_button.connect("clicked", self._on_new_folder)
+        self.search_entry.connect("search-changed", self._apply_search)
         self.transfer_button.connect("clicked", self._on_transfer_clicked)
         if self._on_import is not None:
             self.import_button.connect(
@@ -128,6 +133,7 @@ class RecipeManagerDialog(Adw.Dialog):
         for group in self._groups:
             self.content.remove(group)
         self._groups = []
+        self._search_rows = []
         self._thumb_textures = {}
         self._duplicates = self._duplicate_map()
 
@@ -141,6 +147,7 @@ class RecipeManagerDialog(Adw.Dialog):
             self._add_group(UNGROUPED, "Recipes", ungrouped)
         for folder in self._library.folders():
             self._add_group(folder, folder, self._library.names_in(folder))
+        self._apply_search()
 
     def _add_group(self, folder: str, title: str, names: list[str]) -> None:
         """Add a titled folder section holding the given recipe rows."""
@@ -148,13 +155,34 @@ class RecipeManagerDialog(Adw.Dialog):
         if folder != UNGROUPED:
             group.set_header_suffix(self._folder_header(folder))
         for name in names:
-            group.add(self._recipe_row(name))
+            row = self._recipe_row(name)
+            group.add(row)
+            self._search_rows.append((group, row, self._search_text(name)))
         # Dropping a recipe onto the section's empty area moves it here.
         drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
         drop.connect("drop", self._on_group_drop, folder)
         group.add_controller(drop)
         self.content.add(group)
         self._groups.append(group)
+
+    def _search_text(self, name: str) -> str:
+        """The text a recipe is searched by."""
+        recipe = self._library.get(name)
+        film_sim = recipe.film_simulation if recipe is not None else ""
+        return f"{name} {self._library.comment(name)} {film_sim}"
+
+    def _apply_search(self, *_args: object) -> None:
+        """Show only recipes and folders matching the search entry."""
+        query = self.search_entry.get_text()
+        visible_in: dict[Adw.PreferencesGroup, bool] = dict.fromkeys(
+            self._groups, False
+        )
+        for group, row, text in self._search_rows:
+            match = recipe_matches(query, text)
+            row.set_visible(match)
+            visible_in[group] = visible_in[group] or match
+        for group, has_match in visible_in.items():
+            group.set_visible(has_match or not query.strip())
 
     def _recipe_row(self, name: str) -> Adw.ActionRow:
         """Build one recipe row: a baseline star and an overflow menu."""
