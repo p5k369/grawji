@@ -18,6 +18,12 @@
                 <property name="tooltip-text">Import an X RAW Studio recipe</property>
               </object>
             </child>
+            <child type="start">
+              <object class="GtkSearchEntry" id="search_entry">
+                <property name="placeholder-text">Search recipes</property>
+                <property name="tooltip-text">Filter recipes by name, comment or film simulation</property>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkButton" id="transfer_button">
                 <property name="label">Transfer to camera</property>

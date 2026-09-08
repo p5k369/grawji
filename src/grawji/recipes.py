@@ -47,6 +47,12 @@ def save_recipes(recipes: dict[str, Recipe], path: Path) -> None:
     path.write_text(json.dumps(encoded, indent=2), encoding="utf-8")
 
 
+def recipe_matches(query: str, *fields: str) -> bool:
+    """Whether every word of the query occurs in one of the fields."""
+    haystack = " ".join(fields).casefold()
+    return all(term in haystack for term in query.casefold().split())
+
+
 class RecipeLibrary:
     """Saved recipes plus their folders and the compare baseline."""
 

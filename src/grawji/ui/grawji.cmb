@@ -9,5 +9,5 @@
   <ui filename="preferences.ui" sha256="41f5c1769d88c0fb81b8f2bb02ce16d0fd67efd4f05eab65f49681113d926f85"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
   <ui filename="camera_pane.ui" sha256="51c0aeea0a911b551751560d9390c83a661c45e3d68f6aa0d686cd26916a0563"/>
-  <ui filename="recipe_manager.ui" sha256="4ddd2e8464843301743138846de22249a4ac62e77928b04a39392420defb48fe"/>
+  <ui filename="recipe_manager.ui" sha256="1482cbae69eeab2e7c7be552fafbb3624f03fb222eff758ecbd4f15d3f2e4dc6"/>
 </cambalache-project>
