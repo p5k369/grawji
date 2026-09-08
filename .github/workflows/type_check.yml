@@ -1,4 +1,4 @@
-name: type_check
+name: Type check
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, unlabeled]
