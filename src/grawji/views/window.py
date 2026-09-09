@@ -171,6 +171,7 @@ class MainWindow(Adw.ApplicationWindow):
         # the value they were issued under and ignore themselves if a newer
         # selection has superseded them (fast filmstrip scrubbing).
         self._generation = 0
+        self._preview_seq = 0
 
         self._settings = load_settings(settings_path())
         self._apply_color_scheme()
@@ -894,11 +895,45 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _on_preview(self, generation: int, jpeg: bytes) -> None:
-        """Display a finished preview render."""
+        """Decode a finished preview render off-thread, then show it."""
         if generation != self._generation:
             return  # a newer selection has superseded this render
-        self.preview_view.show_jpeg(jpeg)
+        self._preview_seq += 1
+        threading.Thread(
+            target=self._decode_preview,
+            args=(generation, self._preview_seq, jpeg),
+            name="grawji-preview-decode",
+            daemon=True,
+        ).start()
+
+    def _decode_preview(self, generation: int, seq: int, jpeg: bytes) -> None:
+        """Decode the preview jpeg off the main thread."""
+        try:
+            pixbuf = oriented_pixbuf(jpeg)
+        except GLib.Error as exc:
+            GLib.idle_add(
+                self._apply_preview, generation, seq, jpeg, None, str(exc)
+            )
+            return
+        GLib.idle_add(self._apply_preview, generation, seq, jpeg, pixbuf, "")
+
+    def _apply_preview(
+        self,
+        generation: int,
+        seq: int,
+        jpeg: bytes,
+        pixbuf: Any,
+        error: str,
+    ) -> bool:
+        """Show a decoded preview render."""
+        if generation != self._generation or seq != self._preview_seq:
+            return GLib.SOURCE_REMOVE  # superseded while decoding
+        if pixbuf is None:
+            self._set_busy(busy=False, status=f"Cannot display image: {error}")
+            return GLib.SOURCE_REMOVE
+        self.preview_view.show_pixbuf(pixbuf, jpeg=jpeg)
         self._set_busy(busy=False, status="Ready.")
+        return GLib.SOURCE_REMOVE
 
     def _render_recipe_thumb(
         self, recipe: Recipe, on_done: Callable[[bytes | None], None]
