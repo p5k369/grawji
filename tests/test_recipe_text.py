@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from grawji.recipe_text import parse_recipe_text
+from grawji.camera.core import FILM_SIM_CODES
+from grawji.recipe import Recipe
+from grawji.recipe_text import format_recipe_text, parse_recipe_text
 
 _KODACHROME = """Kodachrome 64
 Film Simulation: Classic Chrome
@@ -479,3 +481,51 @@ def test_bulleted_lines_parse_too():
     assert parsed is not None
     assert parsed.recipe.highlights == -2.0
     assert parsed.recipe.shadows == 2.0
+
+
+def test_format_round_trips_a_full_recipe():
+    """A formatted recipe parses back to the same values."""
+    recipe = Recipe(
+        film_simulation="ClassicNeg",
+        white_balance="Temperature",
+        color_temp=6700,
+        dynamic_range="DR400",
+        grain="Weak",
+        grain_size="Large",
+        color_chrome="Strong",
+        color_chrome_blue="Weak",
+        smooth_skin="Strong",
+        highlights=1.5,
+        shadows=-2.0,
+        color=3,
+        sharpness=-1,
+        noise_reduction=-4,
+        clarity=5,
+        wb_shift_r=2,
+        wb_shift_b=-5,
+    )
+    parsed = parse_recipe_text(format_recipe_text(recipe, "My Look"))
+    assert parsed is not None
+    assert parsed.title == "My Look"
+    assert parsed.recipe == recipe
+
+
+def test_format_round_trips_mono_toning():
+    """B&W toning survives the format/parse round-trip."""
+    recipe = Recipe(
+        film_simulation="Acros",
+        mono_warm_cool=4,
+        mono_magenta_green=-3,
+    )
+    parsed = parse_recipe_text(format_recipe_text(recipe))
+    assert parsed is not None
+    assert parsed.recipe == recipe
+
+
+def test_format_round_trips_every_film_simulation():
+    """Every supported film simulation formats to a label parse reads back."""
+    for name in FILM_SIM_CODES:
+        recipe = Recipe(film_simulation=name)
+        parsed = parse_recipe_text(format_recipe_text(recipe))
+        assert parsed is not None, name
+        assert parsed.recipe.film_simulation == name

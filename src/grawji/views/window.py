@@ -1,4 +1,4 @@
-"""Main application window (layout in ui/grawji.ui via Gtk.Template)."""
+"""Main application window."""
 
 from __future__ import annotations
 
@@ -302,6 +302,11 @@ class MainWindow(Adw.ApplicationWindow):
                 "paste-recipe",
                 self._library.paste_text,
                 ("<Ctrl><Shift>v",),
+            ),
+            (
+                "copy-recipe",
+                self._library.copy_text,
+                ("<Ctrl><Shift>c",),
             ),
             ("reset", self._reset_recipe, ("<Ctrl>r",)),
             ("preferences", self._on_preferences, ("<Ctrl>comma",)),
@@ -810,6 +815,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
         self.recipe_panel.connect(
             "paste-recipe", lambda *_a: self._library.paste_text()
+        )
+        self.recipe_panel.connect(
+            "copy-recipe", lambda *_a: self._library.copy_text()
         )
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:

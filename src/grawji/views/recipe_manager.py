@@ -19,8 +19,9 @@ from grawji.camera import compatibility as compat
 from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.recipe import Recipe
 from grawji.recipe_dedup import find_duplicate_recipes
-from grawji.recipe_text import parse_recipe_text
+from grawji.recipe_text import format_recipe_text, parse_recipe_text
 from grawji.recipes import UNGROUPED, RecipeLibrary, recipe_matches
+from grawji.settings import FROM_IMAGE_LABEL
 from grawji.views import dialogs
 from grawji.views.camera_pane import CameraPane
 from grawji.views.recipe_panel import RecipePanel
@@ -797,6 +798,16 @@ class RecipeLibraryController:
         if parsed.notes:
             skipped = "; ".join(parsed.notes[:3])
             self._on_status(f"Pasted with notes: {skipped}")
+
+    def copy_text(self) -> None:
+        """Copy the current recipe to the clipboard as shareable text."""
+        label = self._panel.active_label
+        title = "" if label == FROM_IMAGE_LABEL else label
+        text = format_recipe_text(self._panel.get_recipe(), title)
+        self._parent.get_clipboard().set(text)
+        self._on_status("Recipe copied to the clipboard as text.")
+        if self._manager is not None:
+            self._manager.show_toast("Recipe copied as text.")
 
     def _apply_unsaved(self, recipe: Recipe, title: str) -> None:
         """Apply an imported/pasted recipe right away, marked unsaved."""

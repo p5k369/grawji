@@ -1,4 +1,4 @@
-"""Parse community text recipes into Recipes."""
+"""Parse and format community text recipes."""
 
 from __future__ import annotations
 
@@ -62,6 +62,32 @@ _FILM_SIMS = {
     "monochromgrün": "MonochromeG",
     "monochromgruen": "MonochromeG",
 }
+
+_FILM_SIM_LABELS = {
+    "Provia": "Provia",
+    "Velvia": "Velvia",
+    "Astia": "Astia",
+    "ClassicChrome": "Classic Chrome",
+    "ClassicNeg": "Classic Neg",
+    "ProNegHi": "Pro Neg Hi",
+    "ProNegStd": "Pro Neg Std",
+    "NostalgicNeg": "Nostalgic Neg",
+    "Eterna": "Eterna",
+    "EternaBleach": "Eterna Bleach Bypass",
+    "Acros": "Acros",
+    "AcrosR": "Acros R",
+    "AcrosYe": "Acros Ye",
+    "AcrosG": "Acros G",
+    "Monochrome": "Monochrome",
+    "MonochromeR": "Monochrome R",
+    "MonochromeYe": "Monochrome Ye",
+    "MonochromeG": "Monochrome G",
+    "Sepia": "Sepia",
+    "RealaAce": "Reala Ace",
+}
+
+# Film sims whose Monochromatic Color toning is meaningful
+_MONO_SIM_PREFIXES = ("Acros", "Monochrome")
 
 # Community WB names -> rawji WhiteBalance member names. Modes that a
 # RAF conversion cannot express map to Auto with a note.
@@ -204,6 +230,54 @@ def parse_recipe_text(text: str) -> ParsedText | None:
     fields.setdefault("dynamic_range", "Auto")
     parsed.recipe = replace(parsed.recipe, **fields)  # type: ignore[arg-type]
     return parsed
+
+
+def _fmt_num(value: float) -> str:
+    """Format a signed tone value."""
+    if value == int(value):
+        number = int(value)
+        return f"{number:+d}" if number else "0"
+    return f"{value:+g}"
+
+
+def format_recipe_text(recipe: Recipe, title: str = "") -> str:
+    """Render a recipe as shareable text that parse_recipe_text reads back."""
+    lines: list[str] = []
+    if title.strip():
+        lines.append(title.strip())
+    lines.append(
+        "Film Simulation: "
+        + _FILM_SIM_LABELS.get(recipe.film_simulation, recipe.film_simulation)
+    )
+    lines.append(f"Dynamic Range: {recipe.dynamic_range}")
+    if recipe.white_balance == "Temperature":
+        lines.append(f"White Balance: {recipe.color_temp}K")
+    else:
+        lines.append(f"White Balance: {recipe.white_balance}")
+    if recipe.wb_shift_r or recipe.wb_shift_b:
+        lines.append(
+            f"WB Shift: R{recipe.wb_shift_r:+d} B{recipe.wb_shift_b:+d}"
+        )
+    lines.append(f"Grain: {recipe.grain}")
+    if recipe.grain != "Off":
+        lines.append(f"Grain Size: {recipe.grain_size}")
+    lines.append(f"Color Chrome Effect: {recipe.color_chrome}")
+    lines.append(f"Color Chrome FX Blue: {recipe.color_chrome_blue}")
+    if recipe.smooth_skin != "Off":
+        lines.append(f"Smooth Skin: {recipe.smooth_skin}")
+    lines.append(f"Highlight: {_fmt_num(recipe.highlights)}")
+    lines.append(f"Shadow: {_fmt_num(recipe.shadows)}")
+    lines.append(f"Color: {_fmt_num(recipe.color)}")
+    lines.append(f"Sharpness: {_fmt_num(recipe.sharpness)}")
+    lines.append(f"Noise Reduction: {_fmt_num(recipe.noise_reduction)}")
+    lines.append(f"Clarity: {_fmt_num(recipe.clarity)}")
+    is_mono = recipe.film_simulation.startswith(_MONO_SIM_PREFIXES)
+    if is_mono and (recipe.mono_warm_cool or recipe.mono_magenta_green):
+        lines.append(
+            f"Monochromatic Color: WC{recipe.mono_warm_cool:+d}, "
+            f"MG{recipe.mono_magenta_green:+d}"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _pair_bare_lines(
