@@ -6,6 +6,7 @@ from grawji.camera.camera_info import (
     detect_camera,
     is_camera_disconnected,
     is_camera_stuck,
+    is_foreign_raf,
 )
 
 
@@ -72,3 +73,19 @@ def test_disconnected_on_failed_connect():
 def test_not_disconnected_on_other_errors():
     """Ordinary failures are not misread as an unplugged camera."""
     assert is_camera_disconnected(RuntimeError("conversion failed")) is False
+
+
+def test_foreign_raf_on_general_error():
+    """PTP 0x2002 at send/get-profile means a RAF from another body."""
+    assert is_foreign_raf(OSError("get_profile failed: 0x2002")) is True
+
+
+def test_foreign_raf_matches_uppercase_code():
+    """The code is matched regardless of hex letter case."""
+    assert is_foreign_raf(OSError("failed: 0X2002")) is True
+
+
+def test_not_foreign_raf_on_other_errors():
+    """Other PTP failures are not misread as a foreign RAF."""
+    busy = RuntimeError("StartRawConversion failed: 0x2019")
+    assert is_foreign_raf(busy) is False

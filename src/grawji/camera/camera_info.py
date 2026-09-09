@@ -5,7 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import usb.core
-from rawji.fuji_enums import FUJIFILM_USB_VENDOR_ID
+from rawji.fuji_enums import FUJIFILM_USB_VENDOR_ID, PTPResponseCode
+
+# Codes rawji names come from its enum.
+# DEVICE_BUSY (0x2019) is standard PTP but absent from that enum.
+_DEVICE_BUSY = 0x2019
+
+
+def _ptp_code_in(exc: Exception, code: int) -> bool:
+    """Whether exc's message carries the given PTP response code."""
+    return f"0x{code:04X}".casefold() in str(exc).casefold()
+
 
 # Friendly names for known Fuji product ids. Detection accepts any device on
 # the Fuji vendor id. This map only supplies a nice label.
@@ -46,7 +56,7 @@ def is_camera_stuck(exc: Exception) -> bool:
     rejected with PTP 0x2019 (Device_Busy) both mean the body is wedged
     and needs a power cycle - retrying from here cannot recover it.
     """
-    return isinstance(exc, TimeoutError) or "0x2019" in str(exc)
+    return isinstance(exc, TimeoutError) or _ptp_code_in(exc, _DEVICE_BUSY)
 
 
 def is_camera_disconnected(exc: Exception) -> bool:
@@ -57,3 +67,8 @@ def is_camera_disconnected(exc: Exception) -> bool:
     """
     text = str(exc)
     return "No such device" in text or "could not connect" in text
+
+
+def is_foreign_raf(exc: Exception) -> bool:
+    """Whether exc signals a RAF shot by a different camera body."""
+    return _ptp_code_in(exc, PTPResponseCode.GeneralError)
