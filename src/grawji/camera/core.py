@@ -45,7 +45,7 @@ from rawji.fuji_profile import (
     encode_tone_value,
 )
 
-from grawji.camera import camera_backup
+from grawji.camera import camera_backup, camera_info
 from grawji.recipe import Recipe
 
 # rawji parameter name -> byte offset in the native profile, derived from
@@ -560,7 +560,7 @@ class CameraSession:
             base: bytes = camera.get_profile()
         except Exception as e:
             self._safe_disconnect(camera)
-            if "0x2002" in str(e):
+            if camera_info.is_foreign_raf(e):
                 raise ForeignRafError(
                     "RAF was shot by a different camera body (PTP 0x2002)"
                 ) from e
