@@ -83,6 +83,7 @@ class RecipePanel(Adw.PreferencesPage):
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "apply-recipe": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "paste-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "copy-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     recipe_row = Gtk.Template.Child()
@@ -112,6 +113,9 @@ class RecipePanel(Adw.PreferencesPage):
         paste_action = Gio.SimpleAction.new("paste", None)
         paste_action.connect("activate", lambda *_a: self.emit("paste-recipe"))
         self._apply_actions.add_action(paste_action)
+        copy_action = Gio.SimpleAction.new("copy", None)
+        copy_action.connect("activate", lambda *_a: self.emit("copy-recipe"))
+        self._apply_actions.add_action(copy_action)
         self.insert_action_group("recipe", self._apply_actions)
 
         self._build_rows()
@@ -497,6 +501,7 @@ class RecipePanel(Adw.PreferencesPage):
         special = Gio.Menu()
         special.append_item(self._apply_item(FROM_IMAGE_LABEL, FROM_IMAGE))
         special.append("Paste from Clipboard…", "recipe.paste")
+        special.append("Copy as Text", "recipe.copy")
         menu.append_section(None, special)
         top = Gio.Menu()
         for name in ungrouped:
