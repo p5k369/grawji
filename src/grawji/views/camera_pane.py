@@ -15,8 +15,8 @@ from gi.repository import Adw, Gdk, GdkPixbuf, GLib, GObject, Gtk
 
 from grawji.camera import compatibility as compat
 from grawji.camera import fs_recipe
-from grawji.imaging.render import texture_for_pixbuf
 from grawji.recipes import RecipeLibrary
+from grawji.views.textures import texture_for_pixbuf
 
 _UI = (
     resources.files("grawji")

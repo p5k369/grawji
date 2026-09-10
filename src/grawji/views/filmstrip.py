@@ -24,10 +24,10 @@ from gi.repository import (
     PangoCairo,
 )
 
-from grawji.imaging.render import texture_for_pixbuf
 from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
 from grawji.settings import cache_dir
 from grawji.sidecar import edit_flags
+from grawji.views.textures import texture_for_pixbuf
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_PX_PER_S_DEFAULT = 600

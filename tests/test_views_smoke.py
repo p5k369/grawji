@@ -14,7 +14,7 @@ from gi.repository import Adw, GLib, GObject, Gtk
 
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
-from tests.gui_support import pump, walk
+from tests.gui_support import StubManagerHost, pump, walk
 
 pytestmark = pytest.mark.gui
 
@@ -272,20 +272,7 @@ def _manager(tmp_path: Any) -> Any:
 
     library = RecipeLibrary(tmp_path / "recipes.json")
     library.add("R&D", Recipe(film_simulation="Acros"), folder="B&W")
-    noop1 = lambda *_a: None  # noqa: E731
-    dialog = RecipeManagerDialog(
-        library=library,
-        on_export=noop1,
-        on_delete=noop1,
-        on_rename=noop1,
-        on_move=noop1,
-        on_set_baseline=noop1,
-        on_place_recipe=noop1,
-        on_create_folder=noop1,
-        on_rename_folder=noop1,
-        on_delete_folder=noop1,
-        on_reorder_folder=noop1,
-    )
+    dialog = RecipeManagerDialog(library=library, host=StubManagerHost())
     pump()
     return dialog
 
@@ -323,20 +310,7 @@ def test_recipe_manager_badges_duplicates(tmp_path: Any) -> None:
     library.add("Punchy", Recipe(film_simulation="Velvia", color=2))
     library.add("Vivid", Recipe(film_simulation="Velvia", color=2))
     library.add("Soft", Recipe(film_simulation="Astia"))
-    noop = lambda *_a: None  # noqa: E731
-    dialog = RecipeManagerDialog(
-        library=library,
-        on_export=noop,
-        on_delete=noop,
-        on_rename=noop,
-        on_move=noop,
-        on_set_baseline=noop,
-        on_place_recipe=noop,
-        on_create_folder=noop,
-        on_rename_folder=noop,
-        on_delete_folder=noop,
-        on_reorder_folder=noop,
-    )
+    dialog = RecipeManagerDialog(library=library, host=StubManagerHost())
     pump()
     root = dialog.get_child()
     labels = [
@@ -347,26 +321,15 @@ def test_recipe_manager_badges_duplicates(tmp_path: Any) -> None:
 
 
 def test_recipe_manager_import_button_fires_callback(tmp_path: Any) -> None:
-    """The manager's Import button invokes on_import when clicked."""
+    """The manager's Import button invokes the host's import."""
     from grawji.views.recipe_manager import RecipeManagerDialog
 
     library = RecipeLibrary(tmp_path / "recipes.json")
     library.add("A", Recipe())
-    noop = lambda *_a: None  # noqa: E731
     imported: list[int] = []
     dialog = RecipeManagerDialog(
         library=library,
-        on_export=noop,
-        on_delete=noop,
-        on_rename=noop,
-        on_move=noop,
-        on_set_baseline=noop,
-        on_place_recipe=noop,
-        on_create_folder=noop,
-        on_rename_folder=noop,
-        on_delete_folder=noop,
-        on_reorder_folder=noop,
-        on_import=lambda: imported.append(1),
+        host=StubManagerHost(import_recipe=lambda: imported.append(1)),
     )
     pump()
     assert dialog.import_button.get_visible()

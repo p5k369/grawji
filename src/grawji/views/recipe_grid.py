@@ -20,9 +20,10 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, GdkPixbuf, GLib, Gtk, Pango
 
-from grawji.imaging.render import texture_for_pixbuf, trim_letterbox
+from grawji.imaging.render import trim_letterbox
 from grawji.imaging.thumbnails import orient_exif
 from grawji.recipe import Recipe
+from grawji.views.textures import texture_for_pixbuf
 
 _UI = (
     resources.files("grawji")

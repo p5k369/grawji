@@ -25,22 +25,6 @@ _ROTATIONS = {
 _GRAY_TARGET = 400
 
 
-def texture_for_pixbuf(pixbuf: Any) -> Gdk.Texture:
-    """A GPU texture from a pixbuf."""
-    fmt = (
-        Gdk.MemoryFormat.R8G8B8A8
-        if pixbuf.get_has_alpha()
-        else Gdk.MemoryFormat.R8G8B8
-    )
-    return Gdk.MemoryTexture.new(
-        pixbuf.get_width(),
-        pixbuf.get_height(),
-        fmt,
-        GLib.Bytes.new(pixbuf.get_pixels()),
-        pixbuf.get_rowstride(),
-    )
-
-
 def gray_rows(pixbuf: Any, target: int = _GRAY_TARGET) -> list[list[int]]:
     """Downscale a pixbuf and return grayscale rows."""
     width = pixbuf.get_width()
