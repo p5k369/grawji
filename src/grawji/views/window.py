@@ -486,6 +486,7 @@ class MainWindow(Adw.ApplicationWindow):
         (filmstrip highlight) paints first instead of waiting on them.
         """
         self._nav.update()
+        self._flush_pending_exposure()
         self._generation += 1
         self._raf_path = Path(raf_path)
         self._settings.last_image = raf_path
@@ -743,7 +744,6 @@ class MainWindow(Adw.ApplicationWindow):
         """Re-render (debounced) after a recipe edit."""
         if not self._session.is_open:
             return
-        self._persist_exposure()
         self._schedule_render()
 
     def _persist_exposure(self) -> None:
@@ -898,10 +898,20 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_pending_id = GLib.timeout_add(150, self._render_now)
 
     def _render_now(self) -> bool:
-        """Fire the debounced preview render."""
+        """Persist the settled EV and fire the debounced preview render."""
         self._render_pending_id = 0
+        # Persisting here (not per edit) writes the sidecar once a slider
+        # drag settles, instead of once per intermediate EV value.
+        self._persist_exposure()
         self._render_if_open()
         return GLib.SOURCE_REMOVE
+
+    def _flush_pending_exposure(self) -> None:
+        """Persist a pending debounced EV now and cancel the timer."""
+        if self._render_pending_id:
+            GLib.source_remove(self._render_pending_id)
+            self._render_pending_id = 0
+            self._persist_exposure()
 
     def _render_preview(self) -> None:
         """Queue a fast (non-full-resolution) preview render."""
@@ -1246,6 +1256,7 @@ class MainWindow(Adw.ApplicationWindow):
         if self.recipe_panel.needs_save and not self._close_confirmed:
             self._confirm_recipe_discard(self._close_discarded)
             return True
+        self._flush_pending_exposure()
         self._settings.window_width = self.get_width()
         self._settings.window_height = self.get_height()
         self._settings.sidebar_width = self.main_paned.get_position()
