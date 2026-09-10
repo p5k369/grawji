@@ -16,9 +16,9 @@ from grawji.imaging.imagemeta import camera_model, exif_orientation, exif_rows
 from grawji.imaging.render import (
     gray_rows,
     parse_aspect,
-    texture_for_pixbuf,
     thumb_jpeg,
 )
+from grawji.views.textures import texture_for_pixbuf
 
 
 def _flat_pixbuf(width: int, height: int, value: int) -> GdkPixbuf.Pixbuf:

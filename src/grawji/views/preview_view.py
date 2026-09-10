@@ -30,7 +30,6 @@ from grawji.imaging.render import (
     bake_pixbuf,
     orient_pixbuf,
     parse_aspect,
-    texture_for_pixbuf,
 )
 from grawji.views.crop_editor import CropEditor
 from grawji.views.paintables import (
@@ -38,6 +37,7 @@ from grawji.views.paintables import (
     ScaledPaintable,
     SplitPaintable,
 )
+from grawji.views.textures import texture_for_pixbuf
 from grawji.views.widgets import Histogram
 
 # Longest edge of the image used while crop-editing.

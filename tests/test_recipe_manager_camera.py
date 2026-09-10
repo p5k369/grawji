@@ -13,7 +13,7 @@ gi.require_version("Adw", "1")
 from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
-from tests.gui_support import pump
+from tests.gui_support import StubManagerHost, pump
 
 pytestmark = pytest.mark.gui
 
@@ -27,22 +27,12 @@ def _dialog(tmp_path, *, model, on_transfer=_NOOP):
     library = RecipeLibrary(tmp_path / "recipes.json")
     library.add("Velvia look", Recipe(film_simulation="Velvia"))
     library.add("Acros look", Recipe(film_simulation="Acros"))
-    dialog = RecipeManagerDialog(
-        library=library,
-        on_export=_NOOP,
-        on_delete=_NOOP,
-        on_rename=_NOOP,
-        on_move=_NOOP,
-        on_set_baseline=_NOOP,
-        on_place_recipe=_NOOP,
-        on_create_folder=_NOOP,
-        on_rename_folder=_NOOP,
-        on_delete_folder=_NOOP,
-        on_reorder_folder=_NOOP,
+    host = StubManagerHost(
         get_capabilities=lambda: capabilities_for_model(model),
         get_model=lambda: model,
-        on_transfer=on_transfer,
+        transfer_banks=on_transfer,
     )
+    dialog = RecipeManagerDialog(library=library, host=host)
     pump()
     return dialog
 

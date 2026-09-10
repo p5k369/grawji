@@ -46,7 +46,6 @@ from grawji.controllers.fileops import FileOpsController
 from grawji.imaging import imagemeta
 from grawji.imaging.render import (
     oriented_jpeg,
-    texture_for_pixbuf,
     thumb_jpeg,
     trim_letterbox,
 )
@@ -67,8 +66,9 @@ from grawji.views.navigator import Navigator
 from grawji.views.preferences import PreferencesDialog
 from grawji.views.preview_view import PreviewView, oriented_pixbuf
 from grawji.views.recipe_grid import RecipeGridDialog
-from grawji.views.recipe_manager import RecipeLibraryController
+from grawji.views.recipe_library import RecipeLibraryController
 from grawji.views.recipe_panel import RecipePanel
+from grawji.views.textures import texture_for_pixbuf
 
 _CAMERA_POLL_SECONDS = 3
 # Debounce a selection's load so fast scrubbing does not spawn a decode per

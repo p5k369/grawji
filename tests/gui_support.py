@@ -27,3 +27,19 @@ def walk(widget: Gtk.Widget) -> list[Gtk.Widget]:
         found.extend(walk(child))
         child = child.get_next_sibling()
     return found
+
+
+class StubManagerHost:
+    """A no-op RecipeManagerHost for building the manager dialog alone."""
+
+    def __init__(self, **overrides: object) -> None:
+        """Default every member to inert."""
+        self.get_capabilities = None
+        self.get_model = None
+        self.load_bank_names = None
+        for name, value in overrides.items():
+            setattr(self, name, value)
+
+    def __getattr__(self, name: str):
+        """Every intent method defaults to a no-op."""
+        return lambda *_a, **_k: None
