@@ -1,0 +1,32 @@
+name: Flatpak smoke test
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - flatpak/**
+      - src/grawji/**
+      - data/**
+      - pyproject.toml
+      - scripts/flatpak_smoke.py
+      - .github/workflows/flatpak_smoke.yml
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: grawji.flatpak
+          manifest-path: flatpak/io.github.p5k369.grawji.yaml
+      - name: Smoke-test the bundle in its sandbox
+        run: |
+          flatpak install -y --user grawji.flatpak
+          flatpak run --command=python3 io.github.p5k369.grawji \
+            "$PWD/scripts/flatpak_smoke.py"
