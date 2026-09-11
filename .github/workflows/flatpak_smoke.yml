@@ -13,7 +13,7 @@ on:
       - .github/workflows/flatpak_smoke.yml
 
 jobs:
-  smoke:
+  build:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
@@ -25,17 +25,32 @@ jobs:
         with:
           bundle: grawji.flatpak
           manifest-path: flatpak/io.github.p5k369.grawji.yaml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smoke-bundle
+          path: grawji.flatpak
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: smoke-bundle
+      - name: Cache the flatpak runtime
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtime-gnome-50
       - name: Smoke-test the bundle in its sandbox
         run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install -y --user grawji.flatpak
-          # TEMP DIAGNOSTICS for the glycin flatpak-spawn chain.
-          command -v dbus-daemon dbus-broker flatpak-portal xvfb-run || true
-          ls -la /usr/bin/dbus* /usr/libexec/flatpak* 2>&1 || true
-          ls /usr/share/dbus-1/services/ 2>&1 || true
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          mkdir -p "$XDG_RUNTIME_DIR"
-          chmod 700 "$XDG_RUNTIME_DIR"
           dbus-run-session -- flatpak run \
-            --env=G_MESSAGES_DEBUG=all \
             --command=python3 io.github.p5k369.grawji \
             "$PWD/scripts/flatpak_smoke.py"
