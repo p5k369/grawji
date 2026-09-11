@@ -45,6 +45,19 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.0" date="2026-09-11">
+      <description>
+        <p>Version 0.4.0 brings recipe sharing, a faster preview, and a more reliable JPEG export.</p>
+        <ul>
+          <li>Copy the current recipe to the clipboard as text to share or save it elsewhere</li>
+          <li>Search your saved recipes in the recipe manager to find the one you want faster</li>
+          <li>Previews now decode in the background, so browsing and rendering feel smoother</li>
+          <li>Fixed JPEG export failing for rotated images</li>
+          <li>Exposure adjustments are saved more efficiently while you drag the slider</li>
+          <li>Check which version you're running with the new --version option</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-09-07">
       <description>
         <p>
