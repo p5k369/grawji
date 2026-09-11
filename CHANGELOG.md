@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/p5k369/grawji/compare/v0.3.1...v0.4.0) (2026-09-11)
+
+
+### Features
+
+* **cli:** add version flag for displaying application version ([#90](https://github.com/p5k369/grawji/issues/90)) ([8451682](https://github.com/p5k369/grawji/commit/845168241bcb06a059f939a8d890a53f55463f57))
+* **recipe, ui:** copy the current recipe to the clipboard as text ([#96](https://github.com/p5k369/grawji/issues/96)) ([52b5a77](https://github.com/p5k369/grawji/commit/52b5a77157e224d2bb41368d53e3972895fcbf3f))
+* **ui, recipe:** add search functionality to recipe manager ([#93](https://github.com/p5k369/grawji/issues/93)) ([6163c5e](https://github.com/p5k369/grawji/commit/6163c5e8e05d8d335a4f1bf2f234560a02140af6))
+
+
+### Bug Fixes
+
+* **export:** flatten alpha after rotation bake so JPEG export works on glycin runtimes ([#101](https://github.com/p5k369/grawji/issues/101)) ([ec4d4e6](https://github.com/p5k369/grawji/commit/ec4d4e68669c8ab0346e34702cb0004df31287f7))
+* **ui:** debounce the per-image EV sidecar write ([#98](https://github.com/p5k369/grawji/issues/98)) ([d317512](https://github.com/p5k369/grawji/commit/d317512df9e8b97a78b1434f831fe16f35f6fccd))
+
+
+### Performance
+
+* **ui, preview:** add threaded JPEG decoding for smoother preview rendering ([#94](https://github.com/p5k369/grawji/issues/94)) ([1aba576](https://github.com/p5k369/grawji/commit/1aba57654509648ed8068baa7da129f07656551e))
+
 ## [0.3.1](https://github.com/p5k369/grawji/compare/v0.3.0...v0.3.1) (2026-09-07)
 
 ### Bug Fixes
