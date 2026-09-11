@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "grawji"
-version = "0.4.0"
+version = "0.4.1"
 description = "GTK4 frontend for rawji - interactive Fuji RAF conversion via the camera engine."
 readme = "README.md"
 requires-python = ">=3.11"

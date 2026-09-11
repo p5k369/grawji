@@ -45,6 +45,13 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.1" date="2026-09-11">
+      <description>
+        <ul>
+          <li>release: attach the flatpak bundle to a draft release before publishing</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-09-11">
       <description>
         <p>Version 0.4.0 brings recipe sharing, a faster preview, and a more reliable JPEG export.</p>

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/p5k369/grawji/compare/v0.4.0...v0.4.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **release:** attach the flatpak bundle to a draft release before publishing ([#102](https://github.com/p5k369/grawji/issues/102)) ([9e155eb](https://github.com/p5k369/grawji/commit/9e155eb22ba2478b1a1319dac1aac3995ca30cdf))
+
 ## [0.4.0](https://github.com/p5k369/grawji/compare/v0.3.1...v0.4.0) (2026-09-11)
 
 
