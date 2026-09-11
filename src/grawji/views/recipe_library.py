@@ -301,6 +301,11 @@ class RecipeLibraryController:
             self._refresh()
             self._on_baseline_changed()
 
+    def set_hotkey(self, name: str, key: int | None) -> None:
+        """Assign a number key to a recipe and refresh."""
+        if self._library.set_hotkey(name, key):
+            self._refresh()
+
     def create_folder(self, name: str) -> None:
         """Create a folder and refresh."""
         if self._library.create_folder(name):

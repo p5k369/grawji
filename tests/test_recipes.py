@@ -279,6 +279,69 @@ def test_library_comment_follows_rename_and_delete(tmp_path):
     assert library.comment("Portra") == ""
 
 
+def test_library_hotkey_round_trip(tmp_path):
+    """An assigned number key survives reload and clears with None."""
+    library = _library(tmp_path)
+    assert library.hotkey_of("Punchy") is None
+    assert library.set_hotkey("Punchy", 3) is True
+    reloaded = RecipeLibrary(tmp_path / "recipes.json")
+    assert reloaded.hotkey_of("Punchy") == 3
+    assert reloaded.recipe_for_hotkey(3) == "Punchy"
+    assert reloaded.set_hotkey("Punchy", None) is True
+    assert reloaded.hotkey_of("Punchy") is None
+    assert reloaded.recipe_for_hotkey(3) is None
+
+
+def test_library_hotkey_moves_to_the_new_recipe(tmp_path):
+    """Assigning a taken key takes it away from the previous holder."""
+    library = _library(tmp_path)
+    library.set_hotkey("Punchy", 1)
+    assert library.set_hotkey("Mono", 1) is True
+    assert library.hotkey_of("Mono") == 1
+    assert library.hotkey_of("Punchy") is None
+
+
+def test_library_hotkey_rejects_invalid_input(tmp_path):
+    """Unknown recipes, keys outside 1 to 9, and no-ops all refuse."""
+    library = _library(tmp_path)
+    assert library.set_hotkey("Nope", 1) is False
+    assert library.set_hotkey("Punchy", 0) is False
+    assert library.set_hotkey("Punchy", 10) is False
+    assert library.set_hotkey("Punchy", None) is False
+    library.set_hotkey("Punchy", 2)
+    assert library.set_hotkey("Punchy", 2) is False
+
+
+def test_library_hotkey_follows_rename_and_delete(tmp_path):
+    """Rename carries the key; delete frees it."""
+    library = _library(tmp_path)
+    library.set_hotkey("Punchy", 5)
+    library.rename("Punchy", "Portra")
+    assert library.hotkey_of("Portra") == 5
+    library.delete("Portra")
+    assert library.recipe_for_hotkey(5) is None
+
+
+def test_library_hotkey_load_drops_duplicates_and_garbage(tmp_path):
+    """A stored duplicate or out-of-range key is ignored on load."""
+    path = tmp_path / "recipes.json"
+    data = {
+        "version": 2,
+        "baseline": None,
+        "folders": [],
+        "recipes": {
+            "A": {"film_simulation": "Provia", "hotkey": 4},
+            "B": {"film_simulation": "Velvia", "hotkey": 4},
+            "C": {"film_simulation": "Astia", "hotkey": 12},
+        },
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
+    library = RecipeLibrary(path)
+    assert library.hotkey_of("A") == 4
+    assert library.hotkey_of("B") is None
+    assert library.hotkey_of("C") is None
+
+
 def test_recipe_matches_is_case_insensitive():
     """Query words match regardless of case."""
     assert recipe_matches("velvia", "Landscape", "", "Velvia")
