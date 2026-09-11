@@ -12,8 +12,11 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import GdkPixbuf, GExiv2
 
+from grawji.crop import CropRotate
 from grawji.imaging.imagemeta import camera_model, exif_orientation, exif_rows
 from grawji.imaging.render import (
+    bake_pixbuf,
+    flatten_alpha,
     gray_rows,
     parse_aspect,
     thumb_jpeg,
@@ -121,3 +124,27 @@ def test_thumb_jpeg_keeps_small_images_unscaled():
     loader.close()
     decoded = loader.get_pixbuf()
     assert (decoded.get_width(), decoded.get_height()) == (120, 80)
+
+
+def test_bake_with_angle_yields_no_alpha():
+    """A rotation bake comes back as 3-channel RGB (issue #100)."""
+    crop = CropRotate(angle=5.0, rect=(0.3, 0.3, 0.4, 0.4))
+    baked = bake_pixbuf(_flat_pixbuf(120, 80, 128), crop)
+    assert not baked.get_has_alpha()
+    assert baked.get_n_channels() == 3
+
+
+def test_flatten_alpha_keeps_opaque_pixels_byte_identical():
+    """Flattening changes nothing on fully opaque content."""
+    rgba = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 4, 4)
+    rgba.fill(0x30A0C0FF)
+    flat = flatten_alpha(rgba)
+    assert not flat.get_has_alpha()
+    pixel = bytes(flat.get_pixels()[:3])
+    assert pixel == b"\x30\xa0\xc0"
+
+
+def test_flatten_alpha_passes_rgb_through():
+    """An already-RGB pixbuf is returned as-is, not copied."""
+    rgb = _flat_pixbuf(4, 4, 90)
+    assert flatten_alpha(rgb) is rgb

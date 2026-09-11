@@ -214,4 +214,33 @@ def bake_pixbuf(pixbuf: Any, crop: CropRotate, *, rect: bool = True) -> Any:
     ctx.get_source().set_filter(cairo.FILTER_GOOD)
     ctx.paint()
     surface.flush()
-    return Gdk.pixbuf_get_from_surface(surface, 0, 0, cw, ch)
+    baked = Gdk.pixbuf_get_from_surface(surface, 0, 0, cw, ch)
+    return flatten_alpha(baked)
+
+
+def flatten_alpha(pixbuf: Any) -> Any:
+    """Composite an alpha pixbuf onto black, pass an RGB one through."""
+    if not pixbuf.get_has_alpha():
+        return pixbuf
+    flat = GdkPixbuf.Pixbuf.new(
+        GdkPixbuf.Colorspace.RGB,
+        False,
+        8,
+        pixbuf.get_width(),
+        pixbuf.get_height(),
+    )
+    flat.fill(0x000000FF)
+    pixbuf.composite(
+        flat,
+        0,
+        0,
+        pixbuf.get_width(),
+        pixbuf.get_height(),
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        GdkPixbuf.InterpType.NEAREST,
+        255,
+    )
+    return flat
