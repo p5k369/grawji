@@ -1,8 +1,18 @@
 name: Release
 
 on:
-  release:
-    types: [created]
+  workflow_call:
+    inputs:
+      tag_name:
+        description: Tag name of the draft release to build and publish
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Tag name of the draft release to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,16 +21,30 @@ jobs:
   # Refuse to release unless the tag, pyproject and the AppStream metainfo all
   # agree on the version, so they can never drift apart in a published build.
   version-guard:
-    if: github.event.release.draft
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.draft.outputs.sha }}
     steps:
+      - name: Look up the draft's target commit
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag_name }}
+        # A draft release has no tag ref yet
+        run: |
+          sha=$(gh api "repos/$GH_REPO/releases" --jq \
+            ".[] | select(.tag_name == \"$TAG\") | .target_commitish")
+          if [ -z "$sha" ]; then
+            echo "no release with tag $TAG found" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
-          # A draft release has no tag ref yet
-          ref: ${{ github.event.release.target_commitish }}
+          ref: ${{ steps.draft.outputs.sha }}
       - name: Tag matches pyproject and metainfo
-        run: python scripts/check_version.py
-          --tag "${{ github.event.release.tag_name }}"
+        run: python scripts/check_version.py --tag "${{ inputs.tag_name }}"
 
   flatpak:
     needs: version-guard
@@ -31,16 +55,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.target_commitish }}
+          ref: ${{ needs.version-guard.outputs.sha }}
       - name: Build the Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: grawji.flatpak
           manifest-path: flatpak/io.github.p5k369.grawji.yaml
-          cache-key: flatpak-builder-${{ github.event.release.tag_name }}
+          cache-key: flatpak-builder-${{ inputs.tag_name }}
       - name: Build the release notes from the metainfo
         run: python3 scripts/release_notes.py
-          --tag "${{ github.event.release.tag_name }}" > release_body.md
+          --tag "${{ inputs.tag_name }}" > release_body.md
       - name: Hand the bundle and notes to the publish job
         uses: actions/upload-artifact@v7
         with:
@@ -62,7 +86,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ inputs.tag_name }}
         run: |
           gh release upload "$TAG" grawji.flatpak --clobber
           gh release edit "$TAG" --notes-file release_body.md
