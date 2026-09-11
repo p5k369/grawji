@@ -14,6 +14,9 @@ from grawji.settings import config_dir
 # Recipes with no folder live at the top level, keyed by this sentinel.
 UNGROUPED = ""
 
+# The number keys a recipe can be assigned to for one-press applying.
+HOTKEYS = range(1, 10)
+
 
 def recipes_path() -> Path:
     """Return the path to the recipes JSON file."""
@@ -63,6 +66,7 @@ class RecipeLibrary:
         self._folder_of: dict[str, str] = {}
         self._thumb_of: dict[str, str] = {}
         self._comment_of: dict[str, str] = {}
+        self._hotkey_of: dict[str, int] = {}
         self._folders: list[str] = []
         self._baseline: str | None = None
         self._load()
@@ -149,6 +153,34 @@ class RecipeLibrary:
         self._save()
         return True
 
+    def hotkey_of(self, name: str) -> int | None:
+        """The number key assigned to a recipe, or None."""
+        return self._hotkey_of.get(name)
+
+    def recipe_for_hotkey(self, key: int) -> str | None:
+        """The recipe name assigned to a number key, or None."""
+        for name, assigned in self._hotkey_of.items():
+            if assigned == key:
+                return name
+        return None
+
+    def set_hotkey(self, name: str, key: int | None) -> bool:
+        """Assign a number key to a recipe, or clear it with None."""
+        if name not in self._recipes:
+            return False
+        if key is None:
+            if self._hotkey_of.pop(name, None) is None:
+                return False
+        elif key not in HOTKEYS or self._hotkey_of.get(name) == key:
+            return False
+        else:
+            holder = self.recipe_for_hotkey(key)
+            if holder is not None:
+                del self._hotkey_of[holder]
+            self._hotkey_of[name] = key
+        self._save()
+        return True
+
     def delete(self, name: str) -> bool:
         """Remove the named recipe; False if it did not exist."""
         if name not in self._recipes:
@@ -157,6 +189,7 @@ class RecipeLibrary:
         self._folder_of.pop(name, None)
         self._thumb_of.pop(name, None)
         self._comment_of.pop(name, None)
+        self._hotkey_of.pop(name, None)
         if self._baseline == name:
             self._baseline = None
         self._save()
@@ -190,6 +223,10 @@ class RecipeLibrary:
         self._comment_of.pop(new, None)
         if comment is not None:
             self._comment_of[new] = comment
+        hotkey = self._hotkey_of.pop(old, None)
+        self._hotkey_of.pop(new, None)
+        if hotkey is not None:
+            self._hotkey_of[new] = hotkey
         if self._baseline in (old, new):
             self._baseline = new
         self._save()
@@ -311,7 +348,8 @@ class RecipeLibrary:
             folder = value.get("folder")
             thumb = value.get("thumb")
             comment = value.get("comment")
-            skip = ("folder", "thumb", "comment")
+            hotkey = value.get("hotkey")
+            skip = ("folder", "thumb", "comment", "hotkey")
             fields = {k: v for k, v in value.items() if k not in skip}
             self._recipes[name] = Recipe.from_dict(fields)
             self._folder_of[name] = folder if isinstance(folder, str) else ""
@@ -319,6 +357,12 @@ class RecipeLibrary:
                 self._thumb_of[name] = thumb
             if isinstance(comment, str) and comment:
                 self._comment_of[name] = comment
+            if (
+                isinstance(hotkey, int)
+                and hotkey in HOTKEYS
+                and hotkey not in self._hotkey_of.values()
+            ):
+                self._hotkey_of[name] = hotkey
         self._folders = [
             f for f in data.get("folders", []) if isinstance(f, str)
         ]
@@ -346,6 +390,9 @@ class RecipeLibrary:
             comment = self._comment_of.get(name)
             if comment:
                 entry["comment"] = comment
+            hotkey = self._hotkey_of.get(name)
+            if hotkey:
+                entry["hotkey"] = hotkey
             encoded[name] = entry
         data = {
             "version": 2,

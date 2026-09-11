@@ -18,8 +18,10 @@ _SHORTCUT_GROUPS = {
     ],
     "Recipe": [
         ("Save recipe", "<Ctrl>S"),
+        ("Copy recipe as text", "<Ctrl><Shift>C"),
         ("Paste recipe from clipboard", "<Ctrl><Shift>V"),
         ("Reset to default", "<Ctrl>R"),
+        ("Apply the recipe assigned to a number key (1 to 9)", "1"),
     ],
     "Navigation": [
         ("Previous image", "Left"),

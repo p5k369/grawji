@@ -16,7 +16,7 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gtk
 from grawji.camera import compatibility as compat
 from grawji.recipe import Recipe
 from grawji.recipe_dedup import find_duplicate_recipes
-from grawji.recipes import UNGROUPED, RecipeLibrary, recipe_matches
+from grawji.recipes import HOTKEYS, UNGROUPED, RecipeLibrary, recipe_matches
 from grawji.views.camera_pane import CameraPane
 
 _UI = (
@@ -50,6 +50,9 @@ class RecipeManagerHost(Protocol):
 
     def set_baseline(self, name: str | None) -> None:
         """Set or clear the compare baseline."""
+
+    def set_hotkey(self, name: str, key: int | None) -> None:
+        """Assign a number key to a recipe, or clear it with None."""
 
     def place_recipe(self, name: str, folder: str, before: str | None) -> None:
         """Position a recipe in a folder, before another recipe."""
@@ -206,6 +209,10 @@ class RecipeManagerDialog(Adw.Dialog):
         if twins:
             row.add_suffix(self._duplicate_badge(twins))
 
+        hotkey = self._library.hotkey_of(name)
+        if hotkey is not None:
+            row.add_suffix(self._hotkey_badge(hotkey))
+
         star = Gtk.ToggleButton(valign=Gtk.Align.CENTER)
         star.set_icon_name("starred-symbolic")
         star.set_tooltip_text("Use as compare baseline")
@@ -324,6 +331,16 @@ class RecipeManagerDialog(Adw.Dialog):
                 mapping[name] = [other for other in group if other != name]
         return mapping
 
+    def _hotkey_badge(self, key: int) -> Gtk.Widget:
+        """A chip showing the number key that applies this recipe."""
+        chip = Gtk.Label(label=f"key {key}", valign=Gtk.Align.CENTER)
+        chip.add_css_class("caption")
+        chip.add_css_class("accent")
+        chip.set_tooltip_text(
+            f"Press {key} in the main window to apply this recipe"
+        )
+        return chip
+
     def _duplicate_badge(self, twins: list[str]) -> Gtk.Widget:
         """A chip flagging a recipe that duplicates others' look."""
         chip = Gtk.Label(label="duplicate", valign=Gtk.Align.CENTER)
@@ -383,6 +400,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self._entry(
             box, popover, "Export…", lambda: self._host.export_recipe(name)
         )
+        self._hotkey_entries(box, popover, name)
         self._image_entries(box, popover, name)
         self._entry(
             box,
@@ -392,6 +410,43 @@ class RecipeManagerDialog(Adw.Dialog):
             destructive=True,
         )
         return popover
+
+    def _hotkey_entries(
+        self, box: Gtk.Box, popover: Gtk.Popover, name: str
+    ) -> None:
+        """Append the apply-key picker to a row's menu."""
+        self._separator(box)
+        caption = Gtk.Label(label="Apply with key", halign=Gtk.Align.START)
+        caption.add_css_class("caption")
+        caption.add_css_class("dim-label")
+        caption.set_margin_start(8)
+        box.append(caption)
+        keys = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        current = self._library.hotkey_of(name)
+        for key in HOTKEYS:
+            button = Gtk.Button(label=str(key))
+            button.add_css_class("flat")
+            if key == current:
+                button.add_css_class("suggested-action")
+                button.set_tooltip_text("Click to remove the key")
+            else:
+                holder = self._library.recipe_for_hotkey(key)
+                if holder is not None:
+                    button.set_tooltip_text(f"Currently: {holder}")
+            button.connect(
+                "clicked", self._on_hotkey_clicked, popover, name, key
+            )
+            keys.append(button)
+        box.append(keys)
+        self._separator(box)
+
+    def _on_hotkey_clicked(
+        self, _button: Any, popover: Gtk.Popover, name: str, key: int
+    ) -> None:
+        """Assign the clicked key, or clear it when already assigned."""
+        popover.popdown()
+        new = None if self._library.hotkey_of(name) == key else key
+        self._host.set_hotkey(name, new)
 
     def _image_entries(
         self, box: Gtk.Box, popover: Gtk.Popover, name: str

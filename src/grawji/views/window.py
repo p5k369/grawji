@@ -1063,9 +1063,9 @@ class MainWindow(Adw.ApplicationWindow):
             button.set_active(not button.get_active())
 
     def _on_crop_key(
-        self, _controller: Any, keyval: int, _code: int, _state: Any
+        self, _controller: Any, keyval: int, _code: int, state: Any
     ) -> bool:
-        """Crop-edit keys, plus Delete for trashing while browsing."""
+        """Crop-edit keys, plus browse keys: Delete and recipe numbers."""
         if self.preview_view.crop_editing:
             if keyval == Gdk.KEY_Escape:
                 self.preview_view.cancel_crop()
@@ -1074,9 +1074,34 @@ class MainWindow(Adw.ApplicationWindow):
                 self.preview_view.apply_crop()
                 return True
             return False
-        if keyval == Gdk.KEY_Delete and not self._focus_is_editable():
+        if self._focus_is_editable():
+            return False
+        if keyval == Gdk.KEY_Delete:
             return self._fileops.handle_delete()
-        return False
+        return self._on_recipe_key(keyval, state)
+
+    def _on_recipe_key(self, keyval: int, state: Any) -> bool:
+        """Apply the recipe assigned to a bare number key, if any."""
+        hotkey = self._recipe_hotkey(keyval, state)
+        if hotkey is None:
+            return False
+        name = self._recipe_library.recipe_for_hotkey(hotkey)
+        if name is None:
+            return False
+        self._on_apply_recipe(None, name)
+        return True
+
+    @staticmethod
+    def _recipe_hotkey(keyval: int, state: Any) -> int | None:
+        """The recipe number a bare 1-9 press stands for."""
+        modifiers = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK
+        if state & modifiers:
+            return None
+        if Gdk.KEY_1 <= keyval <= Gdk.KEY_9:
+            return keyval - Gdk.KEY_1 + 1
+        if Gdk.KEY_KP_1 <= keyval <= Gdk.KEY_KP_9:
+            return keyval - Gdk.KEY_KP_1 + 1
+        return None
 
     def _focus_is_editable(self) -> bool:
         """Whether a text widget owns the focus."""
