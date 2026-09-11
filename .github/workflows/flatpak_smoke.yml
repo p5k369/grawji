@@ -28,9 +28,14 @@ jobs:
       - name: Smoke-test the bundle in its sandbox
         run: |
           flatpak install -y --user grawji.flatpak
+          # TEMP DIAGNOSTICS for the glycin flatpak-spawn chain.
+          command -v dbus-daemon dbus-broker flatpak-portal xvfb-run || true
+          ls -la /usr/bin/dbus* /usr/libexec/flatpak* 2>&1 || true
+          ls /usr/share/dbus-1/services/ 2>&1 || true
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
           dbus-run-session -- flatpak run \
+            --env=G_MESSAGES_DEBUG=all \
             --command=python3 io.github.p5k369.grawji \
             "$PWD/scripts/flatpak_smoke.py"
