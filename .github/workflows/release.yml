@@ -81,7 +81,7 @@ jobs:
 
   # Runs outside the flatpak container so the gh CLI is available.
   publish:
-    needs: flatpak
+    needs: [version-guard, flatpak]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -92,7 +92,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag_name }}
+          SHA: ${{ needs.version-guard.outputs.sha }}
         run: |
           gh release upload "$TAG" grawji.flatpak --clobber
-          gh release edit "$TAG" --notes-file release_body.md
+          gh api "repos/$GH_REPO/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish="$SHA" \
+            --jq .body > generated.md
+          printf '\n\n' | cat release_body.md - generated.md > notes.md
+          gh release edit "$TAG" --notes-file notes.md
           gh release edit "$TAG" --draft=false
