@@ -1,0 +1,56 @@
+name: Flatpak smoke test
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - flatpak/**
+      - src/grawji/**
+      - data/**
+      - pyproject.toml
+      - scripts/flatpak_smoke.py
+      - .github/workflows/flatpak_smoke.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: grawji.flatpak
+          manifest-path: flatpak/io.github.p5k369.grawji.yaml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smoke-bundle
+          path: grawji.flatpak
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: smoke-bundle
+      - name: Cache the flatpak runtime
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtime-gnome-50
+      - name: Smoke-test the bundle in its sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user grawji.flatpak
+          dbus-run-session -- flatpak run \
+            --command=python3 io.github.p5k369.grawji \
+            "$PWD/scripts/flatpak_smoke.py"

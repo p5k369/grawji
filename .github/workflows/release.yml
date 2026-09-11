@@ -61,7 +61,6 @@ jobs:
         with:
           bundle: grawji.flatpak
           manifest-path: flatpak/io.github.p5k369.grawji.yaml
-          cache-key: flatpak-builder-${{ inputs.tag_name }}
       - name: Build the release notes from the metainfo
         run: python3 scripts/release_notes.py
           --tag "${{ inputs.tag_name }}" > release_body.md
@@ -74,9 +73,37 @@ jobs:
             release_body.md
           if-no-files-found: error
 
+  # On a plain runner, not in the builder container: the freedesktop-SDK
+  # image has no flatpak portal while a normal distro flatpak install has the whole stack.
+  smoke:
+    needs: [version-guard, flatpak]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version-guard.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-files
+      - name: Cache the flatpak runtime
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtime-gnome-50
+      - name: Smoke-test the bundle in its sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user grawji.flatpak
+          dbus-run-session -- flatpak run \
+            --command=python3 io.github.p5k369.grawji \
+            "$PWD/scripts/flatpak_smoke.py"
+
   # Runs outside the flatpak container so the gh CLI is available.
   publish:
-    needs: flatpak
+    needs: [version-guard, flatpak, smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -87,7 +114,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag_name }}
+          SHA: ${{ needs.version-guard.outputs.sha }}
         run: |
           gh release upload "$TAG" grawji.flatpak --clobber
-          gh release edit "$TAG" --notes-file release_body.md
+          gh api "repos/$GH_REPO/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish="$SHA" \
+            --jq .body > generated.md
+          printf '\n\n' | cat release_body.md - generated.md > notes.md
+          gh release edit "$TAG" --notes-file notes.md
           gh release edit "$TAG" --draft=false
