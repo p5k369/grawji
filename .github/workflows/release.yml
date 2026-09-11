@@ -64,7 +64,8 @@ jobs:
       - name: Smoke-test the bundle in its sandbox
         run: |
           flatpak install -y --user grawji.flatpak
-          flatpak run --command=python3 io.github.p5k369.grawji \
+          flatpak run --env=GLYCIN_SANDBOX_DISABLED=1 \
+            --command=python3 io.github.p5k369.grawji \
             "$PWD/scripts/flatpak_smoke.py"
       - name: Build the release notes from the metainfo
         run: python3 scripts/release_notes.py
