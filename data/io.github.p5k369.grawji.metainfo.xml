@@ -47,8 +47,9 @@
   <releases>
     <release version="0.4.1" date="2026-09-11">
       <description>
+        <p>A small maintenance release.</p>
         <ul>
-          <li>release: attach the flatpak bundle to a draft release before publishing</li>
+          <li>Releases now always ship with their flatpak bundle attached</li>
         </ul>
       </description>
     </release>
