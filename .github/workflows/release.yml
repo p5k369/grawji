@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  release:
+    types: [created]
 
 permissions:
   contents: write
@@ -12,11 +11,16 @@ jobs:
   # Refuse to release unless the tag, pyproject and the AppStream metainfo all
   # agree on the version, so they can never drift apart in a published build.
   version-guard:
+    if: github.event.release.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A draft release has no tag ref yet
+          ref: ${{ github.event.release.target_commitish }}
       - name: Tag matches pyproject and metainfo
-        run: python scripts/check_version.py --tag "${{ github.ref_name }}"
+        run: python scripts/check_version.py
+          --tag "${{ github.event.release.tag_name }}"
 
   flatpak:
     needs: version-guard
@@ -26,18 +30,40 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.target_commitish }}
       - name: Build the Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: grawji.flatpak
           manifest-path: flatpak/io.github.p5k369.grawji.yaml
-          cache-key: flatpak-builder-${{ github.ref_name }}
+          cache-key: flatpak-builder-${{ github.event.release.tag_name }}
       - name: Build the release notes from the metainfo
-        run: python3 scripts/release_notes.py --tag "${{ github.ref_name }}"
-          > release_body.md
-      - name: Create the release and attach the bundle
-        uses: softprops/action-gh-release@v3
+        run: python3 scripts/release_notes.py
+          --tag "${{ github.event.release.tag_name }}" > release_body.md
+      - name: Hand the bundle and notes to the publish job
+        uses: actions/upload-artifact@v7
         with:
-          files: grawji.flatpak
-          body_path: release_body.md
-          generate_release_notes: true
+          name: release-files
+          path: |
+            grawji.flatpak
+            release_body.md
+          if-no-files-found: error
+
+  # Runs outside the flatpak container so the gh CLI is available.
+  publish:
+    needs: flatpak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-files
+      - name: Attach the bundle to the draft and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" grawji.flatpak --clobber
+          gh release edit "$TAG" --notes-file release_body.md
+          gh release edit "$TAG" --draft=false
