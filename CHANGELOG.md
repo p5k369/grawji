@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/p5k369/grawji/compare/v0.4.1...v0.5.0) (2026-09-12)
+
+
+### Features
+
+* **recipe, ui:** apply recipes with assignable number keys ([#107](https://github.com/p5k369/grawji/issues/107)) ([27e7762](https://github.com/p5k369/grawji/commit/27e7762c3f308e8dc2b4e209fa477e51dd71eed5))
+
+
+### Bug Fixes
+
+* **capabilities:** assume the latest firmware per body ([#109](https://github.com/p5k369/grawji/issues/109)) ([0724832](https://github.com/p5k369/grawji/commit/0724832525b4787b39e03eacca3bdfba9768ee7b))
+* **release:** call the release build directly ([#105](https://github.com/p5k369/grawji/issues/105)) ([fd1dc41](https://github.com/p5k369/grawji/commit/fd1dc41c9df8f81309d4857c52e0cba66d1a8bab))
+* **ui:** list the missing shortcuts in the shortcuts dialog ([#110](https://github.com/p5k369/grawji/issues/110)) ([b82789f](https://github.com/p5k369/grawji/commit/b82789fec1c3bc70a3d165489c76d3e4489026e9))
+
 ## [0.4.1](https://github.com/p5k369/grawji/compare/v0.4.0...v0.4.1) (2026-09-11)
 
 
