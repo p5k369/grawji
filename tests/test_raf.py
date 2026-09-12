@@ -7,7 +7,6 @@ import pytest
 from grawji.raf import (
     RAF_MAGIC,
     embedded_jpeg,
-    embedded_jpeg_from_bytes,
     embedded_jpeg_prefix,
 )
 
@@ -23,30 +22,30 @@ def _make_raf(jpeg: bytes) -> bytes:
     return bytes(header) + jpeg
 
 
-def test_extracts_embedded_jpeg():
-    """The embedded JPEG is sliced out using the header offset/length."""
-    jpeg = b"\xff\xd8" + b"fake-jpeg-payload" + b"\xff\xd9"
-    assert embedded_jpeg_from_bytes(_make_raf(jpeg)) == jpeg
-
-
-def test_rejects_non_raf():
-    """Bytes without the RAF magic are rejected."""
+def test_rejects_non_raf(tmp_path):
+    """A file without the RAF magic is rejected."""
+    path = tmp_path / "not.RAF"
+    path.write_bytes(b"NOT-A-RAF" + bytes(200))
     with pytest.raises(ValueError, match="bad magic"):
-        embedded_jpeg_from_bytes(b"NOT-A-RAF" + bytes(200))
+        embedded_jpeg(path)
 
 
-def test_rejects_short_header():
+def test_rejects_short_header(tmp_path):
     """A truncated header (no room for the offsets) is rejected."""
+    path = tmp_path / "short.RAF"
+    path.write_bytes(RAF_MAGIC + b"\x00\x00")
     with pytest.raises(ValueError, match="too short"):
-        embedded_jpeg_from_bytes(RAF_MAGIC + b"\x00\x00")
+        embedded_jpeg(path)
 
 
-def test_rejects_missing_jpeg_marker():
+def test_rejects_missing_jpeg_marker(tmp_path):
     """A region that does not start with the JPEG SOI is rejected."""
     raf = bytearray(_make_raf(b"\xff\xd8\xff\xd9"))
     raf[_OFFSET : _OFFSET + 2] = b"\x00\x00"  # corrupt the SOI marker
+    path = tmp_path / "corrupt.RAF"
+    path.write_bytes(bytes(raf))
     with pytest.raises(ValueError, match="no valid embedded"):
-        embedded_jpeg_from_bytes(bytes(raf))
+        embedded_jpeg(path)
 
 
 def _write_raf(tmp_path, jpeg: bytes):

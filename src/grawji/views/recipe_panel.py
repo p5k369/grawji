@@ -86,7 +86,6 @@ class RecipePanel(Adw.PreferencesPage):
         "copy-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    recipe_row = Gtk.Template.Child()
     recipe_button = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
     exposure_group = Gtk.Template.Child()

@@ -529,11 +529,6 @@ class FilmStrip(Gtk.ScrolledWindow):
         """The RAF paths currently shown, in display order."""
         return list(self._paths)
 
-    @property
-    def current_index(self) -> int:
-        """Index of the selected thumbnail, or -1 if none is selected."""
-        return self._current
-
     def _clear(self) -> None:
         """Remove all thumbnails currently in the strip."""
         child = self._box.get_first_child()
@@ -921,21 +916,6 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._set_current(self._paths.index(path), center=True)
         self._on_select(path)
         return True
-
-    def select_relative(self, delta: int) -> None:
-        """Select the image delta positions away."""
-        visible = self._visible_indices()
-        if not visible:
-            return
-        if self._current in visible:
-            position = visible.index(self._current)
-            position = max(0, min(position + delta, len(visible) - 1))
-            index = visible[position]
-        else:
-            index = visible[0]
-        if index != self._current:
-            self._set_current(index)
-            self._on_select(self._paths[index])
 
     def _apply_thumb(
         self,

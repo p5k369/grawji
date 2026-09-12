@@ -34,22 +34,6 @@ def decode_recipes(data: object) -> dict[str, Recipe]:
     return out
 
 
-def load_recipes(path: Path) -> dict[str, Recipe]:
-    """Load recipes from a flat-format file, returning {} if unreadable."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return decode_recipes(data)
-
-
-def save_recipes(recipes: dict[str, Recipe], path: Path) -> None:
-    """Write recipes to path in the flat format (used by tests/export)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = {name: recipe.to_dict() for name, recipe in recipes.items()}
-    path.write_text(json.dumps(encoded, indent=2), encoding="utf-8")
-
-
 def recipe_matches(query: str, *fields: str) -> bool:
     """Whether every word of the query occurs in one of the fields."""
     haystack = " ".join(fields).casefold()

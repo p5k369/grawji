@@ -15,7 +15,6 @@ from grawji.camera.core import (
     clamp_dynamic_range,
     film_simulation_byte,
     recipe_from_profile,
-    rmw_patch,
     shot_dynamic_range,
 )
 from grawji.recipe import Recipe
@@ -113,28 +112,6 @@ def session_for(camera):
     never reset real hardware on the developer's machine.
     """
     return CameraSession(camera_factory=lambda: camera, usb_reset=lambda: None)
-
-
-def test_rmw_patch_sets_film_sim_byte():
-    """rmw_patch writes the film-sim byte and leaves the rest intact."""
-    base = bytes(OFFSET_FILM_SIM + 10)
-    patched = rmw_patch(base, film_sim_byte=VELVIA_BYTE)
-    assert patched[OFFSET_FILM_SIM] == VELVIA_BYTE
-    assert patched[:OFFSET_FILM_SIM] == base[:OFFSET_FILM_SIM]
-    assert patched[OFFSET_FILM_SIM + 1 :] == base[OFFSET_FILM_SIM + 1 :]
-
-
-def test_rmw_patch_does_not_mutate_input():
-    """rmw_patch returns a new buffer and never mutates the input."""
-    base = bytes(OFFSET_FILM_SIM + 10)
-    rmw_patch(base, film_sim_byte=ACROS_BYTE)
-    assert base[OFFSET_FILM_SIM] == 0x00
-
-
-def test_rmw_patch_rejects_short_profile():
-    """rmw_patch rejects a profile too short to hold the offset."""
-    with pytest.raises(ValueError, match="too short"):
-        rmw_patch(bytes(10), film_sim_byte=VELVIA_BYTE)
 
 
 def test_film_simulation_byte_known():

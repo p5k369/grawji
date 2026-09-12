@@ -95,7 +95,6 @@ class Candidate:
     """One leveling suggestion: the angle plus the lines behind it."""
 
     delta: float
-    share: float
     segments: tuple[Endpoints, ...]
 
 
@@ -305,21 +304,7 @@ def suggest_candidates(
         out.append(
             Candidate(
                 delta=sum(m.delta * m.weight for m in members) / weight,
-                share=weight / total,
                 segments=tuple(m.endpoints for m in heaviest[:_MARK_SEGMENTS]),
             )
         )
     return out
-
-
-def suggest_deltas(
-    gray: Sequence[Sequence[int]], limit: int = _MAX_CANDIDATES
-) -> list[float]:
-    """Ranked leveling angles only."""
-    return [c.delta for c in suggest_candidates(gray, limit)]
-
-
-def suggest_delta(gray: Sequence[Sequence[int]]) -> float | None:
-    """The single best leveling angle, or None."""
-    candidates = suggest_deltas(gray, limit=1)
-    return candidates[0] if candidates else None
