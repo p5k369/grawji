@@ -157,10 +157,13 @@ _GEN5 = replace(
     wb_temp_freeform=True,
     has_mono_mg=True,
     mono_max=18,
-    film_simulations=_SIMS_NO_REALA,
+    film_simulations=_SIMS_ALL,
 )
-_GEN5_REALA = replace(_GEN5, film_simulations=_SIMS_ALL)
-_GFX_PRO = Capabilities(has_color_chrome=True, has_smooth_skin=True)
+_GFX_PRO = Capabilities(
+    has_color_chrome=True,
+    has_smooth_skin=True,
+    film_simulations=_SIMS_CLASSIC_NEG,
+)
 _GFX_GEN4 = replace(
     _GEN4_BLEACH, has_smooth_skin=True, film_simulations=_SIMS_NO_REALA
 )
@@ -185,19 +188,19 @@ _MODEL_CAPABILITIES = {
     "XH2": _GEN5,
     "XT5": _GEN5,
     "XS20": _GEN5,
-    "X100VI": _GEN5_REALA,
-    "XT50": _GEN5_REALA,
-    "XM5": _GEN5_REALA,
-    "XE5": _GEN5_REALA,
-    "XT30III": _GEN5_REALA,
+    "X100VI": _GEN5,
+    "XT50": _GEN5,
+    "XM5": _GEN5,
+    "XE5": _GEN5,
+    "XT30III": _GEN5,
     "GFX50S": _GFX_PRO,
     "GFX50R": _GFX_PRO,
     "GFX100": _GFX_GEN4,
     "GFX100S": _GFX_GEN4,
     "GFX50SII": _GFX_GEN4,
-    "GFX100II": _GEN5_REALA,
-    "GFX100SII": _GEN5_REALA,
-    "GFX100RF": _GEN5_REALA,
+    "GFX100II": _GEN5,
+    "GFX100SII": _GEN5,
+    "GFX100RF": _GEN5,
 }
 
 

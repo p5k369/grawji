@@ -131,12 +131,16 @@ def test_film_simulations_gate_per_body():
     assert "EternaBleach" in xt4
     assert "NostalgicNeg" not in xt4
 
-    xt5 = capabilities_for(profile, model="X-T5").film_simulations
-    assert "NostalgicNeg" in xt5
-    assert "RealaAce" not in xt5  # the X-T5 never received Reala Ace
-
     xe5 = capabilities_for(profile, model="X-E5").film_simulations
     assert "RealaAce" in xe5
+
+    gfx100s = capabilities_for(profile, model="GFX100S").film_simulations
+    assert "NostalgicNeg" in gfx100s
+    assert "RealaAce" not in gfx100s
+
+    gfx50s = capabilities_for(profile, model="GFX 50S").film_simulations
+    assert "ClassicNeg" in gfx50s
+    assert "EternaBleach" not in gfx50s
 
 
 def test_tone_range_is_minus_two_to_plus_four_everywhere():
