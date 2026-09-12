@@ -9,10 +9,7 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import GdkPixbuf
 
-from grawji.imaging.clipping import (
-    clip_fractions,
-    clip_overlay,
-)
+from grawji.imaging.clipping import clip_overlay
 
 
 def _flat(value: int, width: int = 16, height: int = 16):
@@ -33,40 +30,15 @@ def _split(top_value: int, bottom_value: int, height: int = 16):
 
 
 def test_no_clipping_on_a_midtone():
-    """A mid-gray image is neither blown nor crushed."""
-    high, low = clip_fractions(_flat(120))
-    assert high == 0.0
-    assert low == 0.0
+    """A mid-gray image produces no overlay at all."""
     assert clip_overlay(_flat(120)) is None
 
 
 def test_downscales_above_max_edge():
     """An image larger than max_edge is scaled down before scanning."""
-    high, low = clip_fractions(_flat(255, 64, 48), max_edge=16)
-    assert high == 1.0
-    assert low == 0.0
-    assert clip_overlay(_flat(255, 64, 48), max_edge=16) is not None
-
-
-def test_all_white_is_all_highlight():
-    """A white image reports every pixel as a blown highlight."""
-    high, low = clip_fractions(_flat(255))
-    assert high == 1.0
-    assert low == 0.0
-
-
-def test_all_black_is_all_shadow():
-    """A black image reports every pixel as a crushed shadow."""
-    high, low = clip_fractions(_flat(0))
-    assert high == 0.0
-    assert low == 1.0
-
-
-def test_half_and_half_fractions():
-    """A half-white half-black image splits into the two clip kinds."""
-    high, low = clip_fractions(_split(255, 0))
-    assert high == pytest.approx(0.5, abs=0.02)
-    assert low == pytest.approx(0.5, abs=0.02)
+    overlay = clip_overlay(_flat(255, 64, 48), max_edge=16)
+    assert overlay is not None
+    assert max(overlay.get_width(), overlay.get_height()) <= 16
 
 
 def test_overlay_marks_clipped_pixels_only():

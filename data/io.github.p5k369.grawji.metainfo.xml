@@ -14,18 +14,22 @@
     </p>
     <p>Features:</p>
     <ul>
-      <li>Live preview through the camera's own conversion engine</li>
+      <li>Live preview through the camera's own conversion engine, with
+        histogram, clipping zebras, a peek at the in-camera original and
+        a split view against a reference recipe</li>
       <li>Full recipe control: film simulation, white balance, dynamic
-        range, tone, colour, sharpness, grain, noise reduction, clarity,
-        Color Chrome and monochromatic colour toning</li>
+        range, tone, color, sharpness, grain, noise reduction, clarity,
+        Color Chrome and monochromatic color toning</li>
       <li>Save, apply and import/export recipes in X RAW Studio's FP
         format, with a try-them-all comparison grid and duplicate
         detection</li>
-      <li>Crop and straighten with automatic horizon detection</li>
+      <li>Crop, straighten and per-image exposure, with automatic
+        horizon detection, saved next to each RAF</li>
       <li>Write recipes into the camera's custom banks and FS dial, and
         back up and restore camera settings over USB</li>
       <li>Browse, filter and cull RAFs in the filmstrip</li>
-      <li>Single and full-folder batch export at full resolution</li>
+      <li>Single and full-folder batch export at full resolution, with
+        an optional framing border</li>
     </ul>
   </description>
   <launchable type="desktop-id">io.github.p5k369.grawji.desktop</launchable>
