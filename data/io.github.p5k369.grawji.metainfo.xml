@@ -49,6 +49,16 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.0" date="2026-09-12">
+      <description>
+        <p>This release adds quick recipe shortcuts and rounds out keyboard support.</p>
+        <ul>
+          <li>Assign recipes to number keys and apply them with a single keystroke</li>
+          <li>Camera features are now offered based on the newest firmware available for your camera body</li>
+          <li>The keyboard shortcuts window now lists shortcuts that have no key assigned yet</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-09-11">
       <description>
         <p>A small maintenance release.</p>
