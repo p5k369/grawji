@@ -6,27 +6,14 @@ from grawji.recipe import Recipe
 from grawji.recipes import (
     RecipeLibrary,
     decode_recipes,
-    load_recipes,
     recipe_matches,
-    save_recipes,
 )
 
 
-def test_save_load_round_trip(tmp_path):
-    """Recipes survive a save/load round-trip."""
-    path = tmp_path / "recipes.json"
-    recipes = {
-        "Punchy": Recipe(film_simulation="Velvia", color=3),
-        "Mono": Recipe(film_simulation="Acros", color=0),
-    }
-    save_recipes(recipes, path)
-    loaded = load_recipes(path)
-    assert loaded == recipes
-
-
-def test_load_missing_returns_empty(tmp_path):
-    """Loading a non-existent recipe file returns an empty mapping."""
-    assert load_recipes(tmp_path / "nope.json") == {}
+def _save_flat(recipes: dict[str, Recipe], path) -> None:
+    """Write recipes in the old flat v1 format."""
+    encoded = {name: recipe.to_dict() for name, recipe in recipes.items()}
+    path.write_text(json.dumps(encoded, indent=2), encoding="utf-8")
 
 
 def test_decode_skips_non_recipe_entries():
@@ -34,14 +21,6 @@ def test_decode_skips_non_recipe_entries():
     recipes = decode_recipes({"ok": {"film_simulation": "Astia"}, "bad": 5})
     assert list(recipes) == ["ok"]
     assert recipes["ok"].film_simulation == "Astia"
-
-
-def test_export_then_import_on_other_path(tmp_path):
-    """A file saved as an export imports back to the same recipes."""
-    export = tmp_path / "export.json"
-    recipes = {"Soft": Recipe(highlights=-2, sharpness=-1)}
-    save_recipes(recipes, export)
-    assert load_recipes(export) == recipes
 
 
 def _library(tmp_path):
@@ -188,7 +167,7 @@ def test_library_reorder_folder(tmp_path):
 def test_library_migrates_flat_format(tmp_path):
     """An old flat recipes.json loads with everything ungrouped."""
     path = tmp_path / "recipes.json"
-    save_recipes({"Old": Recipe(film_simulation="Astia")}, path)  # flat
+    _save_flat({"Old": Recipe(film_simulation="Astia")}, path)
     library = RecipeLibrary(path)
     assert library.names == ["Old"]
     assert library.folder_of("Old") == ""

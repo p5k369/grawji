@@ -558,7 +558,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.set_embedded_jpeg(jpeg)
         self.preview_view.set_native_size(native)
         if pixbuf is not None:
-            self.preview_view.show_pixbuf(pixbuf, jpeg=jpeg)
+            self.preview_view.show_pixbuf(pixbuf)
             self.original_picture.set_paintable(texture_for_pixbuf(pixbuf))
         else:
             self.preview_view.clear_source()
@@ -960,7 +960,7 @@ class MainWindow(Adw.ApplicationWindow):
         if pixbuf is None:
             self._set_busy(busy=False, status=f"Cannot display image: {error}")
             return GLib.SOURCE_REMOVE
-        self.preview_view.show_pixbuf(pixbuf, jpeg=jpeg)
+        self.preview_view.show_pixbuf(pixbuf)
         self._set_busy(busy=False, status="Ready.")
         return GLib.SOURCE_REMOVE
 

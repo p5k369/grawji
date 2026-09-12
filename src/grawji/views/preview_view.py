@@ -131,7 +131,6 @@ class PreviewView(Gtk.Box):
         self._pixbuf: Any | None = None
         self._oriented_pixbuf: Any | None = None
         self._original_pixbuf: Any | None = None
-        self._last_jpeg: bytes | None = None
         self._embedded_jpeg: bytes | None = None
         self._peek = False
         self._pan_h = 0.0
@@ -236,11 +235,6 @@ class PreviewView(Gtk.Box):
         """Whether the in-camera original is currently shown."""
         return self._peek
 
-    @property
-    def background(self) -> str:
-        """The current canvas background CSS class ("" for themed)."""
-        return self._background
-
     def set_status(self, text: str) -> None:
         """Set the status-line text."""
         self.status.set_use_markup(False)
@@ -290,8 +284,7 @@ class PreviewView(Gtk.Box):
         return self._embedded_jpeg is not None
 
     def clear_source(self) -> None:
-        """Forget the source JPEG (a new selection failed to decode)."""
-        self._last_jpeg = None
+        """Forget the source pixbuf (a new selection failed to decode)."""
         self._oriented_pixbuf = None
 
     def set_crop(self, value: crop.CropRotate) -> None:
@@ -303,10 +296,8 @@ class PreviewView(Gtk.Box):
         self._native_locked = False
         self._invalidate_derived()
 
-    def show_pixbuf(self, pixbuf: Any, *, jpeg: bytes | None = None) -> None:
-        """Display an EXIF-oriented pixbuf (jpeg is its source bytes)."""
-        if jpeg is not None:
-            self._last_jpeg = jpeg
+    def show_pixbuf(self, pixbuf: Any) -> None:
+        """Display an EXIF-oriented pixbuf."""
         self._oriented_pixbuf = pixbuf
         dims = (pixbuf.get_width(), pixbuf.get_height())
         if not self._native_locked and (

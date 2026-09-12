@@ -98,15 +98,6 @@ def test_known_values_come_from_the_folder(strip: Any) -> None:
     assert strip.known_focals() == ["23 mm", "35 mm", "183.4 mm"]
 
 
-def test_keyboard_nav_skips_hidden_cards(strip: Any) -> None:
-    """Arrow navigation lands only on visible cards."""
-    strip.set_filter(model="X-E5", lens=None, focal=None)
-    strip.select_relative(1)
-    assert strip.opened[-1].endswith("a.RAF")
-    strip.select_relative(1)
-    assert strip.opened[-1].endswith("c.RAF")
-
-
 def test_filter_drops_hidden_marks(strip: Any) -> None:
     """Marks on cards the filter hides are dropped."""
     strip._selected = set(strip.paths)

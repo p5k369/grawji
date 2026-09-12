@@ -61,16 +61,6 @@ def embedded_jpeg_prefix(path: str | Path, max_bytes: int) -> bytes:
     return jpeg
 
 
-def embedded_jpeg_from_bytes(data: bytes) -> bytes:
-    """Extract the embedded JPEG from raw RAF bytes."""
-    offset, length = _parse_extent(data)
-    jpeg = data[offset : offset + length]
-    if len(jpeg) != length or not jpeg.startswith(_JPEG_SOI):
-        msg = "RAF has no valid embedded JPEG"
-        raise ValueError(msg)
-    return jpeg
-
-
 # RAF metadata block
 _META_OFFSET_POS = 92
 _META_MIN = _META_OFFSET_POS + 8

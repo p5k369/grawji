@@ -22,11 +22,6 @@ class Compatibility:
     level: str
     issues: list[str]
 
-    @property
-    def is_full(self) -> bool:
-        """Whether the recipe renders exactly as intended."""
-        return self.level == FULL
-
 
 def evaluate(recipe: Recipe, caps: Capabilities) -> Compatibility:
     """Return how recipe fits a body with the given capabilities."""

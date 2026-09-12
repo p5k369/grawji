@@ -157,35 +157,6 @@ class SessionStateError(CameraError):
     """A render was requested before a RAF was opened."""
 
 
-def rmw_patch(base: bytes, film_sim_byte: int) -> bytes:
-    """Read-modify-write a native camera profile in place.
-
-    Patches only the verified bytes, leaving the RAF's own recipe
-    intact. This is intentionally a small, dependency-free helper so it
-    can be unit-tested without a camera.
-
-    Args:
-        base: The profile bytes read from the camera via get_profile.
-        film_sim_byte: The film-simulation byte to write at
-            OFFSET_FILM_SIM.
-
-    Returns:
-        A new bytes object with the patched profile.
-
-    Raises:
-        ValueError: If base is too short to hold the offset.
-    """
-    if len(base) <= OFFSET_FILM_SIM:
-        msg = (
-            f"profile too short ({len(base)} bytes) to patch offset "
-            f"{OFFSET_FILM_SIM}"
-        )
-        raise ValueError(msg)
-    out = bytearray(base)
-    out[OFFSET_FILM_SIM] = film_sim_byte
-    return bytes(out)
-
-
 def _enum_value(enum_cls: Any, name: str, kind: str) -> int:
     """Return the integer profile value for an enum member name.
 
