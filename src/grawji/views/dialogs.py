@@ -15,6 +15,8 @@ _SHORTCUT_GROUPS = {
     "Files": [
         ("Export JPEG", "<Ctrl>E"),
         ("Move to trash", "Delete"),
+        ("Select all images", "<Ctrl>A"),
+        ("Cancel selection", "Escape"),
     ],
     "Recipe": [
         ("Save recipe", "<Ctrl>S"),
@@ -24,12 +26,13 @@ _SHORTCUT_GROUPS = {
         ("Apply the recipe assigned to a number key (1 to 9)", "1"),
     ],
     "Navigation": [
-        ("Previous image", "Left"),
-        ("Next image", "Right"),
+        ("Previous image (hold to glide)", "Left"),
+        ("Next image (hold to glide)", "Right"),
     ],
     "View": [
         ("Zoom in", "<Ctrl>plus"),
         ("Zoom out", "<Ctrl>minus"),
+        ("Zoom at the pointer (Ctrl + scroll)", ""),
         ("Fit to window", "<Ctrl>0"),
         ("Cycle background", "b"),
         ("Show original (before/after)", "backslash"),
@@ -79,9 +82,10 @@ def present_shortcuts(parent: Gtk.Widget) -> None:
         group = Adw.PreferencesGroup(title=title)
         for label, accel in items:
             row = Adw.ActionRow(title=label)
-            shortcut = Gtk.ShortcutLabel(accelerator=accel)
-            shortcut.set_valign(Gtk.Align.CENTER)
-            row.add_suffix(shortcut)
+            if accel:
+                shortcut = Gtk.ShortcutLabel(accelerator=accel)
+                shortcut.set_valign(Gtk.Align.CENTER)
+                row.add_suffix(shortcut)
             group.add(row)
         page.add(group)
     dialog = Adw.PreferencesDialog()

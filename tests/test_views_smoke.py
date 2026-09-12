@@ -66,7 +66,7 @@ def test_clipping_toggle_changes_the_shown_pixbuf() -> None:
     pump()
     clean = view._pixbuf.get_pixels()
 
-    view.set_show_clipping(True)
+    view.clip_button.set_active(True)
     pump()
     assert scheduled
     assert view._pixbuf.get_pixels() == clean
@@ -75,7 +75,7 @@ def test_clipping_toggle_changes_the_shown_pixbuf() -> None:
     zebra = view._pixbuf.get_pixels()
     assert zebra != clean
 
-    view.set_show_clipping(False)
+    view.clip_button.set_active(False)
     pump()
     assert view._pixbuf.get_pixels() == clean
 

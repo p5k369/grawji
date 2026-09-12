@@ -35,36 +35,6 @@ def _downscaled(pixbuf: Any, max_edge: int) -> Any:
     )
 
 
-def clip_fractions(
-    pixbuf: Any,
-    *,
-    highlight_min: int = HIGHLIGHT_MIN,
-    shadow_max: int = SHADOW_MAX,
-    max_edge: int = _MAX_EDGE,
-) -> tuple[float, float]:
-    """Return the highlight and shadow clipped fractions of an image."""
-    scaled = _downscaled(pixbuf, max_edge)
-    width, height = scaled.get_width(), scaled.get_height()
-    data = scaled.get_pixels()
-    stride = scaled.get_rowstride()
-    channels = scaled.get_n_channels()
-    total = width * height
-    if total == 0:  # pragma: no cover
-        return 0.0, 0.0
-
-    highlights = shadows = 0
-    for y in range(height):
-        base = y * stride
-        for x in range(width):
-            i = base + x * channels
-            top = max(data[i], data[i + 1], data[i + 2])
-            if top <= shadow_max:
-                shadows += 1
-            elif top >= highlight_min:
-                highlights += 1
-    return highlights / total, shadows / total
-
-
 def clip_overlay(
     pixbuf: Any,
     *,
@@ -118,6 +88,5 @@ def clip_overlay(
 __all__ = [
     "HIGHLIGHT_MIN",
     "SHADOW_MAX",
-    "clip_fractions",
     "clip_overlay",
 ]

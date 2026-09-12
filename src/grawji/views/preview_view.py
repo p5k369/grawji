@@ -303,17 +303,6 @@ class PreviewView(Gtk.Box):
         self._native_locked = False
         self._invalidate_derived()
 
-    def show_jpeg(self, jpeg: bytes) -> bool:
-        """Display JPEG bytes in the preview; False if undecodable."""
-        self._last_jpeg = jpeg
-        try:
-            pixbuf = oriented_pixbuf(jpeg)
-        except GLib.Error as exc:
-            self.set_status(f"Cannot display image: {exc}")
-            return False
-        self.show_pixbuf(pixbuf)
-        return True
-
     def show_pixbuf(self, pixbuf: Any, *, jpeg: bytes | None = None) -> None:
         """Display an EXIF-oriented pixbuf (jpeg is its source bytes)."""
         if jpeg is not None:
@@ -468,10 +457,6 @@ class PreviewView(Gtk.Box):
         """Turn the clipping overlay on or off and refresh."""
         self._show_clipping = button.get_active()
         self._redisplay(histogram=False)
-
-    def set_show_clipping(self, on: bool) -> None:
-        """Set the clipping overlay state."""
-        self.clip_button.set_active(on)
 
     def set_native_size(self, dims: tuple[int, int] | None) -> None:
         """Set the image's native (oriented) pixel size from metadata."""

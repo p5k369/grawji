@@ -21,14 +21,15 @@ The name is **g**(tk) + **rawji** (/dʒiː ˈrɔː dʒiː/).
 
 ## Features
 
-- **Live preview** through the camera's own conversion engine. What you see
-  is what the camera would write.
-- **Recipes**: full parameter control, saved recipe library, FP1/FP2/FP3
-  exchange with X RAW Studio, and a try-them-all comparison grid.
-- **Crop and straighten**, with auto level.
+- **Live preview** through the camera's own conversion engine, with
+  histogram, clipping zebras, peek at the original, and split-compare.
+- **Recipes**: full parameter control, saved library with hotkeys,
+  community-text paste, FP1/FP2/FP3 exchange, try-them-all grid.
+- **Crop, straighten and per-image exposure**, with auto level, kept in
+  per-RAF sidecars.
 - **Export** single images or whole folders at full resolution, with
-  optional framing and metadata.
-- **Cull and organize** in the filmstrip: select, copy, move, trash.
+  optional framing border and metadata.
+- **Cull and organize** in the filmstrip: filter, select, copy, move, trash.
 - **Experimental**: write recipes into the camera's custom banks over USB.
 
 ## Warranty disclaimer
