@@ -15,6 +15,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, GLib, GObject, Gtk
 
 from grawji.camera import compatibility as compat
 from grawji.camera import fs_recipe
+from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipes import RecipeLibrary
 from grawji.views.textures import texture_for_pixbuf
 
@@ -24,8 +25,6 @@ _UI = (
     .read_text(encoding="utf-8")
 )
 
-# Every supported body has seven C1-C7 custom banks.
-_BANK_COUNT = 7
 # Camera-family hero
 _HERO_PX = 44
 _HERO_ART_RATIO = 88 / 128
@@ -153,7 +152,7 @@ class CameraPane(Gtk.Box):
         if texture is not None:
             self.camera_image.set_from_paintable(texture)
         self.camera_banks.append(self._section_heading("Custom banks"))
-        for slot in range(_BANK_COUNT):
+        for slot in range(capabilities_for_model(model).num_bank_slots):
             self.camera_banks.append(self._build_bank_card(slot))
         self._build_fs_section(model)
         if self._load_bank_names is not None:

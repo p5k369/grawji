@@ -25,10 +25,12 @@ from grawji.camera.preset_recipe import (
     NUM_SLOTS,
     PASSTHROUGH_DEFAULTS,
     PROP_CLARITY,
+    PROP_COLOR_CHROME_BLUE,
     PROP_MONO_MG,
     PROP_MONO_WC,
     PROP_PRESET_NAME,
     PROP_PRESET_SLOT,
+    PROP_SMOOTH_SKIN,
     PROP_WB_COLOR_TEMP,
     PROP_WB_SHIFT_B,
     PROP_WB_SHIFT_R,
@@ -39,12 +41,12 @@ from grawji.camera.preset_recipe import (
 )
 from grawji.recipe import Recipe
 
-# Properties some bodies reject (0x201c) that must not abort the whole
-# transfer.
-_SOFT_REJECT = {
-    PROP_CLARITY: "clarity (set it on the camera and resave)",
-    PROP_MONO_WC: "monochromatic color toning (set it on the camera)",
-    PROP_MONO_MG: "monochromatic color toning (set it on the camera)",
+_FEATURE_PROPS: dict[int, tuple[str, int | None]] = {
+    PROP_CLARITY: ("clarity", 0),
+    PROP_MONO_WC: ("monochromatic color toning", None),
+    PROP_MONO_MG: ("monochromatic color toning", None),
+    PROP_COLOR_CHROME_BLUE: ("Color Chrome FX Blue", 1),
+    PROP_SMOOTH_SKIN: ("smooth skin", 1),
 }
 
 _log = logging.getLogger(__name__)
@@ -152,16 +154,17 @@ def _restore_slot(cam: Camera, slot: int | None) -> None:
         _log.debug("presets: could not restore the active slot")
 
 
-def read_preset_names(cam: Camera) -> list[str]:
-    """Return the current names of all bank slots.
+def read_preset_names(cam: Camera, num_slots: int = NUM_SLOTS) -> list[str]:
+    """Return the current names of the body's bank slots.
 
-    Selecting each slot to read its name changes the camera's active
-    preset, so the original selection is restored afterwards.
+    Args:
+        cam: A connected camera on the preset path.
+        num_slots: How many custom banks this body has.
     """
     original = _active_slot(cam)
     names = []
     try:
-        for slot in range(NUM_SLOTS):
+        for slot in range(num_slots):
             _select_slot(cam, slot)
             names.append(_read_name(cam))
     finally:
@@ -180,10 +183,31 @@ def _write_name(cam: Camera, name: str) -> tuple[int, list[str]]:
     return 0, [f"name stored as {stored!r}"]
 
 
+def _skip_unadvertised(
+    prop: int,
+    value: int,
+    props: frozenset[int] | None,
+    notes: list[str],
+) -> bool:
+    """Whether a feature property the body lacks should be skipped."""
+    if not props or prop in props or prop not in _FEATURE_PROPS:
+        return False
+    label, neutral = _FEATURE_PROPS[prop]
+    if neutral is None or value != neutral:
+        note = f"{label} (not available on this body)"
+        if note not in notes:
+            notes.append(note)
+    return True
+
+
 def _write_slot(
-    cam: Camera, slot: int, recipe: Recipe | None, name: str | None
+    cam: Camera,
+    slot: int,
+    recipe: Recipe | None,
+    name: str | None,
+    props: frozenset[int] | None = None,
 ) -> tuple[int, list[str]]:
-    """Write one slot."""
+    """Write one slot, skipping feature props the body lacks."""
     applied = 0
     notes = []
 
@@ -203,6 +227,8 @@ def _write_slot(
 
     ignored = []
     for prop, value in encode_recipe(recipe, base):
+        if _skip_unadvertised(prop, value, props, notes):
+            continue
         code = _set_prop(cam, prop, value)
         read_back = _get_prop(cam, prop)
         if read_back is None and code == _PTP_OK:
@@ -218,8 +244,8 @@ def _write_slot(
                     prop,
                     value,
                 )
-        elif code != _PTP_OK and prop in _SOFT_REJECT:
-            note = _SOFT_REJECT[prop]
+        elif code != _PTP_OK and prop in _FEATURE_PROPS:
+            note = f"{_FEATURE_PROPS[prop][0]} (set it on the camera)"
             if note not in notes:
                 notes.append(note)
         elif code != _PTP_OK:
@@ -246,6 +272,8 @@ def transfer_presets(
     *,
     names: dict[int, str] | None = None,
     model: str | None = None,
+    props: frozenset[int] | None = None,
+    num_slots: int = NUM_SLOTS,
 ) -> TransferResult:
     """Write recipes (and optional names) into the camera's presets.
 
@@ -255,6 +283,8 @@ def transfer_presets(
         assignments: Bank index (0-based) -> recipe to store there.
         names: Optional bank index -> new name (truncated to fit).
         model: The body model, for the result.
+        props: The body's advertised properties.
+        num_slots: How many custom banks this body has.
 
     Returns:
         A TransferResult; maintained is unused on this path and dropped
@@ -268,9 +298,12 @@ def transfer_presets(
         raise BackupTransferError("no bank assignments to write")
 
     slots = sorted(set(assignments) | set(names))
-    bad = [s for s in slots if not 0 <= s < NUM_SLOTS]
+    bad = [s for s in slots if not 0 <= s < num_slots]
     if bad:
-        raise BackupTransferError(f"bank slot out of range: {bad}")
+        raise BackupTransferError(
+            f"bank slot out of range for this body's {num_slots} banks:"
+            f" {bad}"
+        )
 
     dropped: dict[int, list[str]] = {}
     applied = 0
@@ -283,7 +316,7 @@ def transfer_presets(
             if name is not None:
                 name = name[:_NAME_MAX]
             notes = unsupported_fields(recipe) if recipe else []
-            count, slot_notes = _write_slot(cam, slot, recipe, name)
+            count, slot_notes = _write_slot(cam, slot, recipe, name, props)
             applied += count
             notes.extend(slot_notes)
             if notes:

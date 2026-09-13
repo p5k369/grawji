@@ -42,6 +42,7 @@ from grawji.camera.camera_types import (
     Camera,
     TransferResult,
 )
+from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipe import Recipe
 
 _log = logging.getLogger(__name__)
@@ -283,7 +284,10 @@ def read_bank_names(
     try:
         info = setup(cam) if run_setup else DeviceInfo()
         if camera_presets.supports_presets(info.props):
-            return camera_presets.read_preset_names(cam)
+            caps = capabilities_for_model(info.model)
+            return camera_presets.read_preset_names(
+                cam, num_slots=caps.num_bank_slots
+            )
         before = read_backup(cam)
     finally:
         disconnect(cam)
@@ -331,8 +335,14 @@ def transfer_recipes(
     try:
         info = setup(cam) if run_setup else DeviceInfo()
         if camera_presets.supports_presets(info.props):
+            caps = capabilities_for_model(info.model)
             return camera_presets.transfer_presets(
-                cam, assignments, names=names, model=info.model
+                cam,
+                assignments,
+                names=names,
+                model=info.model,
+                props=info.props,
+                num_slots=caps.num_bank_slots,
             )
         before = read_backup(cam)
     finally:
