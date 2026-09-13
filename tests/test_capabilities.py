@@ -9,6 +9,7 @@ from grawji.camera.capabilities import (
     BASELINE,
     FILM_SIMULATIONS,
     capabilities_for,
+    capabilities_for_model,
     is_xprocessor5,
     read_iopcode,
 )
@@ -148,3 +149,20 @@ def test_tone_range_is_minus_two_to_plus_four_everywhere():
     for model in ("X-Pro2", "X-T3", "X-E5", None):
         caps = capabilities_for(_profile_with_iopcode("FF179504"), model=model)
         assert (caps.tone_min, caps.tone_max) == (-2, 4)
+
+
+def test_bank_slot_counts_per_body():
+    """PASM-dial X bodies have 4 banks, PASM GFX 6, everything else 7."""
+    for model in ("X-S10", "X-S20", "X-M5"):
+        assert capabilities_for_model(model).num_bank_slots == 4
+    for model in ("GFX100S", "GFX 50S II", "GFX100 II", "GFX100S II"):
+        assert capabilities_for_model(model).num_bank_slots == 6
+    for model in ("X100F", "X-T3", "X-H2", "X-T5", "X-E5", "GFX100RF"):
+        assert capabilities_for_model(model).num_bank_slots == 7
+    assert capabilities_for_model("X-UNKNOWN").num_bank_slots == 7
+
+
+def test_xs20_has_no_smooth_skin():
+    """The X-S20's DeviceInfo lacks 0xD198: no smooth skin (issue #114)."""
+    assert not capabilities_for_model("X-S20").has_smooth_skin
+    assert capabilities_for_model("X-T5").has_smooth_skin

@@ -24,6 +24,7 @@ from grawji.camera.preset_recipe import (
     PROP_MONO_WC,
     PROP_PRESET_NAME,
     PROP_PRESET_SLOT,
+    PROP_SMOOTH_SKIN,
     PROP_WB_SHIFT_R,
     PROP_WHITE_BALANCE,
 )
@@ -74,13 +75,29 @@ class _Slot:
 class FakePresetCamera:
     """In-memory gen5 body: 7 preset slots of device properties."""
 
-    def __init__(self, *, reject=(), ignore=(), grain_quirk=False):
+    def __init__(
+        self,
+        *,
+        reject=(),
+        ignore=(),
+        grain_quirk=False,
+        model="X-E5",
+        advertised=None,
+        reject_code=_PTP_INVALID_VALUE,
+    ):
         """Slots start empty-ish; reject/ignore steer write behavior."""
         self.slots = [_Slot(name=f"BANK{i + 1}") for i in range(7)]
         self.active = 3  # 1-based, like the camera
         self.reject = set(reject)
         self.ignore = set(ignore)
         self.grain_quirk = grain_quirk
+        self.model = model
+        self.advertised = (
+            [PROP_PRESET_SLOT, PROP_PRESET_NAME]
+            if advertised is None
+            else list(advertised)
+        )
+        self.reject_code = reject_code
 
     def _slot(self):
         return self.slots[self.active - 1]
@@ -88,8 +105,7 @@ class FakePresetCamera:
     def send_command(self, code, params=None):
         """Serve DeviceInfo and property reads."""
         if code == _GET_DEVICE_INFO:
-            props = [PROP_PRESET_SLOT, PROP_PRESET_NAME]
-            return _PTP_OK, [], _device_info("X-E5", props)
+            return _PTP_OK, [], _device_info(self.model, self.advertised)
         if code == _GET_PROP:
             prop = params[0]
             if prop == PROP_PRESET_SLOT:
@@ -116,7 +132,7 @@ class FakePresetCamera:
             self._slot().name = text.rstrip("\x00")
             return _PTP_OK, []
         if prop in self.reject:
-            return _PTP_INVALID_VALUE, []
+            return self.reject_code, []
         if prop in self.ignore:
             return _PTP_OK, []  # ACK without storing
         value = struct.unpack_from("<H", data)[0]
@@ -249,3 +265,82 @@ def test_transfer_recipes_dispatches_to_the_preset_path():
     assert result.model == "X-E5"
     assert cam.slots[0].props[PROP_FILM_SIMULATION] == 17
     assert cam.slots[0].name == "PACIFIC"
+
+
+# The full gen5 preset property block 0xD18C..0xD1A5.
+_PRESET_BLOCK = list(range(PROP_PRESET_SLOT, PROP_PRESET_SLOT + 26))
+
+
+def test_missing_smooth_skin_rejection_is_dropped_not_fatal():
+    """X-S20 regression (#114): 0x200a on smooth skin must not abort."""
+    cam = FakePresetCamera(reject={PROP_SMOOTH_SKIN}, reject_code=0x200A)
+    result = transfer_presets(
+        cam, {0: Recipe(film_simulation="Velvia", smooth_skin="Strong")}
+    )
+    assert PROP_FILM_SIMULATION in cam.slots[0].props
+    assert PROP_SMOOTH_SKIN not in cam.slots[0].props
+    assert any("smooth skin" in note for note in result.dropped[0])
+
+
+def test_unadvertised_feature_prop_is_skipped_with_note():
+    """A feature prop the body does not advertise is never written."""
+    advertised = frozenset(p for p in _PRESET_BLOCK if p != PROP_SMOOTH_SKIN)
+    cam = FakePresetCamera()
+    result = transfer_presets(
+        cam,
+        {0: Recipe(film_simulation="Velvia", smooth_skin="Strong")},
+        props=advertised,
+    )
+    assert PROP_SMOOTH_SKIN not in cam.slots[0].props
+    assert any("not available" in note for note in result.dropped[0])
+
+
+def test_unadvertised_feature_prop_at_neutral_skips_silently():
+    """Skipping a feature the recipe does not use warrants no note."""
+    advertised = frozenset(p for p in _PRESET_BLOCK if p != PROP_SMOOTH_SKIN)
+    cam = FakePresetCamera()
+    result = transfer_presets(
+        cam,
+        {0: Recipe(film_simulation="Velvia", smooth_skin="Off")},
+        props=advertised,
+    )
+    assert PROP_SMOOTH_SKIN not in cam.slots[0].props
+    notes = result.dropped.get(0, [])
+    assert not any("not available" in note for note in notes)
+
+
+def test_empty_props_means_unknown_and_writes_everything():
+    """An empty advertised set must not filter."""
+    cam = FakePresetCamera()
+    transfer_presets(
+        cam,
+        {0: Recipe(film_simulation="Velvia", smooth_skin="Strong")},
+        props=frozenset(),
+    )
+    assert cam.slots[0].props[PROP_SMOOTH_SKIN] == 3
+
+
+def test_body_slot_count_limits_banks_and_name_reads():
+    """A 4-bank body refuses slot 5+ and reads only 4 names."""
+    cam = FakePresetCamera()
+    with pytest.raises(BackupTransferError, match="4 banks"):
+        transfer_presets(cam, {4: Recipe()}, num_slots=4)
+    names = read_preset_names(cam, num_slots=4)
+    assert names == [f"BANK{i + 1}" for i in range(4)]
+
+
+def test_xs20_dispatch_skips_smooth_skin_and_limits_slots():
+    """An X-S20-like body transfers despite the 0xD198 hole."""
+    advertised = [p for p in _PRESET_BLOCK if p != PROP_SMOOTH_SKIN]
+    cam = FakePresetCamera(model="X-S20", advertised=advertised)
+    result = transfer_recipes(
+        lambda: cam,
+        lambda _c: None,
+        {0: Recipe(film_simulation="Velvia", smooth_skin="Strong")},
+    )
+    assert result.model == "X-S20"
+    assert PROP_FILM_SIMULATION in cam.slots[0].props
+    assert PROP_SMOOTH_SKIN not in cam.slots[0].props
+    assert any("not available" in note for note in result.dropped[0])
+    with pytest.raises(BackupTransferError, match="4 banks"):
+        transfer_recipes(lambda: cam, lambda _c: None, {6: Recipe()})

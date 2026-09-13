@@ -109,6 +109,7 @@ class Capabilities:
             units (9 on gen4, 18 on XProcessor5; 0 = unsupported).
         film_simulations: The film simulations the body offers, from
             rawji's enum vocabulary.
+        num_bank_slots: How many custom banks the body has.
 
     The field defaults are the X-Pro2 baseline.
     """
@@ -126,6 +127,7 @@ class Capabilities:
     has_mono_mg: bool = False
     mono_max: int = 0
     film_simulations: tuple[str, ...] = _SIMS_GEN3
+    num_bank_slots: int = 7
 
 
 # The safe minimum used when the camera cannot be identified.
@@ -181,25 +183,25 @@ _MODEL_CAPABILITIES = {
     "XPRO3": _GEN4_LATE,
     "X100V": _GEN4_LATE,
     "XT4": _GEN4_BLEACH,
-    "XS10": _GEN4_BLEACH,
+    "XS10": replace(_GEN4_BLEACH, num_bank_slots=4),
     "XE4": _GEN4_BLEACH,
     "XT30II": _GEN4_BLEACH,
     "XH2S": _GEN5,
     "XH2": _GEN5,
     "XT5": _GEN5,
-    "XS20": _GEN5,
+    "XS20": replace(_GEN5, num_bank_slots=4, has_smooth_skin=False),
     "X100VI": _GEN5,
     "XT50": _GEN5,
-    "XM5": _GEN5,
+    "XM5": replace(_GEN5, num_bank_slots=4),
     "XE5": _GEN5,
     "XT30III": _GEN5,
     "GFX50S": _GFX_PRO,
     "GFX50R": _GFX_PRO,
     "GFX100": _GFX_GEN4,
-    "GFX100S": _GFX_GEN4,
-    "GFX50SII": _GFX_GEN4,
-    "GFX100II": _GEN5,
-    "GFX100SII": _GEN5,
+    "GFX100S": replace(_GFX_GEN4, num_bank_slots=6),
+    "GFX50SII": replace(_GFX_GEN4, num_bank_slots=6),
+    "GFX100II": replace(_GEN5, num_bank_slots=6),
+    "GFX100SII": replace(_GEN5, num_bank_slots=6),
     "GFX100RF": _GEN5,
 }
 
