@@ -64,6 +64,44 @@ def apply_checksum(blob: bytes, checksum: Checksum | None) -> bytes:
     return bytes(out)
 
 
+def delta_checksum(
+    before: bytes, target: bytes, checksum: Checksum | None
+) -> bytes:
+    """Return target with the checksum shifted by the patch's byte delta.
+
+    Args:
+        before: The blob as downloaded from the camera.
+        target: The patched blob, same length as before.
+        checksum: The body's checksum spec, or None for bodies without.
+
+    Returns:
+        target with the checksum field updated, or target unchanged when
+        checksum is None.
+
+    Raises:
+        BackupWriteError: If before and target differ in length.
+    """
+    if checksum is None:
+        return target
+    if len(before) != len(target):
+        raise BackupWriteError(
+            f"patched blob is {len(target)} bytes, the camera's own is "
+            f"{len(before)}"
+        )
+    start = checksum.payload_start
+    delta = sum(target[start:]) - sum(before[start:])
+    off = checksum.offset
+    delta -= sum(target[off : off + checksum.skip])
+    delta += sum(before[off : off + checksum.skip])
+    for lo, hi in checksum.extra_skip:
+        delta -= sum(target[lo:hi]) - sum(before[lo:hi])
+    stored = int.from_bytes(before[off : off + 2], "little")
+    value = (stored + delta) & 0xFFFF
+    out = bytearray(target)
+    out[off : off + 2] = value.to_bytes(2, "little")
+    return bytes(out)
+
+
 @dataclass(frozen=True)
 class BankLayout:
     """Where and how one body stores a bank recipe in its backup blob.
@@ -209,9 +247,17 @@ _GEN4_EARLY = BankLayout(
     },
     film_sim_codes=_GEN4_SIMS,
     color_codes=_COLOR_CODES,
-    # Additive u16 @176 over payload [0xA8, EOF)
-    checksum=Checksum(offset=176, payload_start=0xA8, bias=0xFE6C),
-    volatile_offsets=frozenset({176, 248, 380, 408, 3276}),
+    # Additive u16 @176 over payload [0xA8, EOF), skipping the pre-bank
+    # sub-checksum cluster the camera maintains itself.
+    checksum=Checksum(
+        offset=176,
+        payload_start=0xA8,
+        bias=0xFF56,
+        extra_skip=((0x7AF6, 0x7AFA),),
+    ),
+    volatile_offsets=frozenset(
+        {176, 248, 380, 408, 3276, 0x7AF6, 0x7AF7, 0x7AF8, 0x7AF9}
+    ),
     name_rel=67,  # gen4 banks are user-nameable (ASCII at sim+67)
 )
 

@@ -30,7 +30,7 @@ from typing import Protocol
 from grawji.camera import camera_presets, fs_recipe
 from grawji.camera.backup_recipe import (
     BackupWriteError,
-    apply_checksum,
+    delta_checksum,
     layout_for,
     read_names,
     unsupported_fields,
@@ -362,9 +362,7 @@ def transfer_recipes(
     elif names:
         for slot, name in names.items():
             target = write_name(target, layout, slot, name)
-    # Recompute the checksum the camera validates (else it rejects with
-    # 0x200f) no-op on bodies without one.
-    target = apply_checksum(target, layout.checksum)
+    target = delta_checksum(before, target, layout.checksum)
     _log.debug(
         "backup: restoring %d bytes (%d slots)",
         len(target),

@@ -6,6 +6,7 @@ from grawji.camera.backup_recipe import (
     LAYOUTS,
     BackupWriteError,
     apply_checksum,
+    delta_checksum,
     layout_for,
     read_names,
     unsupported_fields,
@@ -182,19 +183,74 @@ def test_checksum_is_self_consistent_and_gen3_has_none():
     """apply_checksum is idempotent and matches the additive formula."""
     xt3 = LAYOUTS["XT3"]
     blob = write_recipe(_blank(xt3), xt3, 0, Recipe(film_simulation="Velvia"))
-    fixed = apply_checksum(blob, xt3.checksum)
-    assert apply_checksum(fixed, xt3.checksum) == fixed
-    # The stored u16 equals the additive sum + bias over the payload.
     ck = xt3.checksum
+    raw = bytearray(blob)
+    for lo, hi in ck.extra_skip:
+        raw[lo:hi] = bytes(range(1, 1 + hi - lo))
+    blob = bytes(raw)
+    fixed = apply_checksum(blob, ck)
+    assert apply_checksum(fixed, ck) == fixed
     total = sum(fixed[ck.payload_start :]) - sum(
         fixed[ck.offset : ck.offset + ck.skip]
     )
+    for lo, hi in ck.extra_skip:
+        total -= sum(fixed[lo:hi])
     assert fixed[ck.offset : ck.offset + 2] == (
         (total + ck.bias) & 0xFFFF
     ).to_bytes(2, "little")
     # gen3 has no checksum; apply is a no-op.
     x100f = LAYOUTS["X100F"]
     assert apply_checksum(_blank(x100f), x100f.checksum) == _blank(x100f)
+
+
+def test_delta_checksum_matches_full_recompute():
+    """On a formula-valid blob, delta equals the full re-sum."""
+    xt3 = LAYOUTS["XT3"]
+    ck = xt3.checksum
+    before = apply_checksum(_blank(xt3), ck)
+    target = write_recipe(before, xt3, 0, Recipe(film_simulation="Velvia"))
+    assert delta_checksum(before, target, ck) == apply_checksum(target, ck)
+    # No checksum spec (gen3) passes the target through untouched.
+    assert delta_checksum(b"ab", b"cd", None) == b"cd"
+
+
+def test_delta_checksum_holds_on_a_foreign_unit():
+    """A body whose formula differs by a constant still verifies."""
+    xt3 = LAYOUTS["XT3"]
+    ck = xt3.checksum
+    shift = 0x86
+    raw = bytearray(apply_checksum(_blank(xt3), ck))
+    stored = int.from_bytes(raw[ck.offset : ck.offset + 2], "little")
+    raw[ck.offset : ck.offset + 2] = ((stored + shift) & 0xFFFF).to_bytes(
+        2, "little"
+    )
+    before = bytes(raw)
+    target = write_recipe(before, xt3, 0, Recipe(film_simulation="Velvia"))
+    got = delta_checksum(before, target, ck)
+    want = int.from_bytes(
+        apply_checksum(target, ck)[ck.offset : ck.offset + 2], "little"
+    )
+    assert got[ck.offset : ck.offset + 2] == (
+        (want + shift) & 0xFFFF
+    ).to_bytes(2, "little")
+    # Only the checksum field differs from the plain patched blob.
+    assert got[: ck.offset] == target[: ck.offset]
+    assert got[ck.offset + 2 :] == target[ck.offset + 2 :]
+
+
+def test_delta_checksum_ignores_excluded_cluster_and_length_mismatch():
+    """Excluded-range changes do not shift the value."""
+    xt3 = LAYOUTS["XT3"]
+    ck = xt3.checksum
+    before = apply_checksum(_blank(xt3), ck)
+    raw = bytearray(before)
+    lo, hi = ck.extra_skip[0]
+    raw[lo:hi] = bytes(range(1, 1 + hi - lo))
+    target = bytes(raw)
+    got = delta_checksum(before, target, ck)
+    assert got[ck.offset : ck.offset + 2] == before[ck.offset : ck.offset + 2]
+    with pytest.raises(BackupWriteError, match="bytes"):
+        delta_checksum(before, before[:-1], ck)
 
 
 def test_names_unsupported_on_gen3():
