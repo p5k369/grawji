@@ -112,12 +112,32 @@ def test_short_profile_narrows_the_table_row():
     assert caps.has_grain_size is True  # @545 exists on every profile
 
 
-def test_half_step_needs_the_table_and_an_xprocessor5_iopcode():
-    """Half-step tone requires both the table row and the processor."""
-    on_gen4 = capabilities_for(_profile_with_iopcode("FF159501"), model="X-E5")
-    assert on_gen4.tone_half_step is False
-    on_gen5 = capabilities_for(_profile_with_iopcode("FF179504"), model="X-E5")
-    assert on_gen5.tone_half_step is True
+def test_half_step_follows_fujis_capability_tiers():
+    """Half-step tone starts at the X-T4."""
+    profile = _profile_with_iopcode("FF159501")
+    assert capabilities_for(profile, model="X-T3").tone_half_step is False
+    assert capabilities_for(profile, model="X-Pro3").tone_half_step is False
+    assert capabilities_for(profile, model="X-T4").tone_half_step is True
+    assert capabilities_for(profile, model="X-E5").tone_half_step is True
+
+
+def test_freeform_kelvin_and_mono_mg_follow_the_xrfc_tiers():
+    """Free Kelvin and mono magenta-green start at the X-Pro3 tier."""
+    full = _profile_with_iopcode("FF179504")  # long profile, all slots
+    assert capabilities_for(full, model="X-T3").wb_temp_freeform is False
+    assert capabilities_for(full, model="X-Pro3").wb_temp_freeform is True
+    assert capabilities_for(full, model="GFX100").wb_temp_freeform is False
+    assert capabilities_for(full, model="X-Pro3").has_mono_mg is True
+    short = b"\x00" * 605
+    assert capabilities_for(short, model="X-Pro3").has_mono_mg is False
+
+
+def test_smooth_skin_gaps_follow_the_xrfc_database():
+    """X-H2S, X-S20, X-M5 and X-T30 III have no smooth skin."""
+    for model in ("X-H2S", "X-S20", "X-M5", "X-T30 III"):
+        assert not capabilities_for_model(model).has_smooth_skin
+    for model in ("X-H2", "X-T5", "X100VI", "X-E5"):
+        assert capabilities_for_model(model).has_smooth_skin
 
 
 def test_film_simulations_gate_per_body():
@@ -160,9 +180,3 @@ def test_bank_slot_counts_per_body():
     for model in ("X100F", "X-T3", "X-H2", "X-T5", "X-E5", "GFX100RF"):
         assert capabilities_for_model(model).num_bank_slots == 7
     assert capabilities_for_model("X-UNKNOWN").num_bank_slots == 7
-
-
-def test_xs20_has_no_smooth_skin():
-    """The X-S20's DeviceInfo lacks 0xD198: no smooth skin (issue #114)."""
-    assert not capabilities_for_model("X-S20").has_smooth_skin
-    assert capabilities_for_model("X-T5").has_smooth_skin

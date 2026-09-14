@@ -1,8 +1,9 @@
 name: Camera body report
 description: >
   Report how grawji behaves with your camera body - especially if grawji
-  told you it is not in the capability table yet, or a control is missing
-  or has no effect.
+  told you it is not in the capability table yet, a control is missing
+  or has no effect, or you captured data to enable bank writing
+  (docs/enable-bank-writing.md).
 title: "[body] "
 labels: ["body-report"]
 body:
@@ -34,6 +35,8 @@ body:
         - A control is shown but changing it does nothing in the render
         - A control I expected is missing
         - Everything works - consider this body confirmed
+        - Bank writing - I tested a transfer on an untested body
+        - Bank writing - I captured data for an unsupported body
         - Something else (describe below)
     validations:
       required: true
@@ -44,7 +47,11 @@ body:
       description: >
         Which controls were shown or missing, and which had a visible
         effect in the preview. For "does nothing": name the control and
-        the values you tried.
+        the values you tried. For bank writing: the outputs described in
+        docs/enable-bank-writing.md (transfer result or error text,
+        probe/diff outputs, blob size, change notes). Never attach raw
+        `.bin` backup files - they contain your camera's serial number
+        in cleartext.
     validations:
       required: true
   - type: textarea
