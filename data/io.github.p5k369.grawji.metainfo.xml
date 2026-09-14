@@ -49,6 +49,14 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.1" date="2026-09-14">
+      <description>
+        <p>This small update fixes a display issue and smooths out camera reconnection.</p>
+        <ul>
+          <li>The pane now shows the correct camera model, and reconnecting to the camera is calmer and more reliable.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-09-14">
       <description>
         <p>Version 0.5.0 improves recipe workflow and makes camera support more reliable across bodies.</p>
