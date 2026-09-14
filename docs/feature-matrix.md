@@ -31,21 +31,21 @@ and the live profile can only narrow a row, never widen it.
 | X-H1 | 2018 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Eterna |
 | X-T3 | 2018 | X-Processor 4 | Y | - | Y | - | - | - | - | 7 | Eterna |
 | X-T30 | 2019 | X-Processor 4 | Y | - | Y | - | - | - | - | 7 | Eterna |
-| X-Pro3 | 2019 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Classic Neg |
-| X100V | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Classic Neg |
+| X-Pro3 | 2019 | X-Processor 4 | Y | Y | Y | Y | Y | - | - | 7 | Classic Neg |
+| X100V | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | - | 7 | Classic Neg |
 | X-T4 | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass |
 | X-S10 | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 4 | Eterna Bleach Bypass |
 | X-E4 | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass |
 | X-T30 II | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass |
-| X-H2S | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) |
+| X-H2S | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 7 | Reala Ace (fw) |
 | X-H2 | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) |
 | X-T5 | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) |
 | X-S20 | 2023 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 4 | Reala Ace (fw) |
 | X100VI | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
 | X-T50 | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
-| X-M5 * | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 4 | Reala Ace |
+| X-M5 * | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 4 | Reala Ace |
 | X-E5 | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
-| X-T30 III * | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
+| X-T30 III * | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 7 | Reala Ace |
 
 `*` X-M5 and X-T30 III pair the X-Processor 5 with the older X-Trans 4
 sensor. Feature set follows the processor.
@@ -54,9 +54,9 @@ sensor. Feature set follows the processor.
 
 | Body | Year | Processor | Grain | Grain size | Color Chrome | FX Blue | Clarity | Smooth skin | 0.5-tone | Banks | Newest film sim |
 |------|------|-----------|-------|------------|--------------|---------|---------|-------------|----------|-------|-----------------|
-| GFX 50S | 2017 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Eterna (fw), Classic Neg (fw) |
-| GFX 50R | 2018 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Eterna (fw), Classic Neg (fw) |
-| GFX100 | 2019 | X-Processor 4 | Y | Y | Y | fw | Y | Y | Y | 7 | Classic Neg (fw), Nostalgic Neg (fw) |
+| GFX 50S | 2017 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Classic Neg (fw) |
+| GFX 50R | 2018 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Classic Neg (fw) |
+| GFX100 | 2019 | X-Processor 4 | Y | Y | Y | fw | Y | Y | Y | 7 | Nostalgic Neg (fw) |
 | GFX100S | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | Y | Y | 6 | Nostalgic Neg (debut) |
 | GFX 50S II | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | Y | Y | 6 | Nostalgic Neg |
 | GFX100 II | 2023 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 6 | Reala Ace (debut) |

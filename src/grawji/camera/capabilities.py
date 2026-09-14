@@ -88,12 +88,9 @@ class Capabilities:
     Attributes:
         tone_min: Lowest highlight/shadow tone the body honors.
         tone_max: Highest highlight/shadow tone the body honors.
-        tone_half_step: Whether the body accepts 0.5 tone steps
-            (hardware-verified on the XProcessor5 X-E5 only).
+        tone_half_step: Whether the body accepts 0.5 tone steps.
         wb_temp_freeform: Whether WB color temperature honors any Kelvin
             value rather than only the 31 Fuji presets.
-            Pre-XProcessor5 bodies snap to the preset list,
-            so the UI offers only those there.
         has_grain_size: Whether grain size (Small/Large) is supported;
             it shares the grain slot at offset 545.
         has_color_chrome: Whether Color Chrome Effect (offset 549) works.
@@ -104,7 +101,7 @@ class Capabilities:
         has_mono_wc: Whether Monochromatic Color warm-cool (offset 601)
             works. Gen4 and later (hardware-verified on the X-T3).
         has_mono_mg: Whether Monochromatic Color magenta-green (offset 613)
-            works. XProcessor5 only (hardware-verified on the X-E5).
+            works.
         mono_max: The +/- range of each Monochromatic Color axis in camera
             units (9 on gen4, 18 on XProcessor5; 0 = unsupported).
         film_simulations: The film simulations the body offers, from
@@ -148,16 +145,17 @@ _GEN4_LATE = Capabilities(
     has_color_chrome_blue=True,
     has_clarity=True,
     has_mono_wc=True,
+    has_mono_mg=True,
     mono_max=9,
+    wb_temp_freeform=True,
     film_simulations=_SIMS_CLASSIC_NEG,
 )
-_GEN4_BLEACH = replace(_GEN4_LATE, film_simulations=_SIMS_BLEACH)
+_GEN4_BLEACH = replace(
+    _GEN4_LATE, film_simulations=_SIMS_BLEACH, tone_half_step=True
+)
 _GEN5 = replace(
     _GEN4_BLEACH,
     has_smooth_skin=True,
-    tone_half_step=True,
-    wb_temp_freeform=True,
-    has_mono_mg=True,
     mono_max=18,
     film_simulations=_SIMS_ALL,
 )
@@ -186,18 +184,18 @@ _MODEL_CAPABILITIES = {
     "XS10": replace(_GEN4_BLEACH, num_bank_slots=4),
     "XE4": _GEN4_BLEACH,
     "XT30II": _GEN4_BLEACH,
-    "XH2S": _GEN5,
+    "XH2S": replace(_GEN5, has_smooth_skin=False),
     "XH2": _GEN5,
     "XT5": _GEN5,
     "XS20": replace(_GEN5, num_bank_slots=4, has_smooth_skin=False),
     "X100VI": _GEN5,
     "XT50": _GEN5,
-    "XM5": replace(_GEN5, num_bank_slots=4),
+    "XM5": replace(_GEN5, num_bank_slots=4, has_smooth_skin=False),
     "XE5": _GEN5,
-    "XT30III": _GEN5,
+    "XT30III": replace(_GEN5, has_smooth_skin=False),
     "GFX50S": _GFX_PRO,
     "GFX50R": _GFX_PRO,
-    "GFX100": _GFX_GEN4,
+    "GFX100": replace(_GFX_GEN4, wb_temp_freeform=False),
     "GFX100S": replace(_GFX_GEN4, num_bank_slots=6),
     "GFX50SII": replace(_GFX_GEN4, num_bank_slots=6),
     "GFX100II": replace(_GEN5, num_bank_slots=6),
@@ -234,13 +232,9 @@ def capabilities_for(profile: bytes, model: str | None = None) -> Capabilities:
     caps = _MODEL_CAPABILITIES.get(_normalize(model)) if model else None
     if caps is None:
         caps = BASELINE
-    iopcode = read_iopcode(profile)
-    xproc5 = iopcode is not None and is_xprocessor5(iopcode)
     size = len(profile)
     return replace(
         caps,
-        tone_half_step=caps.tone_half_step and xproc5,
-        wb_temp_freeform=caps.wb_temp_freeform and xproc5,
         has_smooth_skin=(
             caps.has_smooth_skin and size >= _OFFSET_SMOOTH_SKIN + 4
         ),
@@ -250,7 +244,5 @@ def capabilities_for(profile: bytes, model: str | None = None) -> Capabilities:
         ),
         has_clarity=caps.has_clarity and size >= _OFFSET_CLARITY + 4,
         has_mono_wc=caps.has_mono_wc and size >= _OFFSET_MONO_WC + 4,
-        has_mono_mg=(
-            caps.has_mono_mg and xproc5 and size >= _OFFSET_MONO_MG + 4
-        ),
+        has_mono_mg=caps.has_mono_mg and size >= _OFFSET_MONO_MG + 4,
     )
