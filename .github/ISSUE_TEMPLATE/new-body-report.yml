@@ -1,9 +1,7 @@
 name: Camera body report
 description: >
-  Report how grawji behaves with your camera body - especially if grawji
-  told you it is not in the capability table yet, a control is missing
-  or has no effect, or you captured data to enable bank writing
-  (docs/enable-bank-writing.md).
+  Report how grawji behaves with your camera body: capability gaps,
+  missing or inert controls, or captured data to enable bank writing.
 title: "[body] "
 labels: ["body-report"]
 body:
