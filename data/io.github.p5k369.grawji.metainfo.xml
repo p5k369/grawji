@@ -49,6 +49,18 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.0" date="2026-09-14">
+      <description>
+        <p>Version 0.5.0 improves recipe workflow and makes camera support more reliable across bodies.</p>
+        <ul>
+          <li>Assign recipes to number keys and apply them with a single keystroke</li>
+          <li>Added the missing keyboard shortcuts to the shortcuts window</li>
+          <li>More reliable film simulation bank transfers on the X-T3</li>
+          <li>Cameras with four banks or incomplete preset data no longer cause errors</li>
+          <li>Corrected which features are offered for each camera model, now assuming the latest firmware</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-09-11">
       <description>
         <p>A small maintenance release.</p>
