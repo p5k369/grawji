@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/p5k369/grawji/compare/v0.5.0...v0.5.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **camera, ui:** correct the pane model source and tame the reconnect ([#120](https://github.com/p5k369/grawji/issues/120)) ([076fd85](https://github.com/p5k369/grawji/commit/076fd8572634713fbad389c08cdd61b16d17a973))
+
 ## [0.5.0](https://github.com/p5k369/grawji/compare/v0.4.1...v0.5.0) (2026-09-14)
 
 
