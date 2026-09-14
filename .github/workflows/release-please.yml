@@ -9,19 +9,54 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 jobs:
-  release-please:
+  github-release:
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+      - name: Tag the draft release immediately
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG already exists"
+            exit 0
+          fi
+          if [ -z "$SHA" ]; then
+            SHA=$(gh release view "$TAG" --json targetCommitish \
+              --jq .targetCommitish)
+          fi
+          gh api "repos/$GH_REPO/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$SHA"
+
+  release-pr:
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
       - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.pr }}
         with:
@@ -47,10 +82,10 @@ jobs:
 
   # GitHub Actions never fires release events for DRAFT releases
   release:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: github-release
+    if: ${{ needs.github-release.outputs.release_created == 'true' }}
     permissions:
       contents: write
     uses: ./.github/workflows/release.yml
     with:
-      tag_name: ${{ needs.release-please.outputs.tag_name }}
+      tag_name: ${{ needs.github-release.outputs.tag_name }}
