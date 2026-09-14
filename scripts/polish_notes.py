@@ -31,15 +31,36 @@ sentence for the release, every following line is one user-visible
 change starting with "- ". Use user-facing language, drop commit
 scopes, developer jargon, and purely internal changes, merge related
 items, and use American English. At most 10 bullets, no markdown, no
-empty lines."""
+empty lines.
+
+Describe ONLY changes that appear in the input. Never invent, infer or
+pad with plausible-sounding items: a release with a single input change
+gets exactly one bullet."""
 
 
-def draft_notes(version: str, bullets: list[str]) -> tuple[str, list[str]]:
+def parse_notes(text: str, source_count: int) -> tuple[str, list[str]]:
+    """Validate a model answer."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    items = [line[2:].strip() for line in lines if line.startswith("- ")]
+    if not lines or lines[0].startswith("- ") or not items:
+        raise ValueError(f"unexpected response shape:\n{text}")
+    if len(items) > source_count:
+        raise ValueError(
+            f"{len(items)} bullets from {source_count} changes,"
+            f" refusing invented content:\n{text}"
+        )
+    return lines[0], items
+
+
+def draft_notes(
+    version: str, bullets: list[str], temperature: float = 0.0
+) -> tuple[str, list[str]]:
     """Ask Model for an intro line and user-facing bullets."""
     client = anthropic.Anthropic()
     response = client.messages.create(
         model=MODEL,
         max_tokens=4096,
+        temperature=temperature,
         system=_SYSTEM,
         messages=[
             {
@@ -47,6 +68,8 @@ def draft_notes(version: str, bullets: list[str]) -> tuple[str, list[str]]:
                 "content": (
                     f"Version {version}\n\nChangelog:\n"
                     + "\n".join(f"* {b}" for b in bullets)
+                    + "\n\nRewrite this changelog into the release notes"
+                    " now, exactly in the requested shape."
                 ),
             }
         ],
@@ -55,11 +78,7 @@ def draft_notes(version: str, bullets: list[str]) -> tuple[str, list[str]]:
         (block.text for block in response.content if block.type == "text"),
         "",
     )
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    items = [line[2:].strip() for line in lines if line.startswith("- ")]
-    if not lines or lines[0].startswith("- ") or not items:
-        raise ValueError(f"unexpected response shape:\n{text}")
-    return lines[0], items
+    return parse_notes(text, len(bullets))
 
 
 def main() -> int:
@@ -73,14 +92,18 @@ def main() -> int:
     if not bullets:
         print(f"no changelog section for {version}, nothing to polish")
         return 0
-    try:
-        intro, items = draft_notes(version, bullets)
-    except anthropic.APIError as exc:
-        print(f"Model call failed, keeping the plain entry: {exc}")
-        return 0
-    except ValueError as exc:
-        print(f"unusable response, keeping the plain entry: {exc}")
-        return 0
+    for last_attempt, temperature in ((False, 0.0), (True, 0.7)):
+        try:
+            intro, items = draft_notes(version, bullets, temperature)
+            break
+        except anthropic.APIError as exc:
+            print(f"Model call failed, keeping the plain entry: {exc}")
+            return 0
+        except ValueError as exc:
+            if last_attempt:
+                print(f"unusable response, keeping the plain entry: {exc}")
+                return 0
+            print(f"unusable response, retrying once: {exc}")
     date = datetime.datetime.now(tz=datetime.UTC).date().isoformat()
     entry = release_entry(version, date, items, intro=intro)
     METAINFO.write_text(upsert_release(METAINFO.read_text(), version, entry))
