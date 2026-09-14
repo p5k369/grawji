@@ -10,4 +10,4 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("grawji")
 except PackageNotFoundError:  # not installed (e.g. running from a raw tree)
-    __version__ = "0.4.1"
+    __version__ = "0.5.0"
