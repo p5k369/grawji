@@ -474,11 +474,17 @@ class CameraSession:
         self._camera: Any | None = None
         self._base_profile: bytes | None = None
         self._raf_path: Path | None = None
+        self._model: str | None = None
 
     @property
     def is_open(self) -> bool:
         """Whether a RAF is currently open."""
         return self._camera is not None
+
+    @property
+    def model(self) -> str | None:
+        """The connected body's model from its own DeviceInfo."""
+        return self._model
 
     @property
     def raf_path(self) -> Path | None:
@@ -527,6 +533,7 @@ class CameraSession:
         try:
             if not camera.connect():
                 raise CameraError("could not connect to camera")
+            self._model = self._read_model(camera) or self._model
             camera.send_raf(str(raf_path))
             base: bytes = camera.get_profile()
         except Exception as e:
@@ -537,6 +544,15 @@ class CameraSession:
                 ) from e
             raise
         return camera, base
+
+    @staticmethod
+    def _read_model(camera: Any) -> str | None:
+        """The body's self-reported model, or None if unreadable."""
+        try:
+            _code, _params, data = camera.send_command(0x1001)
+            return camera_backup.parse_device_info(data).model
+        except Exception:
+            return None
 
     def render(self, recipe: Recipe, *, full_resolution: bool) -> bytes:
         """Apply a recipe and render the open RAF (fast; call often).
@@ -626,13 +642,15 @@ class CameraSession:
                 self._connect_backup, self._safe_disconnect, blob
             )
 
-    def read_bank_names(self) -> list[str]:
-        """Return the connected body's current bank names, or [] if none."""
+    def read_bank_names(self) -> tuple[str | None, list[str]]:
+        """Return the connected body's model and current bank names."""
         with self._lock:
             self._close_locked()
-            return camera_backup.read_bank_names(
+            model, names = camera_backup.read_bank_names(
                 self._connect_backup, self._safe_disconnect
             )
+            self._model = model or self._model
+            return model, names
 
     def _connect_backup(self) -> Any:
         """Connect a fresh camera for one backup phase, with one retry."""

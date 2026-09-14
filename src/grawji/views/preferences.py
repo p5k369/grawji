@@ -42,6 +42,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
     color_scheme_row = Gtk.Template.Child()
     wb_grid_row = Gtk.Template.Child()
+    auto_reconnect_row = Gtk.Template.Child()
     jpeg_quality_scale = Gtk.Template.Child()
     glide_speed_scale = Gtk.Template.Child()
     drag_action_row = Gtk.Template.Child()
@@ -72,6 +73,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         index = _COLOR_SCHEMES.index(scheme) if scheme in _COLOR_SCHEMES else 0
         self.color_scheme_row.set_selected(index)
         self.wb_grid_row.set_active(settings.wb_grid_tint)
+        self.auto_reconnect_row.set_active(settings.camera_auto_reconnect)
         self.jpeg_quality_scale.set_value(settings.jpeg_quality)
         self.glide_speed_scale.set_value(settings.nav_glide_speed)
         drag = settings.drag_action
@@ -103,6 +105,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._update_portrait_sensitivity()
         self.color_scheme_row.connect("notify::selected", self._on_edited)
         self.wb_grid_row.connect("notify::active", self._on_edited)
+        self.auto_reconnect_row.connect("notify::active", self._on_edited)
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
         self.glide_speed_scale.connect("value-changed", self._on_edited)
         self.drag_action_row.connect("notify::selected", self._on_edited)
@@ -132,6 +135,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
             self.color_scheme_row.get_selected()
         ]
         self._settings.wb_grid_tint = self.wb_grid_row.get_active()
+        self._settings.camera_auto_reconnect = (
+            self.auto_reconnect_row.get_active()
+        )
         self._settings.jpeg_quality = int(self.jpeg_quality_scale.get_value())
         self._settings.nav_glide_speed = int(
             self.glide_speed_scale.get_value()

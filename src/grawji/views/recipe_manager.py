@@ -34,7 +34,9 @@ class RecipeManagerHost(Protocol):
 
     get_capabilities: Callable[[], Any] | None
     get_model: Callable[[], str | None] | None
-    load_bank_names: Callable[[Callable[[list[str]], None]], None] | None
+    load_bank_names: (
+        Callable[[Callable[[str | None, list[str]], None]], None] | None
+    )
 
     def export_recipe(self, name: str) -> None:
         """Export the named recipe as an FP file."""
@@ -365,9 +367,9 @@ class RecipeManagerDialog(Adw.Dialog):
         """Refresh the bank pane after a transfer (reload names, clear)."""
         self.camera_pane.on_transfer_finished()
 
-    def set_bank_names(self, names: list[str]) -> None:
-        """Forward loaded bank names to the camera pane."""
-        self.camera_pane.set_bank_names(names)
+    def set_bank_names(self, model: str | None, names: list[str]) -> None:
+        """Forward the loaded body model and bank names to the pane."""
+        self.camera_pane.set_bank_names(model, names)
 
     def _take_dragged(self) -> str | None:
         """Return and consume the recipe row currently being dragged."""

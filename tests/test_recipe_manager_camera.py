@@ -106,7 +106,7 @@ def test_drop_into_unnamed_bank_defaults_the_name(tmp_path: Any) -> None:
         model="X-E5",
         on_transfer=lambda a, n, fs: captured.update(names=n),
     )
-    dialog.set_bank_names(["BW", "", "", "", "", "", ""])
+    dialog.set_bank_names("X-E5", ["BW", "", "", "", "", "", ""])
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
     dialog.camera_pane._on_bank_drop(None, "Acros look", 0.0, 0.0, 4)
     pump()
@@ -136,7 +136,7 @@ def test_explicit_rename_beats_the_default_name(tmp_path: Any) -> None:
         model="X-E5",
         on_transfer=lambda a, n, fs: captured.update(names=n),
     )
-    dialog.set_bank_names([""] * 7)
+    dialog.set_bank_names("X-E5", [""] * 7)
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 2)
     dialog.camera_pane._banks[2]["name_label"].set_label("SUMMER")
     pump()
@@ -154,7 +154,7 @@ def test_bank_rename_is_collected(tmp_path: Any) -> None:
             recipes=a, names=n, fs=fs
         ),
     )
-    dialog.set_bank_names(["STD", "PORTRA", "", "", "", "", ""])
+    dialog.set_bank_names("X-T3", ["STD", "PORTRA", "", "", "", "", ""])
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
     dialog.camera_pane._banks[1]["name_label"].set_label("KODAK")  # rename C2
     pump()
@@ -228,3 +228,25 @@ def test_transfer_finished_clears_fs_assignments(tmp_path: Any) -> None:
     assert dialog.camera_pane._fs_recipe == {1: "Velvia look"}
     dialog.on_transfer_finished()
     assert dialog.camera_pane._fs_recipe == {}
+
+
+def test_deviceinfo_model_rebuilds_the_pane(tmp_path: Any) -> None:
+    """The camera's own model corrects a USB product-id guess."""
+    dialog = _dialog(tmp_path, model="Camera")
+    pane = dialog.camera_pane
+    assert len(pane._banks) == 7  # baseline guess
+
+    dialog.set_bank_names("X-S20", ["BW", "STD", "", ""])
+    assert len(pane._banks) == 4
+    assert "X-S20" in pane.camera_header.get_label()
+    assert pane._banks[0]["loaded"] == "BW"
+
+
+def test_matching_model_does_not_rebuild(tmp_path: Any) -> None:
+    """A confirming model keeps the built cards untouched."""
+    dialog = _dialog(tmp_path, model="X-T3")
+    pane = dialog.camera_pane
+    first_card = pane._banks[0]
+    dialog.set_bank_names("X-T3", ["STD"] + [""] * 6)
+    assert pane._banks[0] is first_card
+    assert first_card["loaded"] == "STD"

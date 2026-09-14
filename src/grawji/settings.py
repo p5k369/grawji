@@ -54,6 +54,8 @@ class Settings:
         drag_action: What an unmodified drag of images onto a folder
             does, "move" or "copy". Holding Ctrl when starting a drag
             always copies, Shift always moves.
+        camera_auto_reconnect: Reopen the current image automatically
+            when a camera appears on USB.
         bookmarks: Bookmarked folder paths, shown at the top of the
             folder tree in the order they were added.
         color_scheme: UI theme: "default" follows the desktop, "light" or
@@ -99,6 +101,7 @@ class Settings:
     wb_grid_tint: bool = True
     nav_glide_speed: int = 600
     drag_action: str = "move"
+    camera_auto_reconnect: bool = True
     bookmarks: list[str] = field(default_factory=list)
     color_scheme: str = "default"
     show_histogram: bool = False

@@ -479,11 +479,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._save_settings()
         self.preview_view.set_status("Select an image from the filmstrip.")
 
-    def _on_raf_selected(self, raf_path: str) -> None:
+    def _on_raf_selected(self, raf_path: str, *, quiet: bool = False) -> None:
         """React to the click instantly; load the RAF on the next idle tick.
 
         The file read, JPEG decode and EXIF parse are deferred so the click
         (filmstrip highlight) paints first instead of waiting on them.
+
+        Args:
+            raf_path: The RAF to load.
+            quiet: A failed camera open logs instead of raising a
+                dialog.
         """
         self._nav.update()
         self._flush_pending_exposure()
@@ -495,10 +500,16 @@ class MainWindow(Adw.ApplicationWindow):
         if self._load_pending_id:
             GLib.source_remove(self._load_pending_id)
         self._load_pending_id = GLib.timeout_add(
-            _LOAD_DELAY_MS, self._load_selected, self._generation, raf_path
+            _LOAD_DELAY_MS,
+            self._load_selected,
+            self._generation,
+            raf_path,
+            quiet,
         )
 
-    def _load_selected(self, generation: int, raf_path: str) -> bool:
+    def _load_selected(
+        self, generation: int, raf_path: str, quiet: bool = False
+    ) -> bool:
         """Read the embedded preview + EXIF and open the RAF (off the click).
 
         Skips itself if a newer selection has already superseded it, so fast
@@ -518,7 +529,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._worker.open(
             raf_path,
             on_done=partial(self._on_opened, generation),
-            on_error=self._on_error,
+            on_error=self._on_quiet_error if quiet else self._on_error,
         )
         threading.Thread(
             target=self._decode_selection,
@@ -582,7 +593,7 @@ class MainWindow(Adw.ApplicationWindow):
                 imagemeta.camera_model(str(self._raf_path))
                 if self._raf_path is not None
                 else None
-            )
+            ) or self._session.model
             self.recipe_panel.apply_capabilities(
                 capabilities_for(profile, model=model)
             )
@@ -1198,7 +1209,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _current_capabilities(self) -> Capabilities:
         """Capabilities of the connected body for recipe compatibility."""
         profile = self._session.profile
-        model = camera_info.detect_camera()
+        model = self._session.model or camera_info.detect_camera()
         if profile is not None:
             raf_model = (
                 imagemeta.camera_model(str(self._raf_path))
@@ -1218,11 +1229,17 @@ class MainWindow(Adw.ApplicationWindow):
         )
         if (
             appeared
+            and self._settings.camera_auto_reconnect
             and self._raf_path is not None
             and not self._session.is_open
         ):
-            self._on_raf_selected(str(self._raf_path))
+            self._on_raf_selected(str(self._raf_path), quiet=True)
         return GLib.SOURCE_CONTINUE
+
+    def _on_quiet_error(self, exc: Exception) -> None:
+        """Reset the busy state without a dialog."""
+        logging.getLogger("grawji").info("auto reconnect failed: %s", exc)
+        self._set_busy(busy=False, status="")
 
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
