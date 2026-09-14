@@ -42,7 +42,7 @@ class RecipeLibraryController:
         get_capabilities: Callable[[], Any] | None = None,
         get_model: Callable[[], str | None] | None = None,
         load_bank_names: (
-            Callable[[Callable[[list[str]], None]], None] | None
+            Callable[[Callable[[str | None, list[str]], None]], None] | None
         ) = None,
         run_transfer: Callable[..., None] | None = None,
         render_thumb: (

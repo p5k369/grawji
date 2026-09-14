@@ -17,15 +17,36 @@ def _ptp_code_in(exc: Exception, code: int) -> bool:
     return f"0x{code:04X}".casefold() in str(exc).casefold()
 
 
-# Friendly names for known Fuji product ids. Detection accepts any device on
-# the Fuji vendor id. This map only supplies a nice label.
-# todo: This map is cosmetic only, could be very well integrated in rawji.
+# Friendly names for known Fuji product ids.
+# No public id is known yet for the X-T30 II/III, X-T50, GFX 50S II,
+# GFX100S II and GFX100RF.
 PID_NAMES = {
+    0x02CB: "X-Pro2",
+    0x02CD: "X-T2",
     0x02D1: "X100F",
+    0x02D3: "GFX 50S",
+    0x02D4: "X-T20",
+    0x02D6: "X-E3",
+    0x02D7: "X-H1",
+    0x02DC: "GFX 50R",
     0x02DD: "X-T3",
+    0x02DE: "GFX100",
     0x02E3: "X-T30",
+    0x02E4: "X-Pro3",
     0x02E5: "X100V",
-    0x02E7: "X-T4",
+    # rawji's enum says 0x02E7, which no source anywhere backs.
+    0x02E6: "X-T4",
+    0x02E8: "X-E4",
+    0x02E9: "GFX 100S",
+    0x02EA: "X-S10",
+    0x02F0: "X-H2S",
+    0x02F2: "X-H2",
+    0x02F6: "X-S20",
+    0x02F7: "X-S20",
+    0x02FC: "X-T5",
+    0x02FE: "GFX100 II",
+    0x0305: "X100VI",
+    0x030C: "X-M5",
     0x0313: "X-E5",
 }
 

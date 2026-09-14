@@ -91,6 +91,12 @@
                 </property>
               </object>
             </child>
+            <child>
+              <object class="AdwSwitchRow" id="auto_reconnect_row">
+                <property name="title">Reconnect when a camera appears</property>
+                <property name="subtitle">Reopen the current image automatically on connect</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>

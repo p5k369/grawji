@@ -57,15 +57,18 @@ class CameraOpsController:
 
         threading.Thread(target=work, daemon=True).start()
 
-    def load_bank_names(self, on_loaded: Callable[[list[str]], None]) -> None:
-        """Read current bank names on a worker thread."""
+    def load_bank_names(
+        self, on_loaded: Callable[[str | None, list[str]], None]
+    ) -> None:
+        """Read the body's model and bank names on a worker thread."""
 
         def work() -> None:
+            model: str | None = None
             try:
-                names = self._session.read_bank_names()
+                model, names = self._session.read_bank_names()
             except Exception:
                 names = []
-            GLib.idle_add(on_loaded, names)
+            GLib.idle_add(on_loaded, model, names)
 
         threading.Thread(target=work, daemon=True).start()
 

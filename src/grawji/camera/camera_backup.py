@@ -278,23 +278,24 @@ def read_bank_names(
     disconnect: Callable[[Camera], None],
     *,
     run_setup: bool = True,
-) -> list[str]:
-    """Return the connected body's current bank names, or [] if none."""
+) -> tuple[str | None, list[str]]:
+    """Return the connected body's model and current bank names."""
     cam = connect()
     try:
         info = setup(cam) if run_setup else DeviceInfo()
         if camera_presets.supports_presets(info.props):
             caps = capabilities_for_model(info.model)
-            return camera_presets.read_preset_names(
+            return info.model, camera_presets.read_preset_names(
                 cam, num_slots=caps.num_bank_slots
             )
         before = read_backup(cam)
     finally:
         disconnect(cam)
-    layout = layout_for(model_from_blob(before))
+    model = model_from_blob(before)
+    layout = layout_for(model)
     if layout is None:
-        return []
-    return read_names(before, layout)
+        return model, []
+    return model, read_names(before, layout)
 
 
 def transfer_recipes(

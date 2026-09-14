@@ -99,9 +99,10 @@ class CameraPane(Gtk.Box):
         self._caps: Any = None
         self._get_model: Callable[[], str | None] | None = None
         self._load_bank_names: (
-            Callable[[Callable[[list[str]], None]], None] | None
+            Callable[[Callable[[str | None, list[str]], None]], None] | None
         ) = None
         self._take_dragged: Callable[[], str | None] = lambda: None
+        self._built_model: str | None = None
         self._banks: list[dict[str, Any]] = []
         self._bank_names_loaded = False
         self._bank_recipe: dict[int, str] = {}
@@ -114,7 +115,9 @@ class CameraPane(Gtk.Box):
         library: RecipeLibrary,
         caps: Any,
         get_model: Callable[[], str | None] | None,
-        load_bank_names: Callable[[Callable[[list[str]], None]], None] | None,
+        load_bank_names: (
+            Callable[[Callable[[str | None, list[str]], None]], None] | None
+        ),
         take_dragged: Callable[[], str | None],
     ) -> None:
         """Connect the pane to the dialog's collaborators.
@@ -147,6 +150,20 @@ class CameraPane(Gtk.Box):
             return False
 
         self.camera_stack.set_visible_child_name("banks")
+        self._populate(model)
+        if self._load_bank_names is not None:
+            self._load_bank_names(self.set_bank_names)
+        return True
+
+    def _populate(self, model: str) -> None:
+        """(Re)build the header and the bank/FS cards for model."""
+        self._built_model = model
+        self._banks.clear()
+        self._fs_cards.clear()
+        self._bank_recipe.clear()
+        self._fs_recipe.clear()
+        while (child := self.camera_banks.get_first_child()) is not None:
+            self.camera_banks.remove(child)
         self.camera_header.set_label(f"{model} · custom banks")
         texture = _family_paintable(model)
         if texture is not None:
@@ -155,9 +172,6 @@ class CameraPane(Gtk.Box):
         for slot in range(capabilities_for_model(model).num_bank_slots):
             self.camera_banks.append(self._build_bank_card(slot))
         self._build_fs_section(model)
-        if self._load_bank_names is not None:
-            self._load_bank_names(self.set_bank_names)
-        return True
 
     def collect(self) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
         """The bank recipes, bank names and FS recipes to transfer."""
@@ -177,8 +191,10 @@ class CameraPane(Gtk.Box):
         if self._load_bank_names is not None:
             self._load_bank_names(self.set_bank_names)
 
-    def set_bank_names(self, names: list[str]) -> None:
-        """Reveal each bank's name row and fill it from the camera."""
+    def set_bank_names(self, model: str | None, names: list[str]) -> None:
+        """Fill the bank names, correcting the pane's model first."""
+        if model and model != self._built_model:
+            self._populate(model)
         if not names:
             return
         self._bank_names_loaded = True

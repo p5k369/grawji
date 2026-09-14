@@ -59,20 +59,24 @@ def result(slots, dropped=None, model="X-E5"):
     return SimpleNamespace(model=model, slots=slots, dropped=dropped or {})
 
 
-def test_load_bank_names_reports_names(immediate):
-    """Names read from the body reach the callback."""
-    session = FakeSession(read_bank_names=["BW", "PORTRA"])
+def test_load_bank_names_reports_model_and_names(immediate):
+    """The body's own model and names reach the callback."""
+    session = FakeSession(read_bank_names=("X-S20", ["BW", "PORTRA"]))
     got = []
-    CameraOpsController(session).load_bank_names(got.append)
-    assert got == [["BW", "PORTRA"]]
+    CameraOpsController(session).load_bank_names(
+        lambda model, names: got.append((model, names))
+    )
+    assert got == [("X-S20", ["BW", "PORTRA"])]
 
 
 def test_load_bank_names_swallows_errors(immediate):
-    """A camera error degrades to an empty name list."""
+    """A camera error degrades to no model and an empty name list."""
     session = FakeSession(read_bank_names=RuntimeError("0x2019"))
     got = []
-    CameraOpsController(session).load_bank_names(got.append)
-    assert got == [[]]
+    CameraOpsController(session).load_bank_names(
+        lambda model, names: got.append((model, names))
+    )
+    assert got == [(None, [])]
 
 
 def test_transfer_reports_banks_fs_and_dropped(immediate):
