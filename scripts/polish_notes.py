@@ -52,15 +52,12 @@ def parse_notes(text: str, source_count: int) -> tuple[str, list[str]]:
     return lines[0], items
 
 
-def draft_notes(
-    version: str, bullets: list[str], temperature: float = 0.0
-) -> tuple[str, list[str]]:
+def draft_notes(version: str, bullets: list[str]) -> tuple[str, list[str]]:
     """Ask Model for an intro line and user-facing bullets."""
     client = anthropic.Anthropic()
     response = client.messages.create(
         model=MODEL,
         max_tokens=4096,
-        temperature=temperature,
         system=_SYSTEM,
         messages=[
             {
@@ -92,9 +89,9 @@ def main() -> int:
     if not bullets:
         print(f"no changelog section for {version}, nothing to polish")
         return 0
-    for last_attempt, temperature in ((False, 0.0), (True, 0.7)):
+    for last_attempt in (False, True):
         try:
-            intro, items = draft_notes(version, bullets, temperature)
+            intro, items = draft_notes(version, bullets)
             break
         except anthropic.APIError as exc:
             print(f"Model call failed, keeping the plain entry: {exc}")
