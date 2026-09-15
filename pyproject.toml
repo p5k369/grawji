@@ -19,16 +19,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "ruff",
-  "black",
   "mypy",
   "pytest",
   "pytest-cov",
   "pytest-github-actions-annotate-failures",
-  # Runs the GUI smoke tests under a virtual X display
   "pytest-xvfb",
   "pre-commit",
-  # IDE type stubs for PyGObject (Gtk/Adw/GExiv2/...). Improves editor code
-  # insight; not used by mypy here (the system gi shadows the stub package).
   "pygobject-stubs",
 ]
 
@@ -57,7 +53,7 @@ select = [
   "F",   # pyflakes
   "A",   # flake8-builtins
   "B",   # flake8-bugbear
-  "S",   # flake8-bandit (security)
+  "S",   # flake8-bandit
   "C4",  # flake8-comprehensions
   "Q",   # flake8-quotes
   "RET", # flake8-return
@@ -69,16 +65,31 @@ select = [
   "N",   # pep8-naming
   "W",   # warning
   "PL",  # Pylint
+  "T",   # flake8-debugger + flake8-print
+  "ARG", # flake8-unused-arguments
+  "DTZ", # flake8-datetimez
+  "G",   # flake8-logging-format
+  "ICN", # flake8-import-conventions
+  "ISC", # implicit string concatenation
+  "LOG", # flake8-logging
+  "PIE", # flake8-pie
+  "RSE", # flake8-raise
+  "TID", # flake8-tidy-imports
+  "FURB",# refurb
+  "NPY", # numpy rules
   "PGH", # pygrep-hooks
   "FLY", # flynt
   "PERF",# Perflint
   "RUF", # Ruff-specific rules
 ]
 
-ignore = []
+ignore = [
+  "ISC001",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
+"src/grawji/__main__.py" = ["T201"]
 "scripts/**" = ["D103", "T201", "E402"]
 "src/grawji/controllers/*.py" = ["E402"]
 "src/grawji/imaging/*.py" = ["E402"]
@@ -117,9 +128,6 @@ disallow_untyped_calls = false
 module = ["rawji.*", "usb.*", "cairo", "lensfunpy"]
 ignore_missing_imports = true
 
-# pygobject-stubs is installed for editor type hints, but grawji treats the
-# GTK layer as untyped. Skip the gi stubs in mypy so it does not type-check
-# the dynamic GObject API.
 [[tool.mypy.overrides]]
 module = ["gi", "gi.*"]
 ignore_missing_imports = true
@@ -135,7 +143,6 @@ module = [
 ]
 disallow_subclassing_any = false
 warn_return_any = false
-# @Gtk.Template / @Gtk.Template.Callback are untyped (gi) decorators.
 disable_error_code = ["untyped-decorator", "misc"]
 
 [[tool.mypy.overrides]]

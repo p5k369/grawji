@@ -301,8 +301,7 @@ def transfer_presets(
     bad = [s for s in slots if not 0 <= s < num_slots]
     if bad:
         raise BackupTransferError(
-            f"bank slot out of range for this body's {num_slots} banks:"
-            f" {bad}"
+            f"bank slot out of range for this body's {num_slots} banks: {bad}"
         )
 
     dropped: dict[int, list[str]] = {}

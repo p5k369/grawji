@@ -136,8 +136,8 @@ def download(path: str) -> None:
 def _emit_run(a: bytes, b: bytes, start: int, end: int) -> None:
     """Print one differing byte range."""
     print(
-        f"  @{start}-{end}: {a[start:end + 1].hex()} -> "
-        f"{b[start:end + 1].hex()}"
+        f"  @{start}-{end}: {a[start : end + 1].hex()} -> "
+        f"{b[start : end + 1].hex()}"
     )
 
 

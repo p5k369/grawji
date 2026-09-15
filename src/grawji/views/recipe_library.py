@@ -214,8 +214,7 @@ class RecipeLibraryController:
         self._panel.set_active(recipe, title, unsaved=True)
         self._on_render()
         self._on_status(
-            f"Applied “{title}” (not saved yet — the save button "
-            "stores it)."
+            f"Applied “{title}” (not saved yet — the save button stores it)."
         )
         if self._manager is not None:
             self._manager.show_toast(f"Applied “{title}” (unsaved).")
