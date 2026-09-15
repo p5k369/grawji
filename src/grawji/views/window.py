@@ -951,17 +951,14 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             pixbuf = oriented_pixbuf(jpeg)
         except GLib.Error as exc:
-            GLib.idle_add(
-                self._apply_preview, generation, seq, jpeg, None, str(exc)
-            )
+            GLib.idle_add(self._apply_preview, generation, seq, None, str(exc))
             return
-        GLib.idle_add(self._apply_preview, generation, seq, jpeg, pixbuf, "")
+        GLib.idle_add(self._apply_preview, generation, seq, pixbuf, "")
 
     def _apply_preview(
         self,
         generation: int,
         seq: int,
-        jpeg: bytes,
         pixbuf: Any,
         error: str,
     ) -> bool:

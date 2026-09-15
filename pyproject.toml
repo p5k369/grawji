@@ -53,7 +53,7 @@ select = [
   "F",   # pyflakes
   "A",   # flake8-builtins
   "B",   # flake8-bugbear
-  "S",   # flake8-bandit (security)
+  "S",   # flake8-bandit
   "C4",  # flake8-comprehensions
   "Q",   # flake8-quotes
   "RET", # flake8-return
@@ -65,16 +65,31 @@ select = [
   "N",   # pep8-naming
   "W",   # warning
   "PL",  # Pylint
+  "T",   # flake8-debugger + flake8-print
+  "ARG", # flake8-unused-arguments
+  "DTZ", # flake8-datetimez
+  "G",   # flake8-logging-format
+  "ICN", # flake8-import-conventions
+  "ISC", # implicit string concatenation
+  "LOG", # flake8-logging
+  "PIE", # flake8-pie
+  "RSE", # flake8-raise
+  "TID", # flake8-tidy-imports
+  "FURB",# refurb
+  "NPY", # numpy rules
   "PGH", # pygrep-hooks
   "FLY", # flynt
   "PERF",# Perflint
   "RUF", # Ruff-specific rules
 ]
 
-ignore = []
+ignore = [
+  "ISC001",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
+"src/grawji/__main__.py" = ["T201"]
 "scripts/**" = ["D103", "T201", "E402"]
 "src/grawji/controllers/*.py" = ["E402"]
 "src/grawji/imaging/*.py" = ["E402"]
