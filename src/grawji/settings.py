@@ -88,6 +88,7 @@ class Settings:
             writes nothing.
         export_provenance: Record the applied recipe's name in the
             exported JPEG's EXIF user comment.
+        export_jxl: Write exports as JPEG XL instead of JPEG.
     """
 
     open_recipe: str = FROM_IMAGE
@@ -119,6 +120,7 @@ class Settings:
     export_artist: str = ""
     export_copyright: str = ""
     export_provenance: bool = True
+    export_jxl: bool = False
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""

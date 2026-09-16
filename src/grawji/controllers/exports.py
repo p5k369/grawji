@@ -1,4 +1,4 @@
-"""Controllers for exporting: single full-res files and batches."""
+"""Controllers for exporting."""
 
 from __future__ import annotations
 
@@ -24,17 +24,18 @@ from grawji.camera.core import (
     recipe_from_profile,
 )
 from grawji.camera.preview import CameraWorker
-from grawji.imaging import imagemeta
 from grawji.imaging.export import (
     SetBusy,
     export_basename,
     framing_active,
     initial_folder,
+    jxl_wanted,
     resize_active,
     sidecar_decode,
     with_border,
     with_max_edge,
     write_jpeg,
+    write_passthrough,
 )
 from grawji.recipe import Recipe
 from grawji.settings import Settings
@@ -56,6 +57,7 @@ class SingleExportController:
         get_provenance: Callable[[], str],
         get_current_raf: Callable[[], str | None],
         base_decode: Callable[[bytes], Any],
+        base_identity: Callable[[], bool],
         set_busy: SetBusy,
         on_error: Callable[[Exception], None],
         on_status_link: Callable[[str, str], None],
@@ -74,6 +76,8 @@ class SingleExportController:
             base_decode: Decodes the camera JPEG with the current
                 geometry baked in; the framing settings wrap it at
                 write time.
+            base_identity: Whether base_decode would change no pixels
+                right now.
             set_busy: Toggles the busy spinner with a status line.
             on_error: Reports a camera error.
             on_status_link: Shows the clickable "Exported to" status.
@@ -86,16 +90,20 @@ class SingleExportController:
         self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
         self._base_decode = base_decode
+        self._base_identity = base_identity
         self._set_busy = set_busy
         self._on_error = on_error
         self._on_status_link = on_status_link
 
     def begin(self) -> None:
         """Show a save dialog for a full-resolution export."""
+        jxl = jxl_wanted(self._settings)
         dialog = Gtk.FileDialog()
-        dialog.set_title("Export JPEG")
+        dialog.set_title("Export JPEG XL" if jxl else "Export JPEG")
         dialog.set_initial_name(
-            export_basename(self._get_current_raf() or "grawji-export")
+            export_basename(
+                self._get_current_raf() or "grawji-export", jxl=jxl
+            )
         )
         start = initial_folder(self._settings.last_export_dir)
         if start is not None:
@@ -123,19 +131,35 @@ class SingleExportController:
 
     def _on_exported(self, path: str, jpeg: bytes) -> None:
         """Save the exported JPEG with orientation and rotation baked in."""
+        needs_pixels = (
+            not self._base_identity()
+            or framing_active(self._settings)
+            or resize_active(self._settings)
+        )
         try:
-            write_jpeg(
-                jpeg,
-                path,
-                quality=self._settings.jpeg_quality,
-                decode=with_border(
-                    with_max_edge(self._base_decode, self._settings),
-                    self._settings,
-                ),
-                artist=self._settings.export_artist,
-                rights=self._settings.export_copyright,
-                comment=self._get_provenance(),
-            )
+            if not needs_pixels:
+                write_passthrough(
+                    jpeg,
+                    path,
+                    artist=self._settings.export_artist,
+                    rights=self._settings.export_copyright,
+                    comment=self._get_provenance(),
+                    jxl=jxl_wanted(self._settings),
+                )
+            else:
+                write_jpeg(
+                    jpeg,
+                    path,
+                    quality=self._settings.jpeg_quality,
+                    decode=with_border(
+                        with_max_edge(self._base_decode, self._settings),
+                        self._settings,
+                    ),
+                    artist=self._settings.export_artist,
+                    rights=self._settings.export_copyright,
+                    comment=self._get_provenance(),
+                    jxl=jxl_wanted(self._settings),
+                )
         except (GLib.Error, OSError) as exc:
             self._set_busy(busy=False, status=f"Export failed: {exc}")
             return
@@ -268,7 +292,10 @@ class BatchController:
                 if cancel.is_set():
                     tally["cancelled"] = 1
                     break
-                out_path = Path(out_dir, export_basename(raf_file))
+                out_path = Path(
+                    out_dir,
+                    export_basename(raf_file, jxl=jxl_wanted(self._settings)),
+                )
                 if not overwrite and out_path.exists():
                     tally["existing"] += 1
                 else:
@@ -322,13 +349,13 @@ class BatchController:
             )
         try:
             if decode is None:
-                out_path.write_bytes(
-                    imagemeta.with_credits(
-                        jpeg,
-                        artist=self._settings.export_artist,
-                        rights=self._settings.export_copyright,
-                        comment=comment,
-                    )
+                write_passthrough(
+                    jpeg,
+                    str(out_path),
+                    artist=self._settings.export_artist,
+                    rights=self._settings.export_copyright,
+                    comment=comment,
+                    jxl=jxl_wanted(self._settings),
                 )
             else:
                 write_jpeg(
@@ -339,6 +366,7 @@ class BatchController:
                     artist=self._settings.export_artist,
                     rights=self._settings.export_copyright,
                     comment=comment,
+                    jxl=jxl_wanted(self._settings),
                 )
         except (GLib.Error, OSError) as exc:
             logging.getLogger("grawji").warning(

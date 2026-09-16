@@ -256,6 +256,7 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda: str(self._raf_path) if self._raf_path else None
             ),
             base_decode=self.preview_view.pixbuf_from_jpeg,
+            base_identity=self.preview_view.geometry_is_identity,
             set_busy=self._set_busy,
             on_error=self._on_error,
             on_status_link=self.preview_view.set_status_link,

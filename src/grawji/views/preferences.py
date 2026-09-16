@@ -13,6 +13,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gtk
 
+from grawji.imaging.export import jxl_available
 from grawji.settings import Settings
 
 _UI = (
@@ -46,6 +47,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     jpeg_quality_scale = Gtk.Template.Child()
     glide_speed_scale = Gtk.Template.Child()
     drag_action_row = Gtk.Template.Child()
+    jxl_row = Gtk.Template.Child()
     max_edge_row = Gtk.Template.Child()
     artist_row = Gtk.Template.Child()
     copyright_row = Gtk.Template.Child()
@@ -80,6 +82,11 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.drag_action_row.set_selected(
             _DRAG_ACTIONS.index(drag) if drag in _DRAG_ACTIONS else 0
         )
+        available = jxl_available()
+        self.jxl_row.set_active(settings.export_jxl and available)
+        self.jxl_row.set_sensitive(available)
+        if not available:
+            self.jxl_row.set_subtitle("Needs the cjxl tool (libjxl)")
         self.max_edge_row.set_value(settings.export_max_edge)
         self.artist_row.set_text(settings.export_artist)
         self.copyright_row.set_text(settings.export_copyright)
@@ -103,12 +110,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
                 break
         self.border_portrait_row.set_active(portrait)
         self._update_portrait_sensitivity()
+        self._connect_edits()
+
+    def _connect_edits(self) -> None:
+        """Route every row's edit signal into _on_edited."""
         self.color_scheme_row.connect("notify::selected", self._on_edited)
         self.wb_grid_row.connect("notify::active", self._on_edited)
         self.auto_reconnect_row.connect("notify::active", self._on_edited)
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
         self.glide_speed_scale.connect("value-changed", self._on_edited)
         self.drag_action_row.connect("notify::selected", self._on_edited)
+        self.jxl_row.connect("notify::active", self._on_edited)
         self.max_edge_row.connect("notify::value", self._on_edited)
         self.artist_row.connect("changed", self._on_edited)
         self.copyright_row.connect("changed", self._on_edited)
@@ -145,6 +157,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings.drag_action = _DRAG_ACTIONS[
             self.drag_action_row.get_selected()
         ]
+        if self.jxl_row.get_sensitive():
+            self._settings.export_jxl = self.jxl_row.get_active()
         self._settings.export_max_edge = int(self.max_edge_row.get_value())
         self._settings.export_artist = self.artist_row.get_text().strip()
         self._settings.export_copyright = self.copyright_row.get_text().strip()

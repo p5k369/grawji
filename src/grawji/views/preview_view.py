@@ -1,4 +1,4 @@
-"""The preview viewport: zoom, pan, peek, crop, background, histogram."""
+"""The preview viewport."""
 
 from __future__ import annotations
 
@@ -319,6 +319,10 @@ class PreviewView(Gtk.Box):
     def pixbuf_from_jpeg(self, jpeg: bytes) -> Any:
         """Decode JPEG bytes and bake the current geometry into them."""
         return bake_pixbuf(oriented_pixbuf(jpeg), self._crop)
+
+    def geometry_is_identity(self) -> bool:
+        """Whether pixbuf_from_jpeg would change no pixels right now."""
+        return bool(self._crop.is_identity)
 
     def rotate(self, degrees: int) -> None:
         """Turn the image by a 90-degree step and redisplay."""
