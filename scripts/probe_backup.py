@@ -1,10 +1,4 @@
-"""Probe the camera settings backup/restore over USB.
-
-Usage:
-    python scripts/probe_backup.py download backup.bin
-    python scripts/probe_backup.py diff before.bin after.bin
-    python scripts/probe_backup.py restore backup.bin --write-settings
-"""
+"""Probe the camera settings backup/restore over USB."""
 
 from __future__ import annotations
 

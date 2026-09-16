@@ -32,7 +32,6 @@ def _release_errors(release_tag: str) -> list[str]:
         found = datetime.date.fromisoformat(date.group(1)) if date else None
     except ValueError:
         found = None
-    # A day of slack absorbs the releaser's timezone vs the runner's UTC.
     if found is None or abs((found - today).days) > 1:
         errors.append(
             f"metainfo release date is "

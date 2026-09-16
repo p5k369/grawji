@@ -18,12 +18,7 @@ _INDENT = "    "
 
 
 def changelog_bullets(text: str, version: str) -> list[str]:
-    """Return the cleaned bullet lines for a version's section.
-
-    Markdown links and the trailing PR/commit references that
-    release-please appends are stripped, so only the plain commit
-    summary remains.
-    """
+    """Return the cleaned bullet lines for a version's section."""
     heading = re.compile(
         rf"^## \[?{re.escape(version)}\]?[^\n]*$", re.MULTILINE
     )
