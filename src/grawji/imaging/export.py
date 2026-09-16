@@ -1,7 +1,9 @@
-"""Export building blocks: decode chains, JPEG writing, filenames."""
+"""Export building blocks."""
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -29,7 +31,7 @@ SetBusy = Callable[..., None]
 
 
 def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
-    """A decode callback applying the RAF's sidecar geometry, or None."""
+    """A decode callback applying the RAF's sidecar geometry."""
     geometry = sidecar.load_crop(raf_path)
     if geometry.is_identity:
         return None
@@ -52,7 +54,7 @@ def resize_active(settings: Settings) -> bool:
 def with_max_edge(
     decode: Callable[[bytes], Any], settings: Settings
 ) -> Callable[[bytes], Any]:
-    """Wrap decode with the configured long-edge limit, if any."""
+    """Wrap decode with the configured long-edge limit."""
     if not resize_active(settings):
         return decode
     max_edge = settings.export_max_edge
@@ -62,7 +64,7 @@ def with_max_edge(
 def with_border(
     decode: Callable[[bytes], Any], settings: Settings
 ) -> Callable[[bytes], Any]:
-    """Wrap decode with the configured export border, if any."""
+    """Wrap decode with the configured export border."""
     if not framing_active(settings):
         return decode
     percent = settings.export_border_percent
@@ -71,16 +73,63 @@ def with_border(
     return lambda jpeg: add_border(decode(jpeg), percent, color, aspect)
 
 
-def export_basename(raf_path: Path | str) -> str:
+def jxl_available() -> bool:
+    """Whether the cjxl tool for JPEG XL exports is installed."""
+    return shutil.which("cjxl") is not None
+
+
+def jxl_wanted(settings: Settings) -> bool:
+    """Whether exports should be written as JPEG XL right now."""
+    return settings.export_jxl and jxl_available()
+
+
+def repack_jxl(jpeg: bytes, path: str) -> None:
+    """Losslessly repack a finished JPEG into a .jxl at path."""
+    cjxl = shutil.which("cjxl")
+    if cjxl is None:
+        raise OSError("cjxl not found. Cannot write JPEG XL")
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        tmp_path.write_bytes(jpeg)
+        result = subprocess.run(  # noqa: S603
+            [cjxl, "--lossless_jpeg=1", str(tmp_path), path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise OSError(f"cjxl failed: {result.stderr.strip()}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def write_passthrough(
+    jpeg: bytes,
+    path: str,
+    *,
+    artist: str = "",
+    rights: str = "",
+    comment: str = "",
+    jxl: bool = False,
+) -> None:
+    """Write the camera's own JPEG bytes, credits stamped, no re-encode."""
+    data = imagemeta.with_credits(
+        jpeg, artist=artist, rights=rights, comment=comment
+    )
+    if jxl:
+        repack_jxl(data, path)
+    else:
+        Path(path).write_bytes(data)
+
+
+def export_basename(raf_path: Path | str, *, jxl: bool = False) -> str:
     """Build an export filename from the RAF stem."""
-    return f"{Path(raf_path).stem}.jpg"
+    return f"{Path(raf_path).stem}.{'jxl' if jxl else 'jpg'}"
 
 
 def initial_folder(path: str) -> Gio.File | None:
-    """A Gio.File for path if it is an existing directory, else None.
-
-    Used to open an export dialog at the last-used export folder.
-    """
+    """A Gio.File for path if it is an existing directory."""
     if path and Path(path).is_dir():
         return Gio.File.new_for_path(path)
     return None
@@ -95,6 +144,7 @@ def write_jpeg(  # noqa: PLR0913
     artist: str = "",
     rights: str = "",
     comment: str = "",
+    jxl: bool = False,
 ) -> None:
     """Write jpeg to path with orientation and rotation baked in.
 
@@ -103,7 +153,8 @@ def write_jpeg(  # noqa: PLR0913
     and the EXIF transplant happen on a temp file first, then the
     finished bytes are written to the chosen path in one go: that path
     may be an XDG document-portal proxy (Flatpak), which exiv2 cannot
-    rewrite in place - doing so leaves a 0-byte file.
+    rewrite in place - doing so leaves a 0-byte file. With jxl the
+    finished JPEG is losslessly repacked into a .jxl instead.
 
     Raises GLib.Error or OSError on failure.
     """
@@ -117,6 +168,9 @@ def write_jpeg(  # noqa: PLR0913
         imagemeta.copy_exif(
             jpeg, tmp_path, artist=artist, rights=rights, comment=comment
         )
-        Path(path).write_bytes(Path(tmp_path).read_bytes())
+        if jxl:
+            repack_jxl(Path(tmp_path).read_bytes(), path)
+        else:
+            Path(path).write_bytes(Path(tmp_path).read_bytes())
     finally:
         Path(tmp_path).unlink(missing_ok=True)

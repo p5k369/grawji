@@ -14,6 +14,7 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
 
 import grawji.controllers.exports as module
+import grawji.imaging.export as module_export
 from grawji.camera.core import ForeignRafError
 from grawji.controllers.exports import (
     BatchController,
@@ -32,7 +33,7 @@ def small_jpeg() -> bytes:
     return bytes(data)
 
 
-def single_controller(state, settings=None):
+def single_controller(state, settings=None, identity=False):
     """A SingleExportController over recording fakes."""
     return SingleExportController(
         parent=None,
@@ -45,6 +46,7 @@ def single_controller(state, settings=None):
         base_decode=lambda jpeg: GdkPixbuf.Pixbuf.new(
             GdkPixbuf.Colorspace.RGB, False, 8, 4, 3
         ),
+        base_identity=lambda: identity,
         set_busy=lambda **kw: state.setdefault("busy", []).append(kw),
         on_error=lambda exc: state.setdefault("errors", []).append(exc),
         on_status_link=lambda text, path: state.setdefault("links", []).append(
@@ -64,6 +66,43 @@ def test_single_export_writes_and_links(tmp_path):
     assert state["links"] == [(f"Exported to {out}", str(out))]
 
 
+def test_single_export_streams_untouched_camera_bytes(tmp_path):
+    """No geometry, framing or resize writes the camera bytes as-is."""
+    state: dict[str, list[Any]] = {}
+    controller = single_controller(state, identity=True)
+    jpeg = small_jpeg()
+    out = tmp_path / "out.jpg"
+    controller._on_exported(str(out), jpeg)
+    assert out.read_bytes() == jpeg
+    assert state["busy"][-1] == {"busy": False, "status": "Exported."}
+
+
+def test_single_export_geometry_forces_a_reencode(tmp_path, monkeypatch):
+    """Live crop/rotation routes through write_jpeg, not passthrough."""
+    state: dict[str, list[Any]] = {}
+    controller = single_controller(state, identity=False)
+    calls = []
+    monkeypatch.setattr(
+        module, "write_jpeg", lambda *a, **kw: calls.append(kw)
+    )
+    controller._on_exported(str(tmp_path / "out.jpg"), small_jpeg())
+    assert len(calls) == 1
+
+
+def test_single_export_resize_forces_a_reencode(tmp_path, monkeypatch):
+    """An active size limit disables the passthrough."""
+    state: dict[str, list[Any]] = {}
+    settings = Settings()
+    settings.export_max_edge = 100
+    controller = single_controller(state, settings=settings, identity=True)
+    calls = []
+    monkeypatch.setattr(
+        module, "write_jpeg", lambda *a, **kw: calls.append(kw)
+    )
+    controller._on_exported(str(tmp_path / "out.jpg"), small_jpeg())
+    assert len(calls) == 1
+
+
 def test_single_export_failure_lands_in_the_status(tmp_path, monkeypatch):
     """A write failure resets busy with the error, no link."""
     state: dict[str, list[Any]] = {}
@@ -76,6 +115,65 @@ def test_single_export_failure_lands_in_the_status(tmp_path, monkeypatch):
     controller._on_exported(str(tmp_path / "out.jpg"), small_jpeg())
     assert "Export failed" in state["busy"][-1]["status"]
     assert "links" not in state
+
+
+def test_jxl_wanted_needs_setting_and_tool(monkeypatch):
+    """The JXL switch only bites when cjxl is actually installed."""
+    settings = Settings()
+    assert not module.jxl_wanted(settings)
+    settings.export_jxl = True
+    monkeypatch.setattr(module_export.shutil, "which", lambda name: None)
+    assert not module.jxl_wanted(settings)
+    monkeypatch.setattr(
+        module_export.shutil, "which", lambda name: "/usr/bin/cjxl"
+    )
+    assert module.jxl_wanted(settings)
+
+
+def test_export_basename_extension_follows_the_format():
+    """The default name carries .jxl only in JXL mode."""
+    assert module_export.export_basename("a/b.RAF") == "b.jpg"
+    assert module_export.export_basename("a/b.RAF", jxl=True) == "b.jxl"
+
+
+def test_single_export_jxl_repacks_the_passthrough(tmp_path, monkeypatch):
+    """JXL mode routes the untouched camera bytes through the repack."""
+    state: dict[str, list[Any]] = {}
+    settings = Settings()
+    settings.export_jxl = True
+    controller = single_controller(state, settings=settings, identity=True)
+    repacked = []
+    monkeypatch.setattr(
+        module_export.shutil, "which", lambda name: "/usr/bin/cjxl"
+    )
+    monkeypatch.setattr(
+        module_export,
+        "repack_jxl",
+        lambda jpeg, path: repacked.append((jpeg, path)),
+    )
+    jpeg = small_jpeg()
+    out = tmp_path / "out.jxl"
+    controller._on_exported(str(out), jpeg)
+    assert repacked == [(jpeg, str(out))]
+    assert state["busy"][-1] == {"busy": False, "status": "Exported."}
+
+
+@pytest.mark.skipif(
+    not module_export.jxl_available(), reason="cjxl not installed"
+)
+def test_repack_jxl_writes_a_jxl_container(tmp_path):
+    """The real cjxl repack produces a JPEG XL file."""
+    out = tmp_path / "out.jxl"
+    module_export.repack_jxl(small_jpeg(), str(out))
+    data = out.read_bytes()
+    assert data.startswith(b"\xff\x0a") or data[4:12] == b"JXL \r\n\x87\n"
+
+
+def test_repack_jxl_without_cjxl_raises(tmp_path, monkeypatch):
+    """A missing tool is a clean OSError, not a crash."""
+    monkeypatch.setattr(module_export.shutil, "which", lambda name: None)
+    with pytest.raises(OSError, match="cjxl"):
+        module_export.repack_jxl(b"x", str(tmp_path / "out.jxl"))
 
 
 class FakeSession:

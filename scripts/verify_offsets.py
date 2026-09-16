@@ -1,9 +1,4 @@
-"""Hardware verification of candidate rawji profile offsets.
-
-Run with the camera connected and a RAF from the *connected body*:
-
-    python scripts/verify_offsets.py 20240612_0413.RAF
-"""
+"""Hardware verification of candidate rawji profile offsets."""
 
 from __future__ import annotations
 

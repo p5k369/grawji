@@ -39,7 +39,8 @@ jobs:
         sudo apt-get install -y --no-install-recommends \
           gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gexiv2-0.10 \
           libgtk-4-1 libadwaita-1-0 libusb-1.0-0 xvfb \
-          libgirepository-2.0-dev libcairo2-dev pkg-config
+          libgirepository-2.0-dev libcairo2-dev pkg-config \
+          libjxl-tools
 
     - name: Install test dependencies
       run: |

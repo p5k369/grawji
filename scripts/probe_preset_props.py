@@ -1,11 +1,4 @@
-"""Probe the gen5 custom-preset PTP properties over USB.
-
-Usage:
-    python scripts/probe_preset_props.py caps
-    python scripts/probe_preset_props.py list
-    python scripts/probe_preset_props.py write 7 recipe.json \
-        --name PROBE --write-settings
-"""
+"""Probe the gen5 custom-preset PTP properties over USB."""
 
 from __future__ import annotations
 

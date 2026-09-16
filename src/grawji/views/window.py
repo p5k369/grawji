@@ -256,6 +256,7 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda: str(self._raf_path) if self._raf_path else None
             ),
             base_decode=self.preview_view.pixbuf_from_jpeg,
+            base_identity=self.preview_view.geometry_is_identity,
             set_busy=self._set_busy,
             on_error=self._on_error,
             on_status_link=self.preview_view.set_status_link,
@@ -435,11 +436,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _install_icons(self) -> None:
-        """Register grawji's bundled icons with the icon theme.
-
-        Symbolic icons no theme reliably ships (e.g. the crop glyph)
-        are looked up from the package's ui/icons directory instead.
-        """
+        """Register grawji's bundled icons with the icon theme."""
         icons = resources.files("grawji").joinpath("ui", "icons")
         Gtk.IconTheme.get_for_display(
             Gdk.Display.get_default()
@@ -510,7 +507,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _load_selected(
         self, generation: int, raf_path: str, quiet: bool = False
     ) -> bool:
-        """Read the embedded preview + EXIF and open the RAF (off the click).
+        """Read the embedded preview + EXIF and open the RAF.
 
         Skips itself if a newer selection has already superseded it, so fast
         scrubbing does not pile up decodes.
@@ -563,7 +560,7 @@ class MainWindow(Adw.ApplicationWindow):
         rows: list[tuple[str, str]],
         native: tuple[int, int] | None,
     ) -> bool:
-        """Show the decoded embedded preview + EXIF (on the main thread)."""
+        """Show the decoded embedded preview + EXIF."""
         if generation != self._generation:
             return GLib.SOURCE_REMOVE
         self.preview_view.set_embedded_jpeg(jpeg)
@@ -693,7 +690,7 @@ class MainWindow(Adw.ApplicationWindow):
             )
 
     def _read_iopcode(self) -> int | None:
-        """The open profile's IOPCode (for FP export), or None."""
+        """The open profile's IOPCode."""
         profile = self._session.profile
         return read_iopcode(profile) if profile is not None else None
 
@@ -752,7 +749,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_busy(busy=False, status="Comparing with baseline.")
 
     def _on_recipe_changed(self, _panel: Any) -> None:
-        """Re-render (debounced) after a recipe edit."""
+        """Re-render after a recipe edit."""
         if not self._session.is_open:
             return
         self._schedule_render()
@@ -893,7 +890,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_if_open()
 
     def _render_if_open(self) -> None:
-        """Re-render the preview if an image is open (else do nothing)."""
+        """Re-render the preview if an image is open."""
         if self._session.is_open:
             self._render_preview()
 
@@ -1039,7 +1036,7 @@ class MainWindow(Adw.ApplicationWindow):
             action.set_enabled(count > 0)
 
     def _select_all(self) -> None:
-        """Select every image (batch-select mode only)."""
+        """Select every image."""
         self._filmstrip.select_all()
 
     def _end_select_mode(self) -> None:
