@@ -82,14 +82,7 @@ def oriented_pixbuf(jpeg: bytes) -> Any:
 
 @Gtk.Template(string=_UI)
 class PreviewView(Gtk.Box):
-    """The rendered-image viewport plus its status/tool strip.
-
-    Owns everything about presenting a jpeg: zoom (Ctrl+scroll or the
-    win.zoom-* actions), drag panning, hold-to-peek at the in-camera
-    original, crop and straighten, the cycling canvas background and the
-    histogram overlay. The window feeds it jpegs and reads back the
-    geometry when exporting.
-    """
+    """The rendered-image viewport plus its status/tool strip."""
 
     __gtype_name__ = "GrawjiPreviewView"
 
@@ -168,7 +161,7 @@ class PreviewView(Gtk.Box):
         self._init_viewport_controllers()
 
     def _init_edit_state(self) -> None:
-        """Initialise the geometry and edit-display state fields."""
+        """Initialize the geometry and edit-display state fields."""
         self._crop = crop.CropRotate()
         self._border_percent = 0.0
         self._border_color = "#ffffff"
@@ -222,7 +215,7 @@ class PreviewView(Gtk.Box):
 
     @property
     def crop_rotate(self) -> crop.CropRotate:
-        """The current geometry (live values while editing)."""
+        """The current geometry."""
         return self._crop
 
     @property
@@ -247,7 +240,7 @@ class PreviewView(Gtk.Box):
         self.status.set_markup(f'<a href="{uri}">{label}</a>')
 
     def _on_status_link(self, _label: Any, uri: str) -> bool:
-        """Open the linked file's folder (or the folder itself)."""
+        """Open the linked file's folder."""
         target = Gio.File.new_for_uri(uri)
         launcher = Gtk.FileLauncher.new(target)
         parent = self.get_root()
@@ -275,7 +268,7 @@ class PreviewView(Gtk.Box):
         self.histogram_slot.set_visible(show)
 
     def set_embedded_jpeg(self, jpeg: bytes | None) -> None:
-        """Provide the image's in-camera JPEG, the peek source."""
+        """Provide the image's in-camera JPEG."""
         self._embedded_jpeg = jpeg
 
     @property
@@ -284,11 +277,11 @@ class PreviewView(Gtk.Box):
         return self._embedded_jpeg is not None
 
     def clear_source(self) -> None:
-        """Forget the source pixbuf (a new selection failed to decode)."""
+        """Forget the source pixbuf."""
         self._oriented_pixbuf = None
 
     def set_crop(self, value: crop.CropRotate) -> None:
-        """Set the committed geometry (for a newly selected image)."""
+        """Set the committed geometry."""
         if self._crop_editor.editing:
             self.cancel_crop()
         self._crop = value
@@ -388,7 +381,7 @@ class PreviewView(Gtk.Box):
         self.crop_overlay.queue_draw()
 
     def _with_zebras(self, base: Any) -> Any:
-        """Return base with the clipping overlay composited, if ready."""
+        """Return base with the clipping overlay composited."""
         if not self._show_clipping:
             return base
         if base is not self._clip_base:
@@ -454,7 +447,7 @@ class PreviewView(Gtk.Box):
         self._redisplay(histogram=False)
 
     def set_native_size(self, dims: tuple[int, int] | None) -> None:
-        """Set the image's native (oriented) pixel size from metadata."""
+        """Set the image's native pixel size from metadata."""
         if dims is not None:
             self._native_dims = dims
             self._native_locked = True
@@ -574,7 +567,7 @@ class PreviewView(Gtk.Box):
         self._anchor_scroll(vadj, fy, ay, self._content_h, vh)
 
     def _fit_scale(self) -> float | None:
-        """The fit-to-viewport scale of the shown image, native = 1.0."""
+        """The fit-to-viewport scale of the shown image."""
         dims = self._display_dims()
         if dims is None:
             return None
@@ -585,7 +578,7 @@ class PreviewView(Gtk.Box):
         return min(vw / pw, vh / ph)
 
     def set_peek(self, *, peeking: bool) -> None:
-        """Show the in-camera original while peeking, else the result."""
+        """Show the in-camera original while peeking."""
         if peeking and self._crop_editor.editing:
             return
         if peeking and self._original_pixbuf is None:
@@ -606,7 +599,7 @@ class PreviewView(Gtk.Box):
         return self._compare
 
     def set_compare_baseline(self, jpeg: bytes | None) -> None:
-        """Set the baseline render (JPEG bytes) to compare against."""
+        """Set the baseline render to compare against."""
         self._base_jpeg = jpeg
         self._base_pixbuf = None  # re-decode lazily at the current rotation
         if self._compare:
@@ -627,7 +620,7 @@ class PreviewView(Gtk.Box):
         return self._base_pixbuf
 
     def set_compare(self, *, on: bool) -> bool:
-        """Turn the split-compare view on or off; returns the new state."""
+        """Turn the split-compare view on or off."""
         self._compare = on and self._base_jpeg is not None
         if self._compare:
             self._peek = False
@@ -644,7 +637,7 @@ class PreviewView(Gtk.Box):
         self._background = css_class
 
     def cycle_background(self) -> str:
-        """Advance to the next canvas background; returns its CSS class."""
+        """Advance to the next canvas background."""
         index = (
             BACKGROUNDS.index(self._background)
             if self._background in BACKGROUNDS
@@ -667,7 +660,7 @@ class PreviewView(Gtk.Box):
         self.set_peek(peeking=False)
 
     def _on_peek_cancel(self, _gesture: Gtk.GestureClick, _seq: Any) -> None:
-        """Stop peeking if the gesture is cancelled (e.g. pointer lost)."""
+        """Stop peeking if the gesture is cancelled."""
         self.set_peek(peeking=False)
 
     def _on_pan_begin(self, gesture: Any, x: float, _y: float) -> None:
@@ -719,7 +712,7 @@ class PreviewView(Gtk.Box):
         return left, drawn
 
     def _near_divider(self, x: float, *, grab: float = 12.0) -> bool:
-        """Whether pointer x (scroll coords) is on the divider handle."""
+        """Whether pointer x is on the divider handle."""
         image = self._image_rect()
         if image is None:
             return False
@@ -738,7 +731,7 @@ class PreviewView(Gtk.Box):
         self._split.set_fraction(self._split_fraction)
 
     def _on_pointer_motion(self, _c: Any, x: float, y: float) -> None:
-        """Track the pointer; show a resize cursor over the compare handle."""
+        """Track the pointer and show a resize cursor over the handle."""
         self._pointer = (x, y)
         if not self._dragging_divider:
             self._set_resize_cursor(self._compare and self._near_divider(x))
@@ -750,7 +743,7 @@ class PreviewView(Gtk.Box):
             self._set_resize_cursor(on=False)
 
     def _set_resize_cursor(self, on: bool) -> None:
-        """Show the horizontal-resize cursor over the divider, else default."""
+        """Show the horizontal-resize cursor over the divider."""
         self.scroll.set_cursor(
             Gdk.Cursor.new_from_name("ew-resize", None) if on else None
         )
@@ -806,17 +799,17 @@ class PreviewView(Gtk.Box):
         adj.set_value(max(0.0, min(target, max(0.0, content - viewport))))
 
     def _refresh_display(self) -> None:
-        """Redraw at the current zoom (split view when comparing)."""
+        """Redraw at the current zoom."""
         self._apply_zoom()
 
     def _preview_pixbuf(self) -> Any:
-        """The pixbuf to show: the original while peeking, else the result."""
+        """The pixbuf to show: the original while peeking."""
         if self._peek and self._original_pixbuf is not None:
             return self._original_pixbuf
         return self._pixbuf
 
     def _apply_zoom(self) -> None:
-        """Show the preview at the current zoom (split view when comparing)."""
+        """Show the preview at the current zoom."""
         if self._crop_editor.editing:
             self._apply_edit_view()
             return
@@ -873,7 +866,7 @@ class PreviewView(Gtk.Box):
         self._update_zoom_label()
 
     def apply_crop(self) -> None:
-        """Commit the crop edit (Enter, the check button or the toggle)."""
+        """Commit the crop edit."""
         self._crop_editor.apply()
 
     def cancel_crop(self) -> None:

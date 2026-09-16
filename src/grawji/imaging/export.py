@@ -31,7 +31,7 @@ SetBusy = Callable[..., None]
 
 
 def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
-    """A decode callback applying the RAF's sidecar geometry, or None."""
+    """A decode callback applying the RAF's sidecar geometry."""
     geometry = sidecar.load_crop(raf_path)
     if geometry.is_identity:
         return None
@@ -54,7 +54,7 @@ def resize_active(settings: Settings) -> bool:
 def with_max_edge(
     decode: Callable[[bytes], Any], settings: Settings
 ) -> Callable[[bytes], Any]:
-    """Wrap decode with the configured long-edge limit, if any."""
+    """Wrap decode with the configured long-edge limit."""
     if not resize_active(settings):
         return decode
     max_edge = settings.export_max_edge
@@ -64,7 +64,7 @@ def with_max_edge(
 def with_border(
     decode: Callable[[bytes], Any], settings: Settings
 ) -> Callable[[bytes], Any]:
-    """Wrap decode with the configured export border, if any."""
+    """Wrap decode with the configured export border."""
     if not framing_active(settings):
         return decode
     percent = settings.export_border_percent
@@ -87,7 +87,7 @@ def repack_jxl(jpeg: bytes, path: str) -> None:
     """Losslessly repack a finished JPEG into a .jxl at path."""
     cjxl = shutil.which("cjxl")
     if cjxl is None:
-        raise OSError("cjxl not found; cannot write JPEG XL")
+        raise OSError("cjxl not found. Cannot write JPEG XL")
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
@@ -129,10 +129,7 @@ def export_basename(raf_path: Path | str, *, jxl: bool = False) -> str:
 
 
 def initial_folder(path: str) -> Gio.File | None:
-    """A Gio.File for path if it is an existing directory, else None.
-
-    Used to open an export dialog at the last-used export folder.
-    """
+    """A Gio.File for path if it is an existing directory."""
     if path and Path(path).is_dir():
         return Gio.File.new_for_path(path)
     return None

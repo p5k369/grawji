@@ -74,8 +74,7 @@ class SingleExportController:
                 the export was made with.
             get_current_raf: The open RAF's path for the default name.
             base_decode: Decodes the camera JPEG with the current
-                geometry baked in; the framing settings wrap it at
-                write time.
+                geometry baked in.
             base_identity: Whether base_decode would change no pixels
                 right now.
             set_busy: Toggles the busy spinner with a status line.
@@ -168,7 +167,7 @@ class SingleExportController:
 
 
 class BatchController:
-    """Drives a batch export: folder pick, options dialog, worker task."""
+    """Drives a batch export."""
 
     def __init__(  # noqa: PLR0913
         self,
@@ -377,7 +376,7 @@ class BatchController:
             tally["exported"] += 1
 
     def _image_exposure(self, raf_file: str) -> float:
-        """The EV to render raf_file with: stored, else as shot."""
+        """The EV to render raf_file."""
         stored = sidecar.load_exposure(raf_file)
         if stored is not None:
             return stored

@@ -26,7 +26,7 @@ _DRAG_ACTIONS = ["move", "copy"]
 
 
 def _split_aspect(label: str) -> tuple[str, bool]:
-    """A stored "W:H" aspect as (canonical landscape label, portrait)."""
+    """A stored aspect."""
     wide, sep, tall = label.partition(":")
     try:
         portrait = bool(sep) and float(wide) < float(tall)
