@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,16 @@ gi.require_version("GExiv2", "0.10")
 from gi.repository import GExiv2, GLib
 
 from grawji import exif, raf
+
+# Smallest sensible Exif block: the 4-byte offset plus a TIFF header.
+_EXIF_BLOCK_PREFIX = 12
+# TIFF IFD layout: 12-byte entries, and the two tags naming the size.
+_IFD_ENTRY = 12
+_TAG_WIDTH = 0x0100
+_TAG_HEIGHT = 0x0101
+_TYPE_SHORT = 3
+_TYPE_LONG = 4
+_SHORT_MAX = 0xFFFF
 
 
 def exif_rows(jpeg: bytes) -> list[tuple[str, str]]:
@@ -106,6 +117,16 @@ def _stamp(metadata: Any, *, artist: str, rights: str, comment: str) -> None:
         metadata.try_set_tag_string("Exif.Photo.UserComment", comment)
 
 
+def _resize(metadata: Any, size: tuple[int, int] | None) -> None:
+    """Point the size tags at the pixels actually being written."""
+    if size is None:
+        return
+    width, height = size
+    metadata.try_set_tag_long("Exif.Photo.PixelXDimension", width)
+    metadata.try_set_tag_long("Exif.Photo.PixelYDimension", height)
+    metadata.erase_exif_thumbnail()
+
+
 def copy_exif(
     source_jpeg: bytes,
     dest_path: str,
@@ -113,6 +134,7 @@ def copy_exif(
     artist: str = "",
     rights: str = "",
     comment: str = "",
+    size: tuple[int, int] | None = None,
 ) -> None:
     """Transplant the camera JPEG's metadata onto the exported file.
 
@@ -126,9 +148,66 @@ def copy_exif(
         metadata.open_buf(source_jpeg)
         metadata.try_set_orientation(GExiv2.Orientation.NORMAL)
         _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        _resize(metadata, size)
         metadata.save_file(dest_path)
     except GLib.Error:
         pass
+
+
+def _patch_ifd0_size(tiff: bytes, size: tuple[int, int] | None) -> bytes:
+    """Correct IFD0's own width and height in a raw TIFF stream."""
+    if size is None or tiff[:4] not in (b"II\x2a\x00", b"MM\x00\x2a"):
+        return tiff
+    order = "<" if tiff[:2] == b"II" else ">"
+    out = bytearray(tiff)
+    try:
+        offset = struct.unpack_from(f"{order}I", out, 4)[0]
+        count = struct.unpack_from(f"{order}H", out, offset)[0]
+        for index in range(count):
+            entry = offset + 2 + index * _IFD_ENTRY
+            tag, kind, values = struct.unpack_from(f"{order}HHI", out, entry)
+            if tag not in (_TAG_WIDTH, _TAG_HEIGHT) or values != 1:
+                continue
+            value = size[0] if tag == _TAG_WIDTH else size[1]
+            if kind == _TYPE_LONG:
+                struct.pack_into(f"{order}I", out, entry + 8, value)
+            elif kind == _TYPE_SHORT and value <= _SHORT_MAX:
+                struct.pack_into(f"{order}H", out, entry + 8, value)
+    except struct.error:
+        return tiff
+    return bytes(out)
+
+
+def stamp_exif_block(
+    block: bytes,
+    *,
+    artist: str,
+    rights: str,
+    comment: str = "",
+    size: tuple[int, int] | None = None,
+) -> bytes:
+    """Return a HEIF Exif block with the export credits stamped in."""
+    if len(block) < _EXIF_BLOCK_PREFIX:
+        return block
+    offset = int.from_bytes(block[:4], "big")
+    header, tiff = block[: 4 + offset], block[4 + offset :]
+    if not tiff.startswith((b"II*\x00", b"MM\x00*")):
+        return block
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        tmp_path.write_bytes(tiff)
+        metadata = GExiv2.Metadata()
+        metadata.open_path(str(tmp_path))
+        metadata.try_set_orientation(GExiv2.Orientation.NORMAL)
+        _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        _resize(metadata, size)
+        metadata.save_file(str(tmp_path))
+        return header + _patch_ifd0_size(tmp_path.read_bytes(), size)
+    except GLib.Error:
+        return block
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def with_credits(

@@ -59,6 +59,18 @@ def parse_aspect(label: str) -> float | None:
         return None
 
 
+def parse_color(color: str) -> tuple[int, int, int]:
+    """An RRGGBB or named color as 8-bit RGB."""
+    rgba = Gdk.RGBA()
+    if not rgba.parse(color):
+        rgba.parse("#ffffff")
+    return (
+        round(rgba.red * 255),
+        round(rgba.green * 255),
+        round(rgba.blue * 255),
+    )
+
+
 def add_border(
     pixbuf: Any, percent: float, color: str, aspect: float | None = None
 ) -> Any:
@@ -74,9 +86,7 @@ def add_border(
             total_h = round(total_w / aspect)
     if (total_w, total_h) == (w, h):
         return pixbuf
-    rgba = Gdk.RGBA()
-    if not rgba.parse(color):
-        rgba.parse("#ffffff")
+    red, green, blue = parse_color(color)
     framed = GdkPixbuf.Pixbuf.new(
         GdkPixbuf.Colorspace.RGB,
         pixbuf.get_has_alpha(),
@@ -84,12 +94,7 @@ def add_border(
         total_w,
         total_h,
     )
-    framed.fill(
-        (round(rgba.red * 255) << 24)
-        | (round(rgba.green * 255) << 16)
-        | (round(rgba.blue * 255) << 8)
-        | 0xFF
-    )
+    framed.fill((red << 24) | (green << 16) | (blue << 8) | 0xFF)
     pixbuf.copy_area(
         0, 0, w, h, framed, (total_w - w) // 2, (total_h - h) // 2
     )

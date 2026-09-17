@@ -120,9 +120,8 @@
               </object>
             </child>
             <child>
-              <object class="AdwSwitchRow" id="jxl_row">
-                <property name="title">Export as JPEG XL</property>
-                <property name="subtitle">Losslessly repack the JPEG output into a smaller .jxl</property>
+              <object class="AdwComboRow" id="format_row">
+                <property name="title">Export format</property>
               </object>
             </child>
             <child>

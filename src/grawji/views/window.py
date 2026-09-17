@@ -248,6 +248,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._single_export = SingleExportController(
             parent=self,
             worker=self._worker,
+            session=self._session,
             settings=self._settings,
             save_settings=self._save_settings,
             get_recipe=self.recipe_panel.get_recipe,
@@ -255,8 +256,8 @@ class MainWindow(Adw.ApplicationWindow):
             get_current_raf=(
                 lambda: str(self._raf_path) if self._raf_path else None
             ),
-            base_decode=self.preview_view.pixbuf_from_jpeg,
             base_identity=self.preview_view.geometry_is_identity,
+            get_crop=lambda: self.preview_view.crop_rotate,
             set_busy=self._set_busy,
             on_error=self._on_error,
             on_status_link=self.preview_view.set_status_link,
@@ -1238,7 +1239,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
         dialog = PreferencesDialog(
-            settings=self._settings, on_change=self._on_settings_changed
+            settings=self._settings,
+            on_change=self._on_settings_changed,
+            capabilities=self._current_capabilities(),
         )
         dialogs.fit_dialog(dialog, self, height_fraction=0.8)
         dialog.present(self)

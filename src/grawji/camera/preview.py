@@ -1,4 +1,4 @@
-"""Preview pipeline - run camera ops off the GTK main thread."""
+"""Preview pipeline."""
 
 from __future__ import annotations
 
@@ -91,13 +91,16 @@ class CameraWorker:
         recipe: Recipe,
         *,
         full_resolution: bool,
+        file_type: str = "jpeg",
         on_done: OnDone | None = None,
         on_error: OnError | None = None,
     ) -> None:
         """Queue a render; coalesces with a not-yet-started render."""
         self._submit(
             lambda: self._session.render(
-                recipe, full_resolution=full_resolution
+                recipe,
+                full_resolution=full_resolution,
+                file_type=file_type,
             ),
             on_done,
             on_error,

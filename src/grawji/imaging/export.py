@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,17 +18,26 @@ gi.require_version("Adw", "1")
 from gi.repository import Gio
 
 from grawji import sidecar
-from grawji.imaging import imagemeta
+from grawji.camera.capabilities import Capabilities
+from grawji.crop import CropRotate
+from grawji.imaging import heif, heif_codec, imagemeta, render16
 from grawji.imaging.render import (
     add_border,
     bake_pixbuf,
     parse_aspect,
+    parse_color,
     scale_to_edge,
 )
+from grawji.recipe import Recipe
 from grawji.settings import Settings
 from grawji.views.preview_view import oriented_pixbuf
 
 SetBusy = Callable[..., None]
+
+
+def baked_pixbuf(jpeg: bytes, *, crop: CropRotate) -> Any:
+    """Decode camera bytes and bake a geometry into them."""
+    return bake_pixbuf(oriented_pixbuf(jpeg), crop)
 
 
 def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
@@ -73,14 +83,74 @@ def with_border(
     return lambda jpeg: add_border(decode(jpeg), percent, color, aspect)
 
 
+# Export formats, in the order the preferences list them.
+FORMATS = ("jpeg", "jxl", "heif")
+# Every JPEG ends with an end-of-image marker.
+_JPEG_END = b"\xff\xd9"
+_SUFFIXES = {"jpeg": ".jpg", "jxl": ".jxl", "heif": ".heif"}
+
+
 def jxl_available() -> bool:
     """Whether the cjxl tool for JPEG XL exports is installed."""
     return shutil.which("cjxl") is not None
 
 
-def jxl_wanted(settings: Settings) -> bool:
-    """Whether exports should be written as JPEG XL right now."""
-    return settings.export_jxl and jxl_available()
+def heif_available() -> bool:
+    """Whether HEIF exports can be written on this system."""
+    return heif_codec.available()
+
+
+def available_formats(
+    capabilities: Capabilities | None = None,
+) -> tuple[str, ...]:
+    """The export formats that would actually work right now."""
+    usable = ["jpeg"]
+    if jxl_available():
+        usable.append("jxl")
+    body_can_heif = capabilities is None or capabilities.has_heif
+    if heif_available() and body_can_heif:
+        usable.append("heif")
+    return tuple(usable)
+
+
+def missing_tools(formats: tuple[str, ...]) -> tuple[str, ...]:
+    """Names of the tools that would add a format to formats."""
+    missing = []
+    if "jxl" not in formats and not jxl_available():
+        missing.append("cjxl")
+    if "heif" not in formats and not heif_codec.available():
+        missing.append("libheif with an HEVC encoder")
+    return tuple(missing)
+
+
+def export_format(
+    settings: Settings, capabilities: Capabilities | None = None
+) -> str:
+    """The format exports should be written in right now."""
+    fmt = settings.export_format
+    return fmt if fmt in available_formats(capabilities) else "jpeg"
+
+
+def camera_file_type(fmt: str) -> str:
+    """The conversion output format the camera must render for fmt."""
+    return "heif" if fmt == "heif" else "jpeg"
+
+
+def recipe_for_format(fmt: str, recipe: Recipe) -> tuple[Recipe, str]:
+    """The recipe the camera can render in this format, and what it lost."""
+    if fmt == "heif" and recipe.clarity:
+        return (
+            replace(recipe, clarity=0),
+            "Clarity is not available in HEIF, exported without it.",
+        )
+    return recipe, ""
+
+
+def delivered_format(data: bytes, fmt: str) -> str:
+    """The format the bytes really are."""
+    if fmt == "heif" and not heif.is_heif(data):
+        return "jpeg"
+    return fmt
 
 
 def repack_jxl(jpeg: bytes, path: str) -> None:
@@ -104,28 +174,77 @@ def repack_jxl(jpeg: bytes, path: str) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
+def _check_complete(data: bytes, fmt: str) -> None:
+    """Refuse a render the camera did not finish sending."""
+    whole = (
+        heif.is_complete(data) if fmt == "heif" else data.endswith(_JPEG_END)
+    )
+    if not whole:
+        raise OSError(
+            f"the camera's {fmt.upper()} arrived incomplete "
+            f"({len(data)} bytes), so the export was not written. "
+            "Try it again."
+        )
+
+
+def _heif_with_credits(
+    data: bytes, *, artist: str, rights: str, comment: str
+) -> bytes:
+    """Stamp the export credits into a HEIF, leaving its pixels alone."""
+    if not (artist or rights or comment):
+        return data
+    block = heif.exif_block(data)
+    if block is None:
+        return data
+    stamped = imagemeta.stamp_exif_block(
+        block, artist=artist, rights=rights, comment=comment
+    )
+    return heif.replace_exif(data, stamped) or data
+
+
 def write_passthrough(
-    jpeg: bytes,
+    data: bytes,
     path: str,
     *,
     artist: str = "",
     rights: str = "",
     comment: str = "",
-    jxl: bool = False,
+    fmt: str = "jpeg",
 ) -> None:
-    """Write the camera's own JPEG bytes, credits stamped, no re-encode."""
-    data = imagemeta.with_credits(
-        jpeg, artist=artist, rights=rights, comment=comment
+    """Write the camera's own bytes, credits stamped, no re-encode."""
+    _check_complete(data, fmt)
+    if fmt == "heif":
+        Path(path).write_bytes(
+            _heif_with_credits(
+                data, artist=artist, rights=rights, comment=comment
+            )
+        )
+        return
+    stamped = imagemeta.with_credits(
+        data, artist=artist, rights=rights, comment=comment
     )
-    if jxl:
-        repack_jxl(data, path)
+    if fmt == "jxl":
+        repack_jxl(stamped, path)
     else:
-        Path(path).write_bytes(data)
+        Path(path).write_bytes(stamped)
 
 
-def export_basename(raf_path: Path | str, *, jxl: bool = False) -> str:
+def format_suffix(fmt: str) -> str:
+    """The file extension for an export format."""
+    return _SUFFIXES.get(fmt, ".jpg")
+
+
+def export_basename(raf_path: Path | str, *, fmt: str = "jpeg") -> str:
     """Build an export filename from the RAF stem."""
-    return f"{Path(raf_path).stem}.{'jxl' if jxl else 'jpg'}"
+    return f"{Path(raf_path).stem}{format_suffix(fmt)}"
+
+
+def corrected_path(path: str, fmt: str) -> str:
+    """Repoint an export path at the format that was really produced."""
+    suffix = format_suffix(fmt)
+    if Path(path).suffix.lower() == suffix:
+        return path
+    return str(Path(path).with_suffix(suffix))
 
 
 def initial_folder(path: str) -> Gio.File | None:
@@ -133,6 +252,71 @@ def initial_folder(path: str) -> Gio.File | None:
     if path and Path(path).is_dir():
         return Gio.File.new_for_path(path)
     return None
+
+
+@dataclass(frozen=True)
+class Geometry:
+    """Everything an export does to the camera's pixels."""
+
+    crop: CropRotate
+    max_edge: int = 0
+    border_percent: float = 0.0
+    border_color: str = "#ffffff"
+    border_aspect: float | None = None
+
+
+def geometry_for(crop: CropRotate, settings: Settings) -> Geometry:
+    """Collect the geometry an export should apply."""
+    framing = framing_active(settings)
+    return Geometry(
+        crop=crop,
+        max_edge=settings.export_max_edge,
+        border_percent=(settings.export_border_percent if framing else 0.0),
+        border_color=settings.export_border_color,
+        border_aspect=(
+            parse_aspect(settings.export_border_aspect) if framing else None
+        ),
+    )
+
+
+def write_heif(  # noqa: PLR0913
+    data: bytes,
+    path: str,
+    *,
+    quality: int,
+    geometry: Geometry,
+    artist: str = "",
+    rights: str = "",
+    comment: str = "",
+) -> None:
+    """Re-encode an edited camera HEIF, keeping its depth and metadata."""
+    _check_complete(data, "heif")
+    image = heif_codec.decode(data)
+    if image is None:
+        raise heif_codec.HeifError("libheif is not available to decode HEIF")
+    samples = render16.bake(render16.as_array(image), geometry.crop)
+    samples = render16.scale_to_edge(samples, geometry.max_edge)
+    samples = render16.add_border(
+        samples,
+        geometry.border_percent,
+        render16.scale_color(parse_color(geometry.border_color), image.bits),
+        geometry.border_aspect,
+    )
+    # Trim before the metadata: the encoder pads an odd edge, so the
+    # trimmed shape is the one the file will really have.
+    samples = render16.trim_even(samples)
+    exif = heif.exif_block(data)
+    if exif:
+        exif = imagemeta.stamp_exif_block(
+            exif,
+            artist=artist,
+            rights=rights,
+            comment=comment,
+            size=(samples.shape[1], samples.shape[0]),
+        )
+    heif_codec.encode(
+        samples, path, bits=image.bits, quality=quality, exif=exif
+    )
 
 
 def write_jpeg(  # noqa: PLR0913
@@ -144,20 +328,23 @@ def write_jpeg(  # noqa: PLR0913
     artist: str = "",
     rights: str = "",
     comment: str = "",
-    jxl: bool = False,
+    fmt: str = "jpeg",
+    geometry: Geometry | None = None,
 ) -> None:
-    """Write jpeg to path with orientation and rotation baked in.
-
-    decode turns the camera JPEG into the pixbuf to encode (the caller
-    supplies it so the preview's manual rotation is applied). Encoding
-    and the EXIF transplant happen on a temp file first, then the
-    finished bytes are written to the chosen path in one go: that path
-    may be an XDG document-portal proxy (Flatpak), which exiv2 cannot
-    rewrite in place - doing so leaves a 0-byte file. With jxl the
-    finished JPEG is losslessly repacked into a .jxl instead.
-
-    Raises GLib.Error or OSError on failure.
-    """
+    """Write jpeg to path with orientation and rotation baked in."""
+    if fmt == "heif":
+        if geometry is None:
+            raise ValueError("a HEIF export needs its geometry")
+        write_heif(
+            jpeg,
+            path,
+            quality=quality,
+            geometry=geometry,
+            artist=artist,
+            rights=rights,
+            comment=comment,
+        )
+        return
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = tmp.name
     try:
@@ -166,9 +353,14 @@ def write_jpeg(  # noqa: PLR0913
         # GdkPixbuf re-encoding drops all metadata, so copy the camera's
         # EXIF back on (orientation is now baked into the pixels).
         imagemeta.copy_exif(
-            jpeg, tmp_path, artist=artist, rights=rights, comment=comment
+            jpeg,
+            tmp_path,
+            artist=artist,
+            rights=rights,
+            comment=comment,
+            size=(pixbuf.get_width(), pixbuf.get_height()),
         )
-        if jxl:
+        if fmt == "jxl":
             repack_jxl(Path(tmp_path).read_bytes(), path)
         else:
             Path(path).write_bytes(Path(tmp_path).read_bytes())
