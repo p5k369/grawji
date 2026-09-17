@@ -1,4 +1,4 @@
-"""Pixel baking for preview and export: orientation, geometry, framing."""
+"""Pixel baking for preview and export."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from typing import Any
 
 import cairo
 import gi
+import numpy as np
+from numpy.typing import NDArray
 
 gi.require_version("Gdk", "4.0")
 
@@ -36,18 +38,21 @@ def gray_rows(pixbuf: Any, target: int = _GRAY_TARGET) -> list[list[int]]:
         pixbuf = pixbuf.scale_simple(
             width, height, GdkPixbuf.InterpType.BILINEAR
         )
-    data = pixbuf.get_pixels()
-    stride = pixbuf.get_rowstride()
     channels = pixbuf.get_n_channels()
-    return [
-        [
-            data[y * stride + x * channels]
-            + data[y * stride + x * channels + 1]
-            + data[y * stride + x * channels + 2]
-            for x in range(width)
-        ]
-        for y in range(height)
-    ]
+    rows = pixel_rows(pixbuf)
+    rgb = rows[:, : width * channels].reshape(height, width, channels)
+    gray = rgb[:, :, :3].sum(axis=2, dtype=np.int32)
+    return [row.tolist() for row in gray]
+
+
+def pixel_rows(pixbuf: Any) -> NDArray[np.uint8]:
+    """A pixbuf's bytes as a height by rowstride array."""
+    height, stride = pixbuf.get_height(), pixbuf.get_rowstride()
+    pixels = np.frombuffer(pixbuf.get_pixels(), dtype=np.uint8)
+    missing = height * stride - pixels.size
+    if missing > 0:
+        pixels = np.concatenate((pixels, np.zeros(missing, dtype=np.uint8)))
+    return pixels[: height * stride].reshape(height, stride)
 
 
 def parse_aspect(label: str) -> float | None:
