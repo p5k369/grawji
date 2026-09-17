@@ -88,7 +88,7 @@ class Settings:
             writes nothing.
         export_provenance: Record the applied recipe's name in the
             exported JPEG's EXIF user comment.
-        export_jxl: Write exports as JPEG XL instead of JPEG.
+        export_format: Output format for exports, "jpeg", "jxl" or "heif".
     """
 
     open_recipe: str = FROM_IMAGE
@@ -120,7 +120,7 @@ class Settings:
     export_artist: str = ""
     export_copyright: str = ""
     export_provenance: bool = True
-    export_jxl: bool = False
+    export_format: str = "jpeg"
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict for JSON storage."""
@@ -130,6 +130,8 @@ class Settings:
     def from_dict(cls, data: dict[str, object]) -> Settings:
         """Build settings from a stored dict, ignoring unknown keys."""
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
+        if "export_format" not in known and data.get("export_jxl"):
+            known["export_format"] = "jxl"
         return cls(**known)  # type: ignore[arg-type]
 
 

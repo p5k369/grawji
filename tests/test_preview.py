@@ -1,4 +1,4 @@
-"""Tests for the CameraWorker threading/coalescing layer."""
+"""Tests for the CameraWorker layer."""
 
 import threading
 
@@ -7,10 +7,10 @@ from grawji.recipe import Recipe
 
 
 def notify(event, sink=None):
-    """Callback that records the value (if a sink is given) and signals."""
+    """Callback that records the value and signals."""
 
     def callback(value=None):
-        """Record the value (if a sink is given) and set the event."""
+        """Record the value and set the event."""
         if sink is not None:
             sink.append(value)
         event.set()
@@ -19,17 +19,18 @@ def notify(event, sink=None):
 
 
 class FakeSession:
-    """A CameraSession stand-in; render can be gated to test ordering."""
+    """A CameraSession stand-in."""
 
     def __init__(self):
         """Start with empty logs and no gate or forced failure."""
         self.opened = []
         self.rendered = []
+        self.file_types = []
         self.closed = False
-        self.gate = None  # optional Event to block inside render()
+        self.gate = None
         self.render_started = threading.Event()
         self.fail_render = False
-        self.open_gate = None  # optional Event to block inside open()
+        self.open_gate = None
         self.open_started = threading.Event()
 
     def open(self, raf_path):
@@ -39,13 +40,14 @@ class FakeSession:
             self.open_gate.wait(timeout=5)
         self.opened.append(raf_path)
 
-    def render(self, recipe, *, full_resolution):
+    def render(self, recipe, *, full_resolution, file_type="jpeg"):
         """Signal start, optionally block on the gate, then record/return."""
         self.render_started.set()
         if self.gate is not None:
             self.gate.wait(timeout=5)
         if self.fail_render:
             raise RuntimeError("render boom")
+        self.file_types.append(file_type)
         self.rendered.append((recipe.film_simulation, full_resolution))
         return b"JPEG:" + recipe.film_simulation.encode()
 
@@ -71,10 +73,10 @@ def test_open_then_render_delivers_result():
     assert done.wait(timeout=5)
     worker.stop()
 
-    assert sess.opened == ["/x.RAF"]  # open never coalesced away
+    assert sess.opened == ["/x.RAF"]
     assert sess.rendered == [("Velvia", False)]
     assert results == [b"JPEG:Velvia"]
-    assert sess.closed  # stop() closed the session
+    assert sess.closed
 
 
 def test_render_coalesces_pending_render():
@@ -114,17 +116,17 @@ def test_open_coalesces_pending_open():
     worker = CameraWorker(sess)
     worker.start()
 
-    worker.open("/a.RAF")  # starts, blocks on the gate
+    worker.open("/a.RAF")
     assert sess.open_started.wait(timeout=5)
 
     worker.open("/b.RAF")  # queued
-    worker.open("/c.RAF", on_done=notify(done))  # replaces /b.RAF
+    worker.open("/c.RAF", on_done=notify(done))
 
     sess.open_gate.set()
     assert done.wait(timeout=5)
     worker.stop()
 
-    assert sess.opened == ["/a.RAF", "/c.RAF"]  # /b.RAF coalesced away
+    assert sess.opened == ["/a.RAF", "/c.RAF"]
 
 
 def test_render_does_not_coalesce_a_pending_open():
@@ -136,21 +138,21 @@ def test_render_does_not_coalesce_a_pending_open():
     worker = CameraWorker(sess)
     worker.start()
 
-    worker.open("/a.RAF")  # starts, blocks on the gate
+    worker.open("/a.RAF")
     assert sess.open_started.wait(timeout=5)
 
-    worker.open("/b.RAF")  # queued open
+    worker.open("/b.RAF")
     worker.render(
         Recipe(film_simulation="Velvia"),
         full_resolution=False,
         on_done=notify(done),
-    )  # must NOT replace the queued open
+    )
 
     sess.open_gate.set()
     assert done.wait(timeout=5)
     worker.stop()
 
-    assert sess.opened == ["/a.RAF", "/b.RAF"]  # open survived
+    assert sess.opened == ["/a.RAF", "/b.RAF"]
     assert sess.rendered == [("Velvia", False)]
 
 
@@ -201,4 +203,4 @@ def test_context_manager_starts_and_closes():
         assert done.wait(timeout=5)
 
     assert sess.opened == ["/y.RAF"]
-    assert sess.closed  # __exit__ -> stop() -> close()
+    assert sess.closed

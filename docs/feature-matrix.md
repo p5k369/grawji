@@ -8,11 +8,13 @@ all X-A/X-T100/X-T200 models) have no USB RAW conversion at all and can never
 work with grawji.
 
 Legend: `Y` available · `fw` added later via firmware · `-` absent.
+In the `Output` column `-` means the body writes JPEG only.
 Every cell assumes the body's **latest firmware**, features delivered by
 updates count as present (and `grawji.capabilities` assumes the same).
-In-camera availability is the best proxy for what the USB engine honours,
-but they are not the same thing,  the **USB-verified** section below is the
-ground truth I have measured.
+In-camera availability is the best proxy for what the USB engine honors,
+but they are not the same thing. A `✓` in `Verified` marks a body whose row has
+been checked over USB, by me on the hardware or through a user's report.
+Every other row is read from the manuals and the capability database.
 
 **This table is code:** `grawji.capabilities` encodes it as a per-model
 tier table keyed on the RAF's EXIF model (the RAF is provably from the
@@ -21,47 +23,54 @@ and the live profile can only narrow a row, never widen it.
 
 ## X series
 
-| Body | Year | Processor | Grain | Grain size | Color Chrome | FX Blue | Clarity | Smooth skin | 0.5-tone | Banks | Newest film sim |
-|------|------|-----------|-------|------------|--------------|---------|---------|-------------|----------|-------|-----------------|
-| X-Pro2 | 2016 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros |
-| X-T2 | 2016 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros |
-| X100F | 2017 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros |
-| X-T20 | 2017 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros |
-| X-E3 | 2017 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros |
-| X-H1 | 2018 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Eterna |
-| X-T3 | 2018 | X-Processor 4 | Y | - | Y | - | - | - | - | 7 | Eterna |
-| X-T30 | 2019 | X-Processor 4 | Y | - | Y | - | - | - | - | 7 | Eterna |
-| X-Pro3 | 2019 | X-Processor 4 | Y | Y | Y | Y | Y | - | - | 7 | Classic Neg |
-| X100V | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | - | 7 | Classic Neg |
-| X-T4 | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass |
-| X-S10 | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 4 | Eterna Bleach Bypass |
-| X-E4 | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass |
-| X-T30 II | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass |
-| X-H2S | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 7 | Reala Ace (fw) |
-| X-H2 | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) |
-| X-T5 | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) |
-| X-S20 | 2023 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 4 | Reala Ace (fw) |
-| X100VI | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
-| X-T50 | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
-| X-M5 * | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 4 | Reala Ace |
-| X-E5 | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
-| X-T30 III * | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 7 | Reala Ace |
+| Body | Year | Processor | Grain | Grain size | Color Chrome | FX Blue | Clarity | Smooth skin | 0.5-tone | Banks | Newest film sim | Output | Verified |
+|------|------|-----------|-------|------------|--------------|---------|---------|-------------|----------|-------|-----------------|--------|----------|
+| X-Pro2 | 2016 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros | - |   |
+| X-T2 | 2016 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros | - |   |
+| X100F | 2017 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros | - | ✓ |
+| X-T20 | 2017 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros | - |   |
+| X-E3 | 2017 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Acros | - |   |
+| X-H1 | 2018 | X-Processor Pro | Y | - | - | - | - | - | - | 7 | Eterna | - |   |
+| X-T3 | 2018 | X-Processor 4 | Y | - | Y | - | - | - | - | 7 | Eterna | - | ✓ |
+| X-T30 | 2019 | X-Processor 4 | Y | - | Y | - | - | - | - | 7 | Eterna | - |   |
+| X-Pro3 | 2019 | X-Processor 4 | Y | Y | Y | Y | Y | - | - | 7 | Classic Neg | TIFF 8/16 |   |
+| X100V | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | - | 7 | Classic Neg | - |   |
+| X-T4 | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass | TIFF 8/16 |   |
+| X-S10 | 2020 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 4 | Eterna Bleach Bypass | - |   |
+| X-E4 | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass | - |   |
+| X-T30 II | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | - | Y | 7 | Eterna Bleach Bypass | - |   |
+| X-H2S | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 7 | Reala Ace (fw) | TIFF 8/16, HEIF |   |
+| X-H2 | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) | TIFF 8/16, HEIF |   |
+| X-T5 | 2022 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace (fw) | TIFF 8/16, HEIF |   |
+| X-S20 | 2023 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 4 | Reala Ace (fw) | TIFF 8/16, HEIF |   |
+| X100VI | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace | TIFF 8/16, HEIF |   |
+| X-T50 | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 + 3 ** | Reala Ace | TIFF 8/16, HEIF |   |
+| X-M5 * | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 4 + 3 ** | Reala Ace | TIFF 8/16, HEIF |   |
+| X-E5 | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 + 3 ** | Reala Ace | TIFF 8/16, HEIF | ✓ |
+| X-T30 III * | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | - | Y | 7 | Reala Ace | TIFF 8/16, HEIF |   |
 
 `*` X-M5 and X-T30 III pair the X-Processor 5 with the older X-Trans 4
 sensor. Feature set follows the processor.
 
+`**` Three of these are the FS1 to FS3 positions on the film simulation
+dial, which only these bodies have. They are set in IMAGE QUALITY
+SETTING > FILM SIMULATION DIAL SETTING, not as custom banks, and hold a
+film simulation with its effects. grawji writes them on the **X-E5**
+only: they live at body-specific offsets in the settings blob, and that
+is the one body whose layout is mapped and hardware-verified.
+
 ## GFX series
 
-| Body | Year | Processor | Grain | Grain size | Color Chrome | FX Blue | Clarity | Smooth skin | 0.5-tone | Banks | Newest film sim |
-|------|------|-----------|-------|------------|--------------|---------|---------|-------------|----------|-------|-----------------|
-| GFX 50S | 2017 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Classic Neg (fw) |
-| GFX 50R | 2018 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Classic Neg (fw) |
-| GFX100 | 2019 | X-Processor 4 | Y | Y | Y | fw | Y | Y | Y | 7 | Nostalgic Neg (fw) |
-| GFX100S | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | Y | Y | 6 | Nostalgic Neg (debut) |
-| GFX 50S II | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | Y | Y | 6 | Nostalgic Neg |
-| GFX100 II | 2023 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 6 | Reala Ace (debut) |
-| GFX100S II | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 6 | Reala Ace |
-| GFX100RF | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace |
+| Body | Year | Processor | Grain | Grain size | Color Chrome | FX Blue | Clarity | Smooth skin | 0.5-tone | Banks | Newest film sim | Output | Verified |
+|------|------|-----------|-------|------------|--------------|---------|---------|-------------|----------|-------|-----------------|--------|----------|
+| GFX 50S | 2017 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Classic Neg (fw) | TIFF 8 |   |
+| GFX 50R | 2018 | X-Processor Pro | Y | - | Y | - | - | fw | - | 7 | Classic Neg (fw) | TIFF 8 |   |
+| GFX100 | 2019 | X-Processor 4 | Y | Y | Y | fw | Y | Y | Y | 7 | Nostalgic Neg (fw) | TIFF 8/16 |   |
+| GFX100S | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | Y | Y | 6 | Nostalgic Neg (debut) | TIFF 8/16 |   |
+| GFX 50S II | 2021 | X-Processor 4 | Y | Y | Y | Y | Y | Y | Y | 6 | Nostalgic Neg | TIFF 8/16 |   |
+| GFX100 II | 2023 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 6 | Reala Ace (debut) | TIFF 8/16, HEIF |   |
+| GFX100S II | 2024 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 6 | Reala Ace | TIFF 8/16, HEIF |   |
+| GFX100RF | 2025 | X-Processor 5 | Y | Y | Y | Y | Y | Y | Y | 7 | Reala Ace | TIFF 8/16, HEIF |   |
 
 ## Notes on the feature groups
 
@@ -84,17 +93,6 @@ sensor. Feature set follows the processor.
   Verified against every body's manual, not readable from the camera.
 - **GFX 50S/50R firmware** (v4.00 / v2.00, 2020) added Eterna, Classic
   Neg and Smooth Skin in one bundle.
-
-## USB-verified ground truth (grawji hardware findings)
-
-In-camera menus tell you what the *body* offers, what the *USB conversion
-engine* honors in the d185 profile can differ. Measured so far:
-
-| Body | Profile | IOPCode | Verified via USB                                                                                                                                                            |
-|------|---------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| X100F | 601 B, 22 slots | X-Processor Pro | Core params. High-index effect slots absent (Color Chrome @549 present but inert. Body predates the feature).                                                               |
-| X-T3 | 605 B, 23 slots | 0xff159501 (X-Processor 4) | Core params + Color Chrome @549 (render-verified). No Clarity/FX Blue/smooth-skin slots.                                                                                    |
-| X-E5 | 629 B, 29 slots | 0xff179504 (X-Processor 5) | Everything: Color Chrome @549, grain effect+size combined @545 (Off=1, W/S=2, S/S=3, W/L=4, S/L=5), smooth skin @605, FX Blue @609, Clarity @617 (value*10), 0.5-step tone. |
 
 ## Sources
 

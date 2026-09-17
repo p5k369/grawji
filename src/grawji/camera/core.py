@@ -72,6 +72,9 @@ _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 _DR_PERCENTAGES = {"DR100": 100, "DR200": 200, "DR400": 400}
 _DR_NAMES = {v: k for k, v in _DR_PERCENTAGES.items()}
 
+# HEIF is hardware-verified on the X-E5 (10-bit 4:2:2, HEVC)
+FILE_TYPE_CODES = {"heif": 18}
+
 
 def shot_dynamic_range(base: bytes) -> str | None:
     """The dynamic range the RAF was captured at."""
@@ -352,6 +355,17 @@ def apply_recipe(base: bytes, recipe: Recipe) -> bytes:
     return bytes(out)
 
 
+def apply_file_type(profile: bytes, file_type: str) -> bytes:
+    """Patch the output format into a profile."""
+    code = FILE_TYPE_CODES.get(file_type)
+    offset = _PARAM_OFFSETS["FileType"]
+    if code is None or offset + 4 > len(profile):
+        return profile
+    out = bytearray(profile)
+    struct.pack_into("<I", out, offset, code)
+    return bytes(out)
+
+
 def _enum_name(enum_cls: Any, value: int, fallback: str) -> str:
     """Return the member name for an enum value, or fallback."""
     try:
@@ -554,7 +568,13 @@ class CameraSession:
         except Exception:
             return None
 
-    def render(self, recipe: Recipe, *, full_resolution: bool) -> bytes:
+    def render(
+        self,
+        recipe: Recipe,
+        *,
+        full_resolution: bool,
+        file_type: str = "jpeg",
+    ) -> bytes:
         """Apply a recipe and render the open RAF (fast; call often).
 
         Does NOT re-send the RAF - the session and uploaded RAF stay
@@ -564,9 +584,11 @@ class CameraSession:
             recipe: The recipe to apply.
             full_resolution: False for a fast preview (ignores
                 profile size), True for a full-resolution export.
+            file_type: Output format, "jpeg" or a key of FILE_TYPE_CODES.
 
         Returns:
-            The rendered JPEG bytes.
+            The rendered image bytes, JPEG unless another file type was
+            asked for and the body supports it.
 
         Raises:
             SessionStateError: If no RAF is open.
@@ -574,7 +596,9 @@ class CameraSession:
         with self._lock:
             if self._camera is None or self._base_profile is None:
                 raise SessionStateError("no RAF open; call open() first")
-            profile = apply_recipe(self._base_profile, recipe)
+            profile = apply_file_type(
+                apply_recipe(self._base_profile, recipe), file_type
+            )
             self._camera.set_profile(profile)
             self._camera.trigger_conversion(full_resolution=full_resolution)
             return cast("bytes", self._camera.wait_for_result(self._timeout))

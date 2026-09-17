@@ -107,6 +107,8 @@ class Capabilities:
         film_simulations: The film simulations the body offers, from
             rawji's enum vocabulary.
         num_bank_slots: How many custom banks the body has.
+        has_heif: Whether the body can convert to HEIF over USB. That
+            needs the HEVC encoder, which arrived with XProcessor 5.
 
     The field defaults are the X-Pro2 baseline.
     """
@@ -122,6 +124,7 @@ class Capabilities:
     has_smooth_skin: bool = False
     has_mono_wc: bool = False
     has_mono_mg: bool = False
+    has_heif: bool = False
     mono_max: int = 0
     film_simulations: tuple[str, ...] = _SIMS_GEN3
     num_bank_slots: int = 7
@@ -158,6 +161,7 @@ _GEN5 = replace(
     has_smooth_skin=True,
     mono_max=18,
     film_simulations=_SIMS_ALL,
+    has_heif=True,
 )
 _GFX_PRO = Capabilities(
     has_color_chrome=True,

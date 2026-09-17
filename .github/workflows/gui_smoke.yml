@@ -31,6 +31,7 @@ jobs:
         # Same rawji commit as pyproject.toml (guarded by test_rawji_pin.py).
         .venv/bin/pip install "rawji @ git+https://github.com/pinpox/rawji@a702dc8254378974b86785e2654fe57d590fafe4"
         .venv/bin/pip install -e . --no-deps
+        .venv/bin/pip install numpy
         .venv/bin/pip install pytest pytest-xvfb \
           pytest-github-actions-annotate-failures
 

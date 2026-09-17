@@ -13,7 +13,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gtk
 
-from grawji.imaging.export import jxl_available
+from grawji.camera.capabilities import Capabilities
+from grawji.imaging.export import available_formats, missing_tools
 from grawji.settings import Settings
 
 _UI = (
@@ -23,6 +24,7 @@ _UI = (
 )
 _COLOR_SCHEMES = ["default", "light", "dark"]
 _DRAG_ACTIONS = ["move", "copy"]
+_FORMAT_LABELS = {"jpeg": "JPEG", "jxl": "JPEG XL", "heif": "HEIF"}
 
 
 def _split_aspect(label: str) -> tuple[str, bool]:
@@ -47,7 +49,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     jpeg_quality_scale = Gtk.Template.Child()
     glide_speed_scale = Gtk.Template.Child()
     drag_action_row = Gtk.Template.Child()
-    jxl_row = Gtk.Template.Child()
+    format_row = Gtk.Template.Child()
     max_edge_row = Gtk.Template.Child()
     artist_row = Gtk.Template.Child()
     copyright_row = Gtk.Template.Child()
@@ -59,13 +61,19 @@ class PreferencesDialog(Adw.PreferencesDialog):
     border_portrait_row = Gtk.Template.Child()
 
     def __init__(
-        self, *, settings: Settings, on_change: Callable[[], None]
+        self,
+        *,
+        settings: Settings,
+        on_change: Callable[[], None],
+        capabilities: Capabilities | None = None,
     ) -> None:
         """Create the dialog bound to settings.
 
         Args:
             settings: The settings object to read and update in place.
             on_change: Called after every edit so the caller can persist.
+            capabilities: The connected body's features, so a format it
+                cannot render is not offered.
         """
         super().__init__()
         self._settings = settings
@@ -82,11 +90,20 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.drag_action_row.set_selected(
             _DRAG_ACTIONS.index(drag) if drag in _DRAG_ACTIONS else 0
         )
-        available = jxl_available()
-        self.jxl_row.set_active(settings.export_jxl and available)
-        self.jxl_row.set_sensitive(available)
-        if not available:
-            self.jxl_row.set_subtitle("Needs the cjxl tool (libjxl)")
+        self._formats = available_formats(capabilities)
+        model = Gtk.StringList()
+        for fmt in self._formats:
+            model.append(_FORMAT_LABELS[fmt])
+        self.format_row.set_model(model)
+        chosen = settings.export_format
+        self.format_row.set_selected(
+            self._formats.index(chosen) if chosen in self._formats else 0
+        )
+        missing = missing_tools(self._formats)
+        if missing:
+            self.format_row.set_subtitle(
+                f"More formats need {' and '.join(missing)}"
+            )
         self.max_edge_row.set_value(settings.export_max_edge)
         self.artist_row.set_text(settings.export_artist)
         self.copyright_row.set_text(settings.export_copyright)
@@ -120,7 +137,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
         self.glide_speed_scale.connect("value-changed", self._on_edited)
         self.drag_action_row.connect("notify::selected", self._on_edited)
-        self.jxl_row.connect("notify::active", self._on_edited)
+        self.format_row.connect("notify::selected", self._on_edited)
         self.max_edge_row.connect("notify::value", self._on_edited)
         self.artist_row.connect("changed", self._on_edited)
         self.copyright_row.connect("changed", self._on_edited)
@@ -157,8 +174,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings.drag_action = _DRAG_ACTIONS[
             self.drag_action_row.get_selected()
         ]
-        if self.jxl_row.get_sensitive():
-            self._settings.export_jxl = self.jxl_row.get_active()
+        self._settings.export_format = self._formats[
+            self.format_row.get_selected()
+        ]
         self._settings.export_max_edge = int(self.max_edge_row.get_value())
         self._settings.export_artist = self.artist_row.get_text().strip()
         self._settings.export_copyright = self.copyright_row.get_text().strip()

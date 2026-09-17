@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -24,12 +24,19 @@ from grawji.camera.core import (
     recipe_from_profile,
 )
 from grawji.camera.preview import CameraWorker
+from grawji.crop import CropRotate
 from grawji.imaging.export import (
     SetBusy,
+    baked_pixbuf,
+    camera_file_type,
+    corrected_path,
+    delivered_format,
     export_basename,
+    export_format,
     framing_active,
+    geometry_for,
     initial_folder,
-    jxl_wanted,
+    recipe_for_format,
     resize_active,
     sidecar_decode,
     with_border,
@@ -37,10 +44,33 @@ from grawji.imaging.export import (
     write_jpeg,
     write_passthrough,
 )
+from grawji.imaging.heif_codec import HeifError
 from grawji.recipe import Recipe
 from grawji.settings import Settings
 from grawji.views.batch_export import BatchExportDialog
 from grawji.views.preview_view import oriented_pixbuf
+
+_LOG = logging.getLogger("grawji")
+
+
+@dataclass(frozen=True)
+class _ExportJob:
+    """What a single export needs, read before the worker starts."""
+
+    path: str
+    recipe: Recipe
+    crop: CropRotate
+    comment: str
+    wanted: str
+    identity: bool
+    dropped: str = ""
+
+
+_EXPORT_TITLES = {
+    "jpeg": "Export JPEG",
+    "jxl": "Export JPEG XL",
+    "heif": "Export HEIF",
+}
 
 
 class SingleExportController:
@@ -51,13 +81,14 @@ class SingleExportController:
         *,
         parent: Gtk.Widget,
         worker: CameraWorker,
+        session: CameraSession,
         settings: Settings,
         save_settings: Callable[[], None],
         get_recipe: Callable[[], Recipe],
         get_provenance: Callable[[], str],
         get_current_raf: Callable[[], str | None],
-        base_decode: Callable[[bytes], Any],
         base_identity: Callable[[], bool],
+        get_crop: Callable[[], CropRotate],
         set_busy: SetBusy,
         on_error: Callable[[Exception], None],
         on_status_link: Callable[[str, str], None],
@@ -67,41 +98,43 @@ class SingleExportController:
         Args:
             parent: The window the save dialog attaches to.
             worker: Queues the full-resolution render.
+            session: The open camera session the render runs on.
             settings: Live settings (quality, last export folder).
             save_settings: Persists settings after an edit.
             get_recipe: The recipe currently in the panel.
             get_provenance: A short description of the recipe/source
                 the export was made with.
             get_current_raf: The open RAF's path for the default name.
-            base_decode: Decodes the camera JPEG with the current
-                geometry baked in.
-            base_identity: Whether base_decode would change no pixels
-                right now.
+            base_identity: Whether the current geometry would change no
+                pixels.
+            get_crop: The geometry currently committed in the preview,
+                for the export paths that apply it to raw samples.
             set_busy: Toggles the busy spinner with a status line.
             on_error: Reports a camera error.
             on_status_link: Shows the clickable "Exported to" status.
         """
         self._parent = parent
         self._worker = worker
+        self._session = session
         self._settings = settings
         self._save_settings = save_settings
         self._get_recipe = get_recipe
         self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
-        self._base_decode = base_decode
         self._base_identity = base_identity
+        self._get_crop = get_crop
         self._set_busy = set_busy
         self._on_error = on_error
         self._on_status_link = on_status_link
 
     def begin(self) -> None:
         """Show a save dialog for a full-resolution export."""
-        jxl = jxl_wanted(self._settings)
+        fmt = export_format(self._settings)
         dialog = Gtk.FileDialog()
-        dialog.set_title("Export JPEG XL" if jxl else "Export JPEG")
+        dialog.set_title(_EXPORT_TITLES[fmt])
         dialog.set_initial_name(
             export_basename(
-                self._get_current_raf() or "grawji-export", jxl=jxl
+                self._get_current_raf() or "grawji-export", fmt=fmt
             )
         )
         start = initial_folder(self._settings.last_export_dir)
@@ -121,48 +154,83 @@ class SingleExportController:
         self._settings.last_export_dir = str(Path(path).parent)
         self._save_settings()
         self._set_busy(busy=True, status="Rendering full-resolution export…")
-        self._worker.render(
-            self._get_recipe(),
-            full_resolution=True,
-            on_done=partial(self._on_exported, path),
+        wanted = export_format(self._settings)
+        recipe, dropped = recipe_for_format(wanted, self._get_recipe())
+        if dropped:
+            _LOG.info("export: %s", dropped)
+        job = _ExportJob(
+            path=path,
+            recipe=recipe,
+            crop=self._get_crop(),
+            comment=self._get_provenance(),
+            wanted=wanted,
+            identity=self._base_identity(),
+            dropped=dropped,
+        )
+        self._worker.submit(
+            partial(self._render_and_write, job),
+            on_done=self._on_written,
             on_error=self._on_error,
         )
 
-    def _on_exported(self, path: str, jpeg: bytes) -> None:
-        """Save the exported JPEG with orientation and rotation baked in."""
+    def _render_and_write(self, job: _ExportJob) -> tuple[str, str, str]:
+        """Render and write the export."""
+        rendered = self._session.render(
+            job.recipe,
+            full_resolution=True,
+            file_type=camera_file_type(job.wanted),
+        )
+        # The body may have ignored a HEIF request and sent JPEG, in
+        # which case the file is named for what actually arrived.
+        fmt = delivered_format(rendered, job.wanted)
+        path = corrected_path(job.path, fmt)
         needs_pixels = (
-            not self._base_identity()
+            not job.identity
             or framing_active(self._settings)
             or resize_active(self._settings)
         )
-        try:
-            if not needs_pixels:
-                write_passthrough(
-                    jpeg,
-                    path,
-                    artist=self._settings.export_artist,
-                    rights=self._settings.export_copyright,
-                    comment=self._get_provenance(),
-                    jxl=jxl_wanted(self._settings),
-                )
-            else:
-                write_jpeg(
-                    jpeg,
-                    path,
-                    quality=self._settings.jpeg_quality,
-                    decode=with_border(
-                        with_max_edge(self._base_decode, self._settings),
-                        self._settings,
+        if not needs_pixels:
+            write_passthrough(
+                rendered,
+                path,
+                artist=self._settings.export_artist,
+                rights=self._settings.export_copyright,
+                comment=job.comment,
+                fmt=fmt,
+            )
+        else:
+            write_jpeg(
+                rendered,
+                path,
+                quality=self._settings.jpeg_quality,
+                decode=with_border(
+                    with_max_edge(
+                        partial(baked_pixbuf, crop=job.crop), self._settings
                     ),
-                    artist=self._settings.export_artist,
-                    rights=self._settings.export_copyright,
-                    comment=self._get_provenance(),
-                    jxl=jxl_wanted(self._settings),
-                )
-        except (GLib.Error, OSError) as exc:
-            self._set_busy(busy=False, status=f"Export failed: {exc}")
-            return
-        self._set_busy(busy=False, status="Exported.")
+                    self._settings,
+                ),
+                artist=self._settings.export_artist,
+                rights=self._settings.export_copyright,
+                comment=job.comment,
+                fmt=fmt,
+                geometry=geometry_for(job.crop, self._settings),
+            )
+        return path, fmt, job.dropped
+
+    def _on_written(self, written: tuple[str, str, str]) -> None:
+        """Report the finished export."""
+        path, fmt, dropped = written
+        wanted = export_format(self._settings)
+        if fmt != wanted:
+            self._set_busy(
+                busy=False,
+                status=(
+                    f"This body cannot render {wanted.upper()}, "
+                    "exported JPEG instead."
+                ),
+            )
+        else:
+            self._set_busy(busy=False, status=f"Exported. {dropped}".strip())
         self._on_status_link(f"Exported to {path}", path)
 
 
@@ -225,6 +293,7 @@ class BatchController:
         self._cancel: threading.Event | None = None
         self._pending: list[str] = []
         self._out_dir: str | None = None
+        self._dropped = ""
 
     def begin(self, paths: list[str] | None = None) -> str | None:
         """Start the flow with a folder pick."""
@@ -285,6 +354,13 @@ class BatchController:
         self._cancel = cancel
         self._set_busy(busy=True, status=f"Batch export: 0/{total}…")
 
+        recipe, dropped = recipe_for_format(
+            export_format(self._settings), recipe
+        )
+        if dropped:
+            _LOG.info("batch export: %s", dropped)
+        self._dropped = dropped
+
         def task() -> dict[str, int]:
             tally = {"exported": 0, "existing": 0, "foreign": 0, "failed": 0}
             for done, raf_file in enumerate(paths, start=1):
@@ -293,7 +369,9 @@ class BatchController:
                     break
                 out_path = Path(
                     out_dir,
-                    export_basename(raf_file, jxl=jxl_wanted(self._settings)),
+                    export_basename(
+                        raf_file, fmt=export_format(self._settings)
+                    ),
                 )
                 if not overwrite and out_path.exists():
                     tally["existing"] += 1
@@ -327,9 +405,11 @@ class BatchController:
         """Convert one RAF into out_path."""
         try:
             self._session.open(raf_file)
-            jpeg = self._session.render(
+            fmt = export_format(self._settings)
+            rendered = self._session.render(
                 replace(recipe, exposure=self._image_exposure(raf_file)),
                 full_resolution=True,
+                file_type=camera_file_type(fmt),
             )
         except ForeignRafError:
             if not skip_foreign:
@@ -346,28 +426,33 @@ class BatchController:
             decode = with_border(
                 with_max_edge(decode, self._settings), self._settings
             )
+        fmt = delivered_format(rendered, fmt)
+        out_path = Path(corrected_path(str(out_path), fmt))
         try:
             if decode is None:
                 write_passthrough(
-                    jpeg,
+                    rendered,
                     str(out_path),
                     artist=self._settings.export_artist,
                     rights=self._settings.export_copyright,
                     comment=comment,
-                    jxl=jxl_wanted(self._settings),
+                    fmt=fmt,
                 )
             else:
                 write_jpeg(
-                    jpeg,
+                    rendered,
                     str(out_path),
                     quality=self._settings.jpeg_quality,
                     decode=decode,
                     artist=self._settings.export_artist,
                     rights=self._settings.export_copyright,
                     comment=comment,
-                    jxl=jxl_wanted(self._settings),
+                    fmt=fmt,
+                    geometry=geometry_for(
+                        sidecar.load_crop(raf_file), self._settings
+                    ),
                 )
-        except (GLib.Error, OSError) as exc:
+        except (GLib.Error, OSError, HeifError) as exc:
             logging.getLogger("grawji").warning(
                 "batch export could not write %s: %s", out_path, exc
             )
@@ -409,6 +494,8 @@ class BatchController:
             parts.append(f"Skipped {tally['foreign']} from another camera.")
         if tally["failed"]:
             parts.append(f"{tally['failed']} failed.")
+        if self._dropped:
+            parts.append(self._dropped)
         summary = " ".join(parts)
         self._set_busy(busy=False, status=summary)
         if exported and self._out_dir and self._on_status_link is not None:
