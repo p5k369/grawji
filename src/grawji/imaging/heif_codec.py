@@ -2,8 +2,7 @@
 
 The runtime ships libheif but no binding for it, so the camera's 10-bit files
 have to reach the C library directly. ctypes is the price, and this module is
-where it is paid. Reading the container itself needs no library and lives in
-imaging.heif.
+where it is paid.
 """
 
 from __future__ import annotations
