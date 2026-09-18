@@ -136,8 +136,10 @@ def test_export_format_falls_back_without_the_tool(monkeypatch):
     """A format whose tool is missing degrades to plain JPEG."""
     settings = Settings()
     settings.export_format = "jxl"
+    module_export.jxl_available.cache_clear()
     monkeypatch.setattr(module_export.shutil, "which", lambda name: None)
     assert module_export.export_format(settings) == "jpeg"
+    module_export.jxl_available.cache_clear()
     monkeypatch.setattr(
         module_export.shutil, "which", lambda name: "/usr/bin/cjxl"
     )
@@ -145,6 +147,7 @@ def test_export_format_falls_back_without_the_tool(monkeypatch):
     settings.export_format = "heif"
     monkeypatch.setattr(module_export.heif_codec, "available", lambda: False)
     assert module_export.export_format(settings) == "jpeg"
+    module_export.jxl_available.cache_clear()
     monkeypatch.setattr(module_export.heif_codec, "available", lambda: True)
     assert module_export.export_format(settings) == "heif"
 

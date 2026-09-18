@@ -14,7 +14,11 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk
 
 from grawji.camera.capabilities import Capabilities
-from grawji.imaging.export import available_formats, missing_tools
+from grawji.imaging.export import (
+    available_formats,
+    missing_tools,
+    scales_quality,
+)
 from grawji.settings import Settings
 
 _UI = (
@@ -24,9 +28,19 @@ _UI = (
 )
 _COLOR_SCHEMES = ["default", "light", "dark"]
 _DRAG_ACTIONS = ["move", "copy"]
+# What the quality slider does, where it is not the obvious thing.
+# HEIF runs into the encoder's own ceiling well before the top of the
+# scale, and 100 in JPEG XL means mathematically lossless, which is a
+# different mode of operation rather than one more notch.
+_QUALITY_HINT = "Higher means a larger file"
+_QUALITY_HINTS = {
+    "jxl16": "100 writes a lossless file, several times larger",
+    "heif": "Higher means a larger file, with little gain above 85",
+}
 _FORMAT_LABELS = {
     "jpeg": "JPEG",
     "jxl": "JPEG XL",
+    "jxl16": "JPEG XL, 16 bit",
     "heif": "HEIF",
     "tiff8": "TIFF, 8 bit",
     "tiff16": "TIFF, 16 bit",
@@ -56,6 +70,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     glide_speed_scale = Gtk.Template.Child()
     drag_action_row = Gtk.Template.Child()
     format_row = Gtk.Template.Child()
+    quality_row = Gtk.Template.Child()
     max_edge_row = Gtk.Template.Child()
     artist_row = Gtk.Template.Child()
     copyright_row = Gtk.Template.Child()
@@ -105,6 +120,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.format_row.set_selected(
             self._formats.index(chosen) if chosen in self._formats else 0
         )
+        self._update_quality_row()
         missing = missing_tools(self._formats)
         if missing:
             self.format_row.set_subtitle(
@@ -144,6 +160,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.glide_speed_scale.connect("value-changed", self._on_edited)
         self.drag_action_row.connect("notify::selected", self._on_edited)
         self.format_row.connect("notify::selected", self._on_edited)
+        self.format_row.connect("notify::selected", self._on_format_changed)
         self.max_edge_row.connect("notify::value", self._on_edited)
         self.artist_row.connect("changed", self._on_edited)
         self.copyright_row.connect("changed", self._on_edited)
@@ -153,6 +170,19 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.border_color_button.connect("notify::rgba", self._on_edited)
         self.border_aspect_row.connect("notify::selected", self._on_edited)
         self.border_portrait_row.connect("notify::active", self._on_edited)
+
+    def _on_format_changed(self, *_args: object) -> None:
+        """Follow the format with the controls that depend on it."""
+        self._update_quality_row()
+
+    def _update_quality_row(self) -> None:
+        """Show the quality slider only where it changes anything."""
+        index = self.format_row.get_selected()
+        fmt = (
+            self._formats[index] if 0 <= index < len(self._formats) else "jpeg"
+        )
+        self.quality_row.set_visible(scales_quality(fmt))
+        self.quality_row.set_subtitle(_QUALITY_HINTS.get(fmt, _QUALITY_HINT))
 
     def _on_border_toggled(self, *_args: object) -> None:
         """Reveal the border controls whenever the switch turns on."""

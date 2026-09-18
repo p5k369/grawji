@@ -70,6 +70,7 @@ class _ExportJob:
 _EXPORT_TITLES = {
     "jpeg": "Export JPEG",
     "jxl": "Export JPEG XL",
+    "jxl16": "Export JPEG XL",
     "heif": "Export HEIF",
     "tiff8": "Export TIFF",
     "tiff16": "Export TIFF",
@@ -200,6 +201,7 @@ class SingleExportController:
                 rights=self._settings.export_copyright,
                 comment=job.comment,
                 fmt=fmt,
+                quality=self._settings.jpeg_quality,
             )
         else:
             write_jpeg(
@@ -357,9 +359,8 @@ class BatchController:
         self._cancel = cancel
         self._set_busy(busy=True, status=f"Batch export: 0/{total}…")
 
-        recipe, dropped = recipe_for_format(
-            export_format(self._settings), recipe
-        )
+        wanted = export_format(self._settings)
+        recipe, dropped = recipe_for_format(wanted, recipe)
         if dropped:
             _LOG.info("batch export: %s", dropped)
         self._dropped = dropped
@@ -370,12 +371,7 @@ class BatchController:
                 if cancel.is_set():
                     tally["cancelled"] = 1
                     break
-                out_path = Path(
-                    out_dir,
-                    export_basename(
-                        raf_file, fmt=export_format(self._settings)
-                    ),
-                )
+                out_path = Path(out_dir, export_basename(raf_file, fmt=wanted))
                 if not overwrite and out_path.exists():
                     tally["existing"] += 1
                 else:
@@ -440,6 +436,7 @@ class BatchController:
                     rights=self._settings.export_copyright,
                     comment=comment,
                     fmt=fmt,
+                    quality=self._settings.jpeg_quality,
                 )
             else:
                 write_jpeg(
