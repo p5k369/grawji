@@ -210,6 +210,21 @@ def stamp_exif_block(
         tmp_path.unlink(missing_ok=True)
 
 
+def stamp_file(
+    path: str, *, artist: str, rights: str, comment: str = ""
+) -> None:
+    """Stamp the export credits onto a file already on disk."""
+    if not artist and not rights and not comment:
+        return
+    try:
+        metadata = GExiv2.Metadata()
+        metadata.open_path(path)
+        _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        metadata.save_file(path)
+    except GLib.Error:
+        pass
+
+
 def with_credits(
     jpeg: bytes, *, artist: str, rights: str, comment: str = ""
 ) -> bytes:

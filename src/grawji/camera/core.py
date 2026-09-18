@@ -72,8 +72,8 @@ _FILM_SIM_NAMES = {v: k for k, v in FILM_SIM_CODES.items()}
 _DR_PERCENTAGES = {"DR100": 100, "DR200": 200, "DR400": 400}
 _DR_NAMES = {v: k for k, v in _DR_PERCENTAGES.items()}
 
-# HEIF is hardware-verified on the X-E5 (10-bit 4:2:2, HEVC)
-FILE_TYPE_CODES = {"heif": 18}
+# Conversion output formats, as the d185 FileType slot encodes them.
+FILE_TYPE_CODES = {"tiff8": 9, "tiff16": 11, "heif": 18}
 
 
 def shot_dynamic_range(base: bytes) -> str | None:

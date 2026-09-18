@@ -88,7 +88,8 @@ class Settings:
             writes nothing.
         export_provenance: Record the applied recipe's name in the
             exported JPEG's EXIF user comment.
-        export_format: Output format for exports, "jpeg", "jxl" or "heif".
+        export_format: Output format for exports, one of
+            imaging.export.FORMATS.
     """
 
     open_recipe: str = FROM_IMAGE

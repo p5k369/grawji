@@ -24,7 +24,13 @@ _UI = (
 )
 _COLOR_SCHEMES = ["default", "light", "dark"]
 _DRAG_ACTIONS = ["move", "copy"]
-_FORMAT_LABELS = {"jpeg": "JPEG", "jxl": "JPEG XL", "heif": "HEIF"}
+_FORMAT_LABELS = {
+    "jpeg": "JPEG",
+    "jxl": "JPEG XL",
+    "heif": "HEIF",
+    "tiff8": "TIFF, 8 bit",
+    "tiff16": "TIFF, 16 bit",
+}
 
 
 def _split_aspect(label: str) -> tuple[str, bool]:

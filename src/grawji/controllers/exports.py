@@ -45,6 +45,7 @@ from grawji.imaging.export import (
     write_passthrough,
 )
 from grawji.imaging.heif_codec import HeifError
+from grawji.imaging.tiff import TiffError
 from grawji.recipe import Recipe
 from grawji.settings import Settings
 from grawji.views.batch_export import BatchExportDialog
@@ -70,6 +71,8 @@ _EXPORT_TITLES = {
     "jpeg": "Export JPEG",
     "jxl": "Export JPEG XL",
     "heif": "Export HEIF",
+    "tiff8": "Export TIFF",
+    "tiff16": "Export TIFF",
 }
 
 
@@ -180,8 +183,8 @@ class SingleExportController:
             full_resolution=True,
             file_type=camera_file_type(job.wanted),
         )
-        # The body may have ignored a HEIF request and sent JPEG, in
-        # which case the file is named for what actually arrived.
+        # The body may have ignored a HEIF or TIFF request and sent
+        # JPEG, so the file is named for what actually arrived.
         fmt = delivered_format(rendered, job.wanted)
         path = corrected_path(job.path, fmt)
         needs_pixels = (
@@ -452,7 +455,7 @@ class BatchController:
                         sidecar.load_crop(raf_file), self._settings
                     ),
                 )
-        except (GLib.Error, OSError, HeifError) as exc:
+        except (GLib.Error, OSError, HeifError, TiffError) as exc:
             logging.getLogger("grawji").warning(
                 "batch export could not write %s: %s", out_path, exc
             )
