@@ -107,8 +107,9 @@ class Capabilities:
         film_simulations: The film simulations the body offers, from
             rawji's enum vocabulary.
         num_bank_slots: How many custom banks the body has.
-        has_heif: Whether the body can convert to HEIF over USB. That
-            needs the HEVC encoder, which arrived with XProcessor 5.
+        has_heif: Whether the body can convert to HEIF over USB.
+        has_tiff8: Whether the body can convert to 8-bit TIFF over USB.
+        has_tiff16: Whether the body can convert to 16-bit TIFF.
 
     The field defaults are the X-Pro2 baseline.
     """
@@ -125,6 +126,8 @@ class Capabilities:
     has_mono_wc: bool = False
     has_mono_mg: bool = False
     has_heif: bool = False
+    has_tiff8: bool = False
+    has_tiff16: bool = False
     mono_max: int = 0
     film_simulations: tuple[str, ...] = _SIMS_GEN3
     num_bank_slots: int = 7
@@ -162,6 +165,8 @@ _GEN5 = replace(
     mono_max=18,
     film_simulations=_SIMS_ALL,
     has_heif=True,
+    has_tiff8=True,
+    has_tiff16=True,
 )
 _GFX_PRO = Capabilities(
     has_color_chrome=True,
@@ -182,9 +187,9 @@ _MODEL_CAPABILITIES = {
     "XH1": Capabilities(film_simulations=_SIMS_ETERNA),
     "XT3": _GEN4_EARLY,
     "XT30": _GEN4_EARLY,
-    "XPRO3": _GEN4_LATE,
+    "XPRO3": replace(_GEN4_LATE, has_tiff8=True, has_tiff16=True),
     "X100V": _GEN4_LATE,
-    "XT4": _GEN4_BLEACH,
+    "XT4": replace(_GEN4_BLEACH, has_tiff8=True, has_tiff16=True),
     "XS10": replace(_GEN4_BLEACH, num_bank_slots=4),
     "XE4": _GEN4_BLEACH,
     "XT30II": _GEN4_BLEACH,
@@ -197,11 +202,17 @@ _MODEL_CAPABILITIES = {
     "XM5": replace(_GEN5, num_bank_slots=4, has_smooth_skin=False),
     "XE5": _GEN5,
     "XT30III": replace(_GEN5, has_smooth_skin=False),
-    "GFX50S": _GFX_PRO,
-    "GFX50R": _GFX_PRO,
-    "GFX100": replace(_GFX_GEN4, wb_temp_freeform=False),
-    "GFX100S": replace(_GFX_GEN4, num_bank_slots=6),
-    "GFX50SII": replace(_GFX_GEN4, num_bank_slots=6),
+    "GFX50S": replace(_GFX_PRO, has_tiff8=True),
+    "GFX50R": replace(_GFX_PRO, has_tiff8=True),
+    "GFX100": replace(
+        _GFX_GEN4, wb_temp_freeform=False, has_tiff8=True, has_tiff16=True
+    ),
+    "GFX100S": replace(
+        _GFX_GEN4, num_bank_slots=6, has_tiff8=True, has_tiff16=True
+    ),
+    "GFX50SII": replace(
+        _GFX_GEN4, num_bank_slots=6, has_tiff8=True, has_tiff16=True
+    ),
     "GFX100II": replace(_GEN5, num_bank_slots=6),
     "GFX100SII": replace(_GEN5, num_bank_slots=6),
     "GFX100RF": _GEN5,

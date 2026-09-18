@@ -20,7 +20,7 @@ from gi.repository import Gio
 from grawji import sidecar
 from grawji.camera.capabilities import Capabilities
 from grawji.crop import CropRotate
-from grawji.imaging import heif, heif_codec, imagemeta, render16
+from grawji.imaging import heif, heif_codec, imagemeta, render16, tiff
 from grawji.imaging.render import (
     add_border,
     bake_pixbuf,
@@ -84,10 +84,19 @@ def with_border(
 
 
 # Export formats, in the order the preferences list them.
-FORMATS = ("jpeg", "jxl", "heif")
+FORMATS = ("jpeg", "jxl", "heif", "tiff8", "tiff16")
 # Every JPEG ends with an end-of-image marker.
 _JPEG_END = b"\xff\xd9"
-_SUFFIXES = {"jpeg": ".jpg", "jxl": ".jxl", "heif": ".heif"}
+_SUFFIXES = {
+    "jpeg": ".jpg",
+    "jxl": ".jxl",
+    "heif": ".heif",
+    "tiff8": ".tif",
+    "tiff16": ".tif",
+}
+# The formats the camera renders itself instead of JPEG.
+_CAMERA_TYPES = ("heif", "tiff8", "tiff16")
+_TIFF_BITS = {"tiff8": 8, "tiff16": 16}
 
 
 def jxl_available() -> bool:
@@ -110,6 +119,10 @@ def available_formats(
     body_can_heif = capabilities is None or capabilities.has_heif
     if heif_available() and body_can_heif:
         usable.append("heif")
+    if capabilities is None or capabilities.has_tiff8:
+        usable.append("tiff8")
+    if capabilities is None or capabilities.has_tiff16:
+        usable.append("tiff16")
     return tuple(usable)
 
 
@@ -133,7 +146,7 @@ def export_format(
 
 def camera_file_type(fmt: str) -> str:
     """The conversion output format the camera must render for fmt."""
-    return "heif" if fmt == "heif" else "jpeg"
+    return fmt if fmt in _CAMERA_TYPES else "jpeg"
 
 
 def recipe_for_format(fmt: str, recipe: Recipe) -> tuple[Recipe, str]:
@@ -149,6 +162,8 @@ def recipe_for_format(fmt: str, recipe: Recipe) -> tuple[Recipe, str]:
 def delivered_format(data: bytes, fmt: str) -> str:
     """The format the bytes really are."""
     if fmt == "heif" and not heif.is_heif(data):
+        return "jpeg"
+    if fmt in _TIFF_BITS and not tiff.is_tiff(data):
         return "jpeg"
     return fmt
 
@@ -176,9 +191,12 @@ def repack_jxl(jpeg: bytes, path: str) -> None:
 
 def _check_complete(data: bytes, fmt: str) -> None:
     """Refuse a render the camera did not finish sending."""
-    whole = (
-        heif.is_complete(data) if fmt == "heif" else data.endswith(_JPEG_END)
-    )
+    if fmt == "heif":
+        whole = heif.is_complete(data)
+    elif fmt in _TIFF_BITS:
+        whole = tiff.is_complete(data)
+    else:
+        whole = data.endswith(_JPEG_END)
     if not whole:
         raise OSError(
             f"the camera's {fmt.upper()} arrived incomplete "
@@ -213,6 +231,12 @@ def write_passthrough(
 ) -> None:
     """Write the camera's own bytes, credits stamped, no re-encode."""
     _check_complete(data, fmt)
+    if fmt in _TIFF_BITS:
+        Path(path).write_bytes(data)
+        imagemeta.stamp_file(
+            path, artist=artist, rights=rights, comment=comment
+        )
+        return
     if fmt == "heif":
         Path(path).write_bytes(
             _heif_with_credits(
@@ -319,6 +343,37 @@ def write_heif(  # noqa: PLR0913
     )
 
 
+def write_tiff(
+    data: bytes,
+    path: str,
+    *,
+    geometry: Geometry,
+    artist: str = "",
+    rights: str = "",
+    comment: str = "",
+) -> None:
+    """Re-encode an edited camera TIFF, keeping its depth and metadata."""
+    _check_complete(data, "tiff16")
+    decoded = tiff.decode(data)
+    samples = render16.bake(decoded.samples, geometry.crop)
+    samples = render16.scale_to_edge(samples, geometry.max_edge)
+    samples = render16.add_border(
+        samples,
+        geometry.border_percent,
+        render16.scale_color(parse_color(geometry.border_color), decoded.bits),
+        geometry.border_aspect,
+    )
+    tiff.encode(samples, path, bits=decoded.bits)
+    imagemeta.copy_exif(
+        data,
+        path,
+        artist=artist,
+        rights=rights,
+        comment=comment,
+        size=(samples.shape[1], samples.shape[0]),
+    )
+
+
 def write_jpeg(  # noqa: PLR0913
     jpeg: bytes,
     path: str,
@@ -332,6 +387,18 @@ def write_jpeg(  # noqa: PLR0913
     geometry: Geometry | None = None,
 ) -> None:
     """Write jpeg to path with orientation and rotation baked in."""
+    if fmt in _TIFF_BITS:
+        if geometry is None:
+            raise ValueError("a TIFF export needs its geometry")
+        write_tiff(
+            jpeg,
+            path,
+            geometry=geometry,
+            artist=artist,
+            rights=rights,
+            comment=comment,
+        )
+        return
     if fmt == "heif":
         if geometry is None:
             raise ValueError("a HEIF export needs its geometry")
