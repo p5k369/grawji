@@ -87,7 +87,7 @@ def with_border(
 
 
 # Export formats, in the order the preferences list them.
-FORMATS = ("jpeg", "jxl", "heif", "jxl16", "tiff8", "tiff16")
+FORMATS = ("jpeg", "jxl", "jxl16", "heif", "tiff8", "tiff16")
 # Every JPEG ends with an end-of-image marker.
 _JPEG_END = b"\xff\xd9"
 _SUFFIXES = {
@@ -172,14 +172,14 @@ def available_formats(
 ) -> tuple[str, ...]:
     """The export formats that would actually work right now."""
     usable = ["jpeg"]
+    body_can_tiff16 = capabilities is None or capabilities.has_tiff16
     if jxl_available():
         usable.append("jxl")
+    if jxl16_available() and body_can_tiff16:
+        usable.append("jxl16")
     body_can_heif = capabilities is None or capabilities.has_heif
     if heif_available() and body_can_heif:
         usable.append("heif")
-    body_can_tiff16 = capabilities is None or capabilities.has_tiff16
-    if jxl16_available() and body_can_tiff16:
-        usable.append("jxl16")
     if capabilities is None or capabilities.has_tiff8:
         usable.append("tiff8")
     if body_can_tiff16:
