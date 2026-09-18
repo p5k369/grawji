@@ -103,8 +103,13 @@
           <object class="AdwPreferencesGroup">
             <property name="title">Export</property>
             <child>
-              <object class="AdwActionRow">
-                <property name="title">JPEG quality</property>
+              <object class="AdwComboRow" id="format_row">
+                <property name="title">Export format</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow" id="quality_row">
+                <property name="title">Quality</property>
                 <property name="subtitle">Higher means a larger file</property>
                 <child type="suffix">
                   <object class="GtkScale" id="jpeg_quality_scale">
@@ -117,11 +122,6 @@
                     <property name="adjustment">jpeg_quality_adjustment</property>
                   </object>
                 </child>
-              </object>
-            </child>
-            <child>
-              <object class="AdwComboRow" id="format_row">
-                <property name="title">Export format</property>
               </object>
             </child>
             <child>

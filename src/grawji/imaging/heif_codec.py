@@ -45,6 +45,7 @@ _SIGNATURES: _Signatures = (
     ("heif_context_alloc", [], _VOID),
     ("heif_context_free", [_VOID], None),
     ("heif_have_encoder_for_format", [_INT], _INT),
+    ("heif_have_decoder_for_format", [_INT], _INT),
     ("heif_image_create", [_INT] * 4 + [_OUT], _Error),
     ("heif_image_add_plane", [_VOID] + [_INT] * 4, _Error),
     ("heif_image_get_plane", [_VOID, _INT, ctypes.POINTER(_INT)], _PLANE),
@@ -97,10 +98,12 @@ _LOADED = _declare(_LIB, _SIGNATURES)
 
 
 def available() -> bool:
-    """Whether HEIF exports can be written on this system."""
+    """Whether HEIF exports can be handled on this system."""
     if _LIB is None or not _LOADED:
         return False
-    return bool(_LIB.heif_have_encoder_for_format(_COMPRESSION_HEVC))
+    return bool(_LIB.heif_have_encoder_for_format(_COMPRESSION_HEVC)) and bool(
+        _LIB.heif_have_decoder_for_format(_COMPRESSION_HEVC)
+    )
 
 
 def _check(error: _Error, what: str) -> None:

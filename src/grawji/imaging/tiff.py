@@ -22,6 +22,7 @@ _VALUE_INLINE = 4
 # The field types this module reads.
 _TYPE_SHORT = 3
 _TYPE_LONG = 4
+_TYPE_UNDEFINED = 7
 _TYPE_WIDTH = {_TYPE_SHORT: 2, _TYPE_LONG: 4}
 # The tags that describe the pixels.
 _WIDTH = 256
@@ -34,6 +35,7 @@ _SAMPLES = 277
 _ROWS_PER_STRIP = 278
 _STRIP_COUNTS = 279
 _PLANAR = 284
+_ICC = 34675
 # The only values that describe an engine TIFF.
 _UNCOMPRESSED = 1
 _RGB = 2
@@ -131,6 +133,30 @@ def is_complete(data: bytes) -> bool:
         offset + count <= len(data)
         for offset, count in zip(offsets, counts, strict=True)
     )
+
+
+def icc_profile(data: bytes) -> bytes | None:
+    """The embedded ICC profile."""
+    try:
+        order, _tags = _read_ifd(data)
+        start = struct.unpack_from(f"{order}I", data, 4)[0]
+        count = struct.unpack_from(f"{order}H", data, start)[0]
+    except (TiffError, struct.error):
+        return None
+    for index in range(count):
+        entry = start + 2 + index * _ENTRY
+        try:
+            tag, kind, items = struct.unpack_from(f"{order}HHI", data, entry)
+        except struct.error:
+            return None
+        if tag != _ICC or kind != _TYPE_UNDEFINED or not items:
+            continue
+        at = entry + 8
+        if items > _VALUE_INLINE:
+            at = struct.unpack_from(f"{order}I", data, at)[0]
+        profile = data[at : at + items]
+        return profile if len(profile) == items else None
+    return None
 
 
 def decode(data: bytes) -> DecodedTiff:

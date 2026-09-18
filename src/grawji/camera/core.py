@@ -76,6 +76,20 @@ _DR_NAMES = {v: k for k, v in _DR_PERCENTAGES.items()}
 FILE_TYPE_CODES = {"tiff8": 9, "tiff16": 11, "heif": 18}
 
 
+# todo: keep that only in place as long as rawji does not support bigger
+#  container. The largest thing the conversion engine hands back is an
+#   uncompressed 16-bit TIFF, which is width * height * 6 bytes plus a
+#   few MB of Exif. A 102 MP GFX frame reaches 586 MiB, above the 512 MiB
+#   rawji allows by default, so the limit is raised per session.
+MAX_CONTAINER_SIZE = 1024 * 1024 * 1024
+
+
+def _allow_large_containers(camera: Any) -> None:
+    """Let a session receive a full-resolution 16-bit TIFF."""
+    if hasattr(camera, "max_container_size"):
+        camera.max_container_size = MAX_CONTAINER_SIZE
+
+
 def shot_dynamic_range(base: bytes) -> str | None:
     """The dynamic range the RAF was captured at."""
     offset = _PARAM_OFFSETS["DynamicRange"]
@@ -544,6 +558,7 @@ class CameraSession:
     def _open_attempt(self, raf_path: str | Path) -> tuple[Any, bytes]:
         """Run one connect / send_raf / get_profile sequence."""
         camera = self._camera_factory()
+        _allow_large_containers(camera)
         try:
             if not camera.connect():
                 raise CameraError("could not connect to camera")
