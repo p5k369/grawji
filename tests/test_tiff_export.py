@@ -249,7 +249,9 @@ def test_jxl16_notices_a_jpeg_fallback():
     assert export.delivered_format(b"\xff\xd8\xff\xe1jpeg", "jxl16") == "jpeg"
 
 
-@pytest.mark.skipif(not export.jxl_available(), reason="cjxl is not installed")
+@pytest.mark.skipif(
+    not export.jxl16_available(), reason="cjxl is too old or missing"
+)
 def test_jxl16_round_trips_through_cjxl(tmp_path):
     """A 16-bit TIFF becomes a 16-bit JXL of the cropped size."""
     samples = sample_frame(width=64, height=48, bits=16)
@@ -265,7 +267,9 @@ def test_jxl16_round_trips_through_cjxl(tmp_path):
     assert out.read_bytes()[:2] != b"II"
 
 
-@pytest.mark.skipif(not export.jxl_available(), reason="cjxl is not installed")
+@pytest.mark.skipif(
+    not export.jxl16_available(), reason="cjxl is too old or missing"
+)
 def test_jxl16_passthrough_encodes_instead_of_copying(tmp_path):
     """There is no passing a TIFF through as a JXL, so it is encoded."""
     data = written(tmp_path, sample_frame(width=32, height=24), 16)
@@ -312,10 +316,10 @@ def test_the_quality_row_follows_the_chosen_format():
     for index, fmt in enumerate(dialog._formats):
         dialog.format_row.set_selected(index)
         seen[fmt] = dialog.quality_row.get_visible()
-    assert seen["tiff8"] is False
-    assert seen["tiff16"] is False
+    assert seen, "the dialog offered no format at all"
+    for fmt, visible in seen.items():
+        assert visible is export.scales_quality(fmt), fmt
     assert seen["jpeg"] is True
-    assert seen["jxl16"] is True
 
 
 def test_heif_needs_the_decoder_as_well(monkeypatch):
