@@ -88,6 +88,14 @@
               "XDG_DATA_DIRS"
               ":"
               "${pkgs.adwaita-icon-theme}/share"
+              "--prefix"
+              "PATH"
+              ":"
+              "${pkgs.libjxl.bin}/bin"
+              "--prefix"
+              "LD_LIBRARY_PATH"
+              ":"
+              "${pkgs.libheif}/lib"
             ];
 
             pythonImportsCheck = [
