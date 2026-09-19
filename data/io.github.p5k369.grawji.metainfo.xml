@@ -49,6 +49,19 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.0" date="2026-09-19">
+      <description>
+        <p>This release expands your export options and speeds up the preview.</p>
+        <ul>
+          <li>Export photos as TIFF in 8-bit or 16-bit</li>
+          <li>Export photos as HEIF rendered by the camera</li>
+          <li>Export photos as JPEG XL, including 16-bit output</li>
+          <li>Single untouched photos can now be exported without re-encoding</li>
+          <li>JPEG XL export now works in the Flatpak version out of the box</li>
+          <li>Faster clipping overlay and gray row display in the preview</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-09-14">
       <description>
         <p>This small update fixes a display issue and smooths out camera reconnection.</p>
