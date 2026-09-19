@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rawji-src = {
-      url = "github:pinpox/rawji";
+      url = "github:pinpox/rawji/3b68b9c7ba23f2bef1cd9203652035a980eca1f7";
       flake = false;
     };
   };
@@ -25,6 +25,9 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           python = pkgs.python3;
+          version =
+            (builtins.fromTOML (builtins.readFile ./pyproject.toml))
+            .project.version;
 
           rawji = python.pkgs.buildPythonPackage {
             pname = "rawji";
@@ -54,7 +57,7 @@
 
           grawji = python.pkgs.buildPythonApplication {
             pname = "grawji";
-            version = "0.2.0";
+            inherit version;
             pyproject = true;
             src = ./.;
 
@@ -70,6 +73,7 @@
             buildInputs = gtkStack;
 
             dependencies = [
+              python.pkgs.numpy
               python.pkgs.pygobject3
               python.pkgs.pyusb
               rawji
@@ -79,7 +83,12 @@
 
             makeWrapperArgs = [ "\${gappsWrapperArgs[@]}" ];
 
-            pythonImportsCheck = [ "grawji" ];
+            pythonImportsCheck = [
+              "grawji"
+              "grawji.camera.camera_info"
+              "grawji.imaging.render16"
+              "grawji.imaging.tiff"
+            ];
 
             meta = {
               description = "GTK4 frontend for rawji - interactive Fuji RAF conversion via the camera engine";

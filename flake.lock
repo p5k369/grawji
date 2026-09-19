@@ -19,16 +19,17 @@
     "rawji-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1784294947,
-        "narHash": "sha256-z/Z1dFcJ+mnOt6LXVZ2W2SvsexImrE32dNBAG1Rq+ec=",
+        "lastModified": 1789713332,
+        "narHash": "sha256-Ab4jVY0xjChfY2NX6s4r5vMwbdbQtbuJwz6iXoN+F4s=",
         "owner": "pinpox",
         "repo": "rawji",
-        "rev": "2219c46e594ff6e3794081995da967f34ca0ae47",
+        "rev": "3b68b9c7ba23f2bef1cd9203652035a980eca1f7",
         "type": "github"
       },
       "original": {
         "owner": "pinpox",
         "repo": "rawji",
+        "rev": "3b68b9c7ba23f2bef1cd9203652035a980eca1f7",
         "type": "github"
       }
     },

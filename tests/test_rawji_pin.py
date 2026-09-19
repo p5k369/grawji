@@ -15,10 +15,17 @@ PINNING_FILES = [
     ROOT / "flatpak" / "io.github.p5k369.grawji.yaml",
     ROOT / ".github" / "workflows" / "test.yml",
     ROOT / ".github" / "workflows" / "gui_smoke.yml",
+    ROOT / "flake.nix",
+    ROOT / "flake.lock",
 ]
 
 _PIN = re.compile(
-    r"(?:rawji@|rawji\.git.*\n\s*commit:\s*|pinpox/rawji@)([0-9a-f]{7,40})"
+    r"(?:rawji@"  # pip requirement
+    r"|rawji\.git.*\n\s*commit:\s*"  # flatpak manifest
+    r"|pinpox/rawji@"  # workflows
+    r"|pinpox/rawji/"  # flake input url
+    r"|\"repo\": \"rawji\",\n\s*\"rev\": \""  # flake.lock
+    r")([0-9a-f]{7,40})"
 )
 
 
