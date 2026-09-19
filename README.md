@@ -62,53 +62,22 @@ First, put the camera in RAW-conversion USB mode, otherwise rawji cannot talk to
 
 > **Set Up** → **Connection Setting** → **USB Mode** → **USB RAW CONV./BACKUP RESTORE**
 
-| How | Install | Notes                                                                                    |
-| --- | --- |------------------------------------------------------------------------------------------|
-| **Flatpak** | `flatpak install --user grawji.flatpak` | bundle from [Releases](https://github.com/p5k369/grawji/releases), everything included   |
-| **Nix** | `nix run github:p5k369/grawji` | flake, no clone needed. `nix build` gives `./result/bin/grawji`                          |
+| How | Install | Notes |
+| --- | --- | --- |
+| **Debian / Ubuntu** | `sudo apt install ./grawji_*_all.deb` | package from [Releases](https://github.com/p5k369/grawji/releases), pulls GTK4 and ships the USB rule |
+| **Flatpak** | `flatpak install --user grawji.flatpak` | bundle from [Releases](https://github.com/p5k369/grawji/releases), everything included |
 | **Gentoo** | `emerge media-gfx/grawji` | in [GURU](https://wiki.gentoo.org/wiki/Project:GURU), `~amd64`, pulls `dev-python/rawji` |
-| **Source** | `make install` | system GTK4/PyGObject first, see below                                                   |
+| **Nix** | `nix run github:p5k369/grawji` | flake, no clone needed. `nix build` gives `./result/bin/grawji` |
+| **Source** | `make install` | system GTK4 and PyGObject first, see below |
 
-<details>
-<summary><b>Flatpak, step-by-step</b></summary>
+JPEG XL and HEIF export need `cjxl` and libheif with its HEVC plugins. The
+Flatpak carries them, the Debian package recommends them, everywhere else they
+are your distribution's packages. Without them those formats are simply not
+offered.
 
-**1. Set up Flatpak and Flathub** (most distros ship Flatpak):
-
-```sh
-flatpak remote-add --if-not-exists --user \
-  flathub https://flathub.org/repo/flathub.flatpakrepo
-```
-
-**2. Install** `grawji.flatpak` from the
-[Releases](https://github.com/p5k369/grawji/releases) page (the first install
-also pulls the shared GNOME runtime, a few hundred MB, fetched once):
-
-```sh
-flatpak install --user grawji.flatpak
-```
-
-**3. Run:**
-
-```sh
-flatpak run io.github.p5k369.grawji
-```
-
-</details>
-
-<details>
-<summary><b>Gentoo, step-by-step</b></summary>
-
-Enable the overlay and accept the `~amd64` keywords once:
-
-```sh
-eselect repository enable guru
-emerge --sync guru
-echo "media-gfx/grawji ~amd64
-dev-python/rawji ~amd64" >> /etc/portage/package.accept_keywords/grawji
-emerge -av media-gfx/grawji
-```
-
-</details>
+USB access: the Debian package installs a udev rule, and most distributions
+grant non-root access anyway through `uaccess` or `plugdev`. If yours does not,
+add a rule for the Fuji vendor id `0x04cb`.
 
 <details>
 <summary><b>From source, step-by-step</b></summary>
@@ -137,10 +106,6 @@ cd grawji
 make install
 make run        # or: .venv/bin/python -m grawji
 ```
-
-USB access: most distributions already grant non-root access via `uaccess` or
-`plugdev`. If yours does not, add a udev rule for the Fuji vendor id `0x04cb`
-(check first).
 
 </details>
 
