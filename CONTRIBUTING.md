@@ -4,89 +4,83 @@ grawji is a GTK4 frontend for [rawji](https://github.com/pinpox/rawji) -
 interactive Fujifilm RAF conversion through the camera's own engine over
 USB. The ground truth is a physical camera, not a spec.
 
-## Development setup
+## Setup
 
-You need Python 3.11+ and the system GTK4 stack (GTK4, libadwaita,
-PyGObject, GExiv2). PyGObject comes from the system, so create the venv
-with access to it:
-
-```sh
-make dev                       # venv with dev extras plus pre-commit hooks
-make dev RAWJI="-e ../rawji"   # hack on rawji too (editable checkout)
-```
-
-or by hand:
+Python 3.11+ and the system GTK4 stack (GTK4, libadwaita, PyGObject,
+GExiv2). PyGObject comes from the system, so the venv needs access to it:
 
 ```sh
-python -m venv --system-site-packages .venv
-source .venv/bin/activate
-pip install -e .[dev]
-pip install -e ../rawji   # rawji is not on PyPI, clone it next to grawji
-pre-commit install
+make dev
+make dev RAWJI="-e ../rawji"
 ```
 
-Run the app with `make run` or `python -m grawji` (add `--verbose` for
-debug logging), and always work with the venv activated - the hooks rely
-on it. `make lint`, `make format` and `make test` wrap the usual tools.
+Run with `make run` or `python -m grawji` (`--verbose` for debug logging),
+always with the venv activated - the hooks rely on it. `make lint`,
+`make format` and `make test` wrap the usual tools.
 
 ## Quality gates
 
 `pre-commit install` sets up both hook types: commits run formatting,
-lint and strict mypy; pushes also run pytest. A push that reaches the
-remote has passed all gates - nothing to run by hand
-(`pre-commit run --all-files` and `pytest` work on demand).
+lint and strict mypy, pushes also run pytest. A push that reaches the
+remote has passed every gate, so there is nothing to run by hand.
 
-Direct commits to `main` are blocked. Branch and open a PR. Commit
-subjects follow the conventional-commit style in `git log`.
+Direct commits to `main` are blocked. Branch and open a PR.
 
-## Code layout and conventions
+## Commit messages
 
-- Pure modules live at the package root and are mypy-strict and
-  unit-tested. Mock the rawji boundary in tests.
-- GTK view glue lives in `grawji/views/`, exempt from the strictest mypy
-  rules. `gui`-marked smoke tests build the widgets under a virtual
-  display. Run them with `GDK_BACKEND=x11 pytest -m gui` (needs the `dev`
-  extra's `pytest-xvfb`). They skip without a display. Deeper behaviour is
-  verified by running the app.
+Subjects follow [Conventional Commits](https://www.conventionalcommits.org).
+This is not style preference: release-please reads them, and the type
+alone decides what happens at release time.
+
+| Type | Effect at release time |
+|------|------------------------|
+| `feat` | minor bump, listed under Features |
+| `fix` | patch bump, listed under Bug Fixes |
+| `perf` | listed under Performance |
+| everything else | no release, no changelog entry |
+
+So the type is a decision, not a label. Reserve `fix` for behaviour a
+user could notice, and use `build` or `chore` for packaging, tooling and
+workflow work.
+
+Scope the subject when it helps (`fix(export):`, `feat(camera):`), and
+write the body for someone who finds the commit in a year: what was
+wrong, not what you typed.
+
+## Code layout
+
+- Pure modules live at the package root, are mypy-strict and unit-tested.
+  Mock the rawji boundary.
+- GTK view glue lives in `grawji/views/` and is exempt from the strictest
+  mypy rules. `GDK_BACKEND=x11 pytest -m gui` builds the widgets under a
+  virtual display, skipped without one. Deeper behavior is verified by
+  running the app.
 - Build static UI from the `.ui` templates in `src/grawji/ui/`, not
   imperatively in Python. I use
-  [Cambalache](https://gitlab.gnome.org/jpu/cambalache)
-  (`src/grawji/ui/grawji.cmb`).
-- Docstrings (Google style, plain prose - no RST), not banner comments.
+  [Cambalache](https://gitlab.gnome.org/jpu/cambalache).
+- Docstrings (Google style, plain prose, no RST), not banner comments.
 - Preview latency is the top priority: camera calls run on the worker
-  thread, results return via `GLib.idle_add`, rapid changes are
-  debounced.
-
-## Flatpak
-
-To build the Flatpak (needs `flatpak-builder` and the GNOME 50
-runtime/SDK), `make flatpak` builds and installs it. `make flatpak-bundle`
-writes a single-file `grawji.flatpak`. The manifest is
-`flatpak/io.github.p5k369.grawji.yaml`, it builds fully offline (the build
-backend is vendored as pinned wheels).
+  thread, results return via `GLib.idle_add`, rapid changes are debounced.
 
 ## Camera protocol changes
 
-The d185 profile blob is undocumented, everything grawji writes was
-verified against real hardware (see `docs/usb-capture.md` for how).
-To keep it that way:
+The d185 profile blob is undocumented. Everything grawji writes was
+verified against real hardware (see `docs/usb-capture.md`). To keep it
+that way:
 
-- **Patch, never rebuild.** grawji read-modify-writes only verified
-  bytes of the camera's own profile.
+- **Patch, never rebuild.** grawji read-modify-writes only verified bytes
+  of the camera's own profile.
 - **New offsets need hardware proof:** a passing
-  `scripts/verify_offsets.py` run against a connected body, with body
-  and date recorded. Render-identical output means the camera ignored
-  your bytes - a failure, not a success.
-- Per-body support is data, not code: update `grawji/capabilities.py`
-  and `docs/feature-matrix.md` together.
-- Testing needs a Fuji body in "USB RAW CONV./BACKUP RESTORE" mode and
-  RAFs shot by that body (foreign RAFs fail with PTP error 0x2002).
+  `scripts/verify_offsets.py` run against a connected body, with body and
+  date recorded. Render-identical output means the camera ignored your
+  bytes, which is a failure, not a success.
+- Per-body support is data, not code: update `grawji/capabilities.py` and
+  `docs/feature-matrix.md` together.
 
-No hardware for the change you are proposing? Say so in the PR - it can
+No hardware for the change you are proposing? Say so in the PR. It can
 usually be verified for you, but unverified protocol claims are not
 merged.
 
 ## License
 
-grawji is GPL-3.0-or-later; contributions are accepted under the same
-terms.
+GPL-3.0-or-later. Contributions are accepted under the same terms.

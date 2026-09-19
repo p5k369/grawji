@@ -73,6 +73,32 @@ jobs:
             release_body.md
           if-no-files-found: error
 
+  deb:
+    needs: version-guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version-guard.outputs.sha }}
+      - name: Build the Debian package
+        run: python3 scripts/build_deb.py --output dist
+      - name: Install it on a clean runner and start it headless
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/grawji_*_all.deb xvfb
+          xvfb-run -a timeout 15 grawji && code=0 || code=$?
+          # The timer has to be what stops it, anything else is a crash
+          test "$code" -eq 124 || {
+            echo "grawji exited with $code" >&2
+            exit 1
+          }
+      - name: Hand the package to the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-file
+          path: dist/*.deb
+          if-no-files-found: error
+
   # On a plain runner, not in the builder container: the freedesktop-SDK
   # image has no flatpak portal while a normal distro flatpak install has the whole stack.
   smoke:
@@ -103,20 +129,23 @@ jobs:
 
   # Runs outside the flatpak container so the gh CLI is available.
   publish:
-    needs: [version-guard, flatpak, smoke]
+    needs: [version-guard, flatpak, deb, smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: release-files
-      - name: Attach the bundle to the draft and publish
+      - uses: actions/download-artifact@v8
+        with:
+          name: deb-file
+      - name: Attach the bundle and the package, then publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag_name }}
           SHA: ${{ needs.version-guard.outputs.sha }}
         run: |
-          gh release upload "$TAG" grawji.flatpak --clobber
+          gh release upload "$TAG" grawji.flatpak grawji_*.deb --clobber
           gh api "repos/$GH_REPO/releases/generate-notes" \
             -f tag_name="$TAG" -f target_commitish="$SHA" \
             --jq .body > generated.md
