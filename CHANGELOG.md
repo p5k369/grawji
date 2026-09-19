@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.0](https://github.com/p5k369/grawji/compare/v0.5.1...v0.6.0) (2026-09-19)
+
+
+### Features
+
+* **export:** add 16-bit JPEG XL output ([#136](https://github.com/p5k369/grawji/issues/136)) ([f4fe4a3](https://github.com/p5k369/grawji/commit/f4fe4a39586d97a9d8ed10224abe3de39d4aa37b))
+* **export:** add HEIF output rendered by the camera ([#132](https://github.com/p5k369/grawji/issues/132)) ([9dd7a47](https://github.com/p5k369/grawji/commit/9dd7a47f8c30ff03ebe221a51fde839c61714d3b))
+* **export:** add TIFF 8-bit and 16-bit export support ([#135](https://github.com/p5k369/grawji/issues/135)) ([7ae7b9a](https://github.com/p5k369/grawji/commit/7ae7b9a206c41fb3deac69136fe314091f6fba97))
+* **export:** optional JPEG XL output and passthrough for untouched single exports added ([#128](https://github.com/p5k369/grawji/issues/128)) ([18c8ec8](https://github.com/p5k369/grawji/commit/18c8ec8cf230e9b0cca14890723071d3b98f138f))
+
+
+### Bug Fixes
+
+* **flatpak:** ship cjxl so JPEG XL exports work in the sandbox ([#130](https://github.com/p5k369/grawji/issues/130)) ([205925a](https://github.com/p5k369/grawji/commit/205925ad6b3247322c6d354e0d792909a49c8734))
+
+
+### Performance
+
+* **preview:** vectorise the clipping overlay and the gray rows ([#133](https://github.com/p5k369/grawji/issues/133)) ([a53d493](https://github.com/p5k369/grawji/commit/a53d493f878fe4600cf813a5dcb6ae10ff17117e))
+
 ## [0.5.1](https://github.com/p5k369/grawji/compare/v0.5.0...v0.5.1) (2026-09-14)
 
 
