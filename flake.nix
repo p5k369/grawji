@@ -46,6 +46,7 @@
 
           # GI typelibs and native libs needed at runtime.
           gtkStack = [
+            pkgs.adwaita-icon-theme
             pkgs.gtk4
             pkgs.libadwaita
             pkgs.gexiv2
@@ -81,7 +82,13 @@
 
             dontWrapGApps = true;
 
-            makeWrapperArgs = [ "\${gappsWrapperArgs[@]}" ];
+            makeWrapperArgs = [
+              "\${gappsWrapperArgs[@]}"
+              "--prefix"
+              "XDG_DATA_DIRS"
+              ":"
+              "${pkgs.adwaita-icon-theme}/share"
+            ];
 
             pythonImportsCheck = [
               "grawji"
