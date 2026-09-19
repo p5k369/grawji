@@ -35,6 +35,7 @@ _SAMPLES = 277
 _ROWS_PER_STRIP = 278
 _STRIP_COUNTS = 279
 _PLANAR = 284
+_ORIENTATION = 274
 _ICC = 34675
 # The only values that describe an engine TIFF.
 _UNCOMPRESSED = 1
@@ -43,6 +44,8 @@ _CHUNKY = 1
 _CHANNELS = 3
 _BITS_8 = 8
 SUPPORTED_BITS = (_BITS_8, 16)
+# The orientation of a file that needs no transform.
+_TOP_LEFT = 1
 
 
 class DecodedTiff(NamedTuple):
@@ -50,6 +53,7 @@ class DecodedTiff(NamedTuple):
 
     samples: Samples
     bits: int
+    orientation: int
 
 
 class TiffError(RuntimeError):
@@ -190,7 +194,8 @@ def decode(data: bytes) -> DecodedTiff:
     dtype = np.dtype(np.uint8 if bits == _BITS_8 else f"{order}u2")
     flat = np.frombuffer(raw, dtype=dtype)
     samples = flat.reshape(height, width, _CHANNELS)
-    return DecodedTiff(samples.astype(np.uint16), bits)
+    orientation = _one(tags, _ORIENTATION, _TOP_LEFT)
+    return DecodedTiff(samples.astype(np.uint16), bits, orientation)
 
 
 def _entries(
