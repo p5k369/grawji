@@ -134,3 +134,30 @@ def test_straightening_matches_the_pixbuf_path(crop):
     difference = np.abs(samples - baked)
     assert difference.mean() < 2.0
     assert np.percentile(difference, 99) <= 8
+
+
+# How a file with each Exif orientation stores an upright frame.
+_STORED = {
+    1: lambda a: a,
+    2: lambda a: a[:, ::-1],
+    3: lambda a: a[::-1, ::-1],
+    4: lambda a: a[::-1],
+    5: lambda a: a.transpose(1, 0, 2),
+    6: lambda a: np.rot90(a, 1),
+    7: lambda a: a.transpose(1, 0, 2)[::-1, ::-1],
+    8: lambda a: np.rot90(a, -1),
+}
+
+
+@pytest.mark.parametrize("tag", sorted(_STORED))
+def test_exif_orient_turns_every_orientation_upright(tag):
+    """Each of the eight tags leads back to the same upright frame."""
+    upright = np.arange(2 * 3 * 3, dtype=np.uint16).reshape(3, 2, 3)
+    stored = np.ascontiguousarray(_STORED[tag](upright))
+    assert np.array_equal(render16.exif_orient(stored, tag), upright)
+
+
+def test_exif_orient_ignores_a_value_it_does_not_know():
+    """A broken tag leaves the frame alone instead of raising."""
+    frame = np.arange(2 * 2 * 3, dtype=np.uint16).reshape(2, 2, 3)
+    assert np.array_equal(render16.exif_orient(frame, 42), frame)

@@ -10,6 +10,7 @@ import pytest
 from grawji.camera import capabilities, core
 from grawji.crop import CropRotate
 from grawji.imaging import export, tiff
+from tests.image_support import tiff_bytes
 
 
 def sample_frame(width=7, height=5, bits=16):
@@ -381,9 +382,11 @@ def test_jxl16_carries_the_color_space_across(tmp_path, monkeypatch):
     seen = {}
     real = export.encode_jxl
 
-    def spy(samples, path, *, quality, exif, icc=None):
+    def spy(samples, path, *, quality, exif, icc=None, bits=16):
         seen["icc"] = icc
-        return real(samples, path, quality=quality, exif=exif, icc=icc)
+        return real(
+            samples, path, quality=quality, exif=exif, icc=icc, bits=bits
+        )
 
     monkeypatch.setattr(export, "encode_jxl", spy)
     data = written(tmp_path, sample_frame(width=32, height=24), 16)
@@ -424,3 +427,32 @@ def test_raising_the_limit_tolerates_an_older_rawji():
         __slots__ = ()
 
     core._allow_large_containers(Ancient())
+
+
+def test_decode_reports_the_orientation_tag():
+    """A portrait frame from the camera says how it is stored."""
+    samples = sample_frame()
+    assert tiff.decode(tiff_bytes(samples, tag=8, bits=16)).orientation == 8
+    assert tiff.decode(tiff_bytes(samples, tag=1, bits=16)).orientation == 1
+
+
+def test_our_own_writer_leaves_the_frame_upright(tmp_path):
+    """The writer omits the tag, which the reader takes as top left."""
+    samples = sample_frame()
+    assert tiff.decode(written(tmp_path, samples, 16)).orientation == 1
+
+
+def test_an_edited_export_turns_the_frame_upright(tmp_path):
+    """A sideways stored frame is cropped in the upright view."""
+    samples = sample_frame(width=9, height=5)
+    # Orientation 8 means the file is stored rotated 90 degrees clockwise
+    data = tiff_bytes(
+        np.ascontiguousarray(np.rot90(samples, -1)), tag=8, bits=16
+    )
+    path = tmp_path / "edited.tif"
+    export.write_tiff(
+        data, str(path), geometry=export.Geometry(crop=CropRotate())
+    )
+    written_back = tiff.decode(path.read_bytes())
+    assert written_back.samples.shape == samples.shape
+    assert np.array_equal(written_back.samples, samples)

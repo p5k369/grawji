@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,6 +12,17 @@ from grawji.crop import FULL_RECT, CropRotate, rotated_size
 from grawji.imaging.heif_codec import DecodedImage
 
 _ROTATIONS = (90, 180, 270)
+_TOP_LEFT = 1
+# numpy rotates counter-clockwise, the tags count clockwise.
+_EXIF_FLIPS: dict[int, Callable[[Samples], Samples]] = {
+    2: lambda a: a[:, ::-1],
+    3: lambda a: a[::-1, ::-1],
+    4: lambda a: a[::-1],
+    5: lambda a: a.transpose(1, 0, 2),
+    6: lambda a: np.rot90(a, -1),
+    7: lambda a: a.transpose(1, 0, 2)[::-1, ::-1],
+    8: lambda a: np.rot90(a, 1),
+}
 _CHANNELS = 3
 # Half a pixel
 _HALF = 0.5
@@ -36,6 +48,16 @@ def orient(samples: Samples, orientation: int) -> Samples:
         return samples
     # numpy rotates counter-clockwise, the sidecar angle is clockwise.
     return np.ascontiguousarray(np.rot90(samples, k=-(orientation // 90)))
+
+
+def exif_orient(samples: Samples, orientation: int) -> Samples:
+    """Turn stored samples upright, following an Exif orientation tag."""
+    if orientation == _TOP_LEFT:
+        return samples
+    flipped = _EXIF_FLIPS.get(orientation)
+    if flipped is None:
+        return samples
+    return np.ascontiguousarray(flipped(samples))
 
 
 def bake(samples: Samples, crop: CropRotate) -> Samples:

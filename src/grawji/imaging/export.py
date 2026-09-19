@@ -108,6 +108,7 @@ _CAMERA_TYPES = {
 # The formats that arrive from the camera as a TIFF.
 _FROM_TIFF = ("tiff8", "tiff16", "jxl16")
 _TIFF_BITS = {"tiff8": 8, "tiff16": 16}
+_EIGHT_BIT = 8
 # Formats whose file size and fidelity answer to the quality setting.
 _SCALES_QUALITY = ("jpeg", "jxl", "jxl16", "heif")
 # A four-pixel frame and the smallest valid Exif stream, used once to
@@ -292,8 +293,9 @@ def encode_jxl(
     quality: int,
     exif: bytes | None,
     icc: bytes | None = None,
+    bits: int = 16,
 ) -> None:
-    """Encode 16-bit samples to JPEG XL, metadata included."""
+    """Encode samples to JPEG XL at their own depth, metadata included."""
     cjxl = shutil.which("cjxl")
     if cjxl is None:
         raise OSError("cjxl not found. Cannot write JPEG XL")
@@ -313,9 +315,11 @@ def encode_jxl(
             command, stdin=subprocess.PIPE, stderr=subprocess.PIPE
         ) as proc:
             assert proc.stdin is not None  # noqa: S101
+            top = (1 << bits) - 1
+            proc.stdin.write(b"P6\n%d %d\n%d\n" % (width, height, top))
             # PPM is big-endian by definition, the samples are not.
-            proc.stdin.write(b"P6\n%d %d\n65535\n" % (width, height))
-            proc.stdin.write(samples.astype(">u2").tobytes())
+            payload = samples.astype(np.uint8 if bits == _EIGHT_BIT else ">u2")
+            proc.stdin.write(payload.tobytes())
             proc.stdin.close()
             failed = proc.wait() != 0
     if failed:
@@ -500,7 +504,8 @@ def write_tiff(
     """Re-encode an edited camera TIFF, keeping its depth and metadata."""
     _check_complete(data, "tiff16")
     decoded = tiff.decode(data)
-    samples = render16.bake(decoded.samples, geometry.crop)
+    upright = render16.exif_orient(decoded.samples, decoded.orientation)
+    samples = render16.bake(upright, geometry.crop)
     samples = render16.scale_to_edge(samples, geometry.max_edge)
     samples = render16.add_border(
         samples,
@@ -532,7 +537,8 @@ def write_jxl16(  # noqa: PLR0913
     """Pack an edited camera TIFF into JPEG XL at its own bit depth."""
     _check_complete(data, "jxl16")
     decoded = tiff.decode(data)
-    samples = render16.bake(decoded.samples, geometry.crop)
+    upright = render16.exif_orient(decoded.samples, decoded.orientation)
+    samples = render16.bake(upright, geometry.crop)
     samples = render16.scale_to_edge(samples, geometry.max_edge)
     samples = render16.add_border(
         samples,
@@ -544,6 +550,7 @@ def write_jxl16(  # noqa: PLR0913
         samples,
         path,
         quality=quality,
+        bits=decoded.bits,
         icc=tiff.icc_profile(data),
         exif=_exif_stream(
             data,
