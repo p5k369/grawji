@@ -242,7 +242,9 @@ def test_a_too_old_cjxl_still_leaves_plain_jxl(monkeypatch):
     formats = export.available_formats(xe5)
     assert "jxl" in formats
     assert "jxl16" not in formats
-    assert "a newer cjxl for 16-bit JPEG XL" in export.missing_tools(formats)
+    assert "a newer cjxl for camera-rendered JPEG XL" in export.missing_tools(
+        formats
+    )
 
 
 def test_jxl16_notices_a_jpeg_fallback():
@@ -258,7 +260,7 @@ def test_jxl16_round_trips_through_cjxl(tmp_path):
     samples = sample_frame(width=64, height=48, bits=16)
     data = written(tmp_path, samples, 16)
     out = tmp_path / "packed.jxl"
-    export.write_jxl16(
+    export.write_jxl_from_tiff(
         data,
         str(out),
         quality=100,
@@ -390,43 +392,13 @@ def test_jxl16_carries_the_color_space_across(tmp_path, monkeypatch):
 
     monkeypatch.setattr(export, "encode_jxl", spy)
     data = written(tmp_path, sample_frame(width=32, height=24), 16)
-    export.write_jxl16(
+    export.write_jxl_from_tiff(
         data,
         str(tmp_path / "out.jxl"),
         quality=90,
         geometry=export.Geometry(crop=CropRotate()),
     )
     assert "icc" in seen
-
-
-def test_the_session_raises_the_container_limit():
-    """The session lifts rawji's container limit on its own camera.
-
-    A full-resolution 16-bit TIFF is larger than rawji allows by
-    default, so without this no such export could be received.
-    """
-    from grawji.camera import core
-
-    class FakeCamera:
-        max_container_size = 512 * 1024 * 1024
-
-        def connect(self):
-            return False
-
-    camera = FakeCamera()
-    core._allow_large_containers(camera)
-    # A 102 MP frame at 16 bit needs 586 MiB plus its metadata.
-    assert camera.max_container_size >= 620 * 1024 * 1024
-
-
-def test_raising_the_limit_tolerates_an_older_rawji():
-    """A build without the attribute must not blow up on open."""
-    from grawji.camera import core
-
-    class Ancient:
-        __slots__ = ()
-
-    core._allow_large_containers(Ancient())
 
 
 def test_decode_reports_the_orientation_tag():

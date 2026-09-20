@@ -1,11 +1,11 @@
-"""Transfer grawji recipes into gen5 custom presets over USB.
+"""Transfer grawji recipes into custom presets over USB.
 
-XProcessor5 bodies expose the C1-C7 custom settings as PTP device
-properties (see grawji.preset_recipe), so writing a recipe is a plain
+Newer bodies expose the C1-C7 custom settings as PTP device properties
+(see grawji.preset_recipe), so writing a recipe is a plain
 SetDevicePropValue sequence on one connection: select the slot via
 0xD18C, write the name and the recipe properties in the X RAW Studio
 order, then read everything back to verify. There is no checksum and no
-object transfer, unlike the gen3/gen4 settings-blob path in
+object transfer, unlike the settings-blob path in
 grawji.camera_backup, which dispatches here when the connected body
 advertises the preset-slot property.
 """

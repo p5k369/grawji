@@ -34,12 +34,14 @@ _DRAG_ACTIONS = ["move", "copy"]
 # different mode of operation rather than one more notch.
 _QUALITY_HINT = "Higher means a larger file"
 _QUALITY_HINTS = {
+    "jxl8": "100 writes a lossless file, several times larger",
     "jxl16": "100 writes a lossless file, several times larger",
     "heif": "Higher means a larger file, with little gain above 85",
 }
 _FORMAT_LABELS = {
     "jpeg": "JPEG",
-    "jxl": "JPEG XL",
+    "jxl": "JPEG XL, from JPEG",
+    "jxl8": "JPEG XL, 8 bit",
     "jxl16": "JPEG XL, 16 bit",
     "heif": "HEIF",
     "tiff8": "TIFF, 8 bit",

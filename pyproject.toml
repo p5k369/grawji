@@ -15,7 +15,7 @@ dependencies = [
   "numpy",
   "pyusb",
   # rawji is not on PyPI and does not bump versions
-  "rawji @ git+https://github.com/pinpox/rawji@3b68b9c7ba23f2bef1cd9203652035a980eca1f7",
+  "rawji @ git+https://github.com/pinpox/rawji@02cb559bb1555b3f77e4b246cad06c44cff56c8e",
 ]
 
 [project.optional-dependencies]
