@@ -87,6 +87,10 @@ is the one body whose layout is mapped and hardware-verified.
   with the sim was confirmed on the X-S20 in the issue #108.
 - **Smooth Skin Effect** debuted on the GFX100 and was backported to the
   GFX 50S/50R by firmware.
+- **Custom settings over USB** need the PTP preset properties (0xD18C
+  to 0xD1A5). The X100F and X-T3 lack them, so grawji patches their
+  settings blob instead. From the X-Pro3 on, newer bodies should take
+  the preset path, but only the X-E5 and the X-S20 are tested.
 - **Custom banks** 7 on every body, except the PASM-mode-dial models
   where the banks are the dial's C positions, 4 on the X-S10, X-S20
   and X-M5, 6 on the GFX100S, GFX 50S II, GFX100 II and GFX100S II.

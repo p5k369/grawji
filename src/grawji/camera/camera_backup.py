@@ -13,7 +13,7 @@ which is authoritative because the blob came from the connected body. The
 blob_size guard in backup_recipe rejects a relative whose blob is not the
 expected size before anything is written.
 
-Gen5 bodies take a different route: they expose the C1-C7
+Newer bodies take a different route: they expose the C1-C7
 presets as plain PTP device properties, so when the connected body
 advertises the preset-slot property 0xD18C the transfer dispatches to
 grawji.camera_presets instead of patching the settings blob.
@@ -308,8 +308,8 @@ def transfer_recipes(
 ) -> TransferResult:
     """Write recipes (and optional names) into the camera's custom banks.
 
-    A gen5 body (preset properties advertised) is written over its first
-    connection and returns early. On the blob path each phase opens its
+    A body that advertises the preset properties is written over its
+    first connection and returns early. On the blob path each phase opens its
     own connection: the camera rejects a GetObject and a SendObject in
     one session with 0x200f, so download, restore and read-back must be
     separate connects.
