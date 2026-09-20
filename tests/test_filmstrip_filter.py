@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from grawji import catalog
+
 pytestmark = pytest.mark.gui
 
 PRIME = "XF35mmF1.4 R"
@@ -26,11 +28,15 @@ def strip(gtk: Any, tmp_path: Path) -> Any:
     built.opened = opened
     built.scan(str(tmp_path))
     paths = built.paths
-    built._meta = {
+    meta = {
         paths[0]: ThumbMeta("X-E5", PRIME, "35 mm"),
         paths[1]: ThumbMeta("X100F", "", "23 mm"),
         paths[2]: ThumbMeta("X-E5", TELE, "183.4 mm"),
     }
+    for path, seen in meta.items():
+        built._entries[path] = catalog.with_meta(
+            built._entries[path], seen.model, seen.lens, seen.focal
+        )
     return built
 
 
@@ -158,7 +164,10 @@ def test_sliders_absent_without_two_focals(strip: Any) -> None:
     """A single distinct focal length offers no range to filter."""
     from grawji.imaging.thumbnails import ThumbMeta
 
-    strip._meta = {p: ThumbMeta("X-E5", PRIME, "35 mm") for p in strip.paths}
+    strip._entries = {
+        path: catalog.with_meta(strip._entries[path], "X-E5", PRIME, "35 mm")
+        for path in strip.paths
+    }
     assert strip._build_focal_sliders() is None
 
 
@@ -184,6 +193,9 @@ def test_edit_badges_are_independent(strip: Any, tmp_path: Path) -> None:
 
 def test_unknown_metadata_stays_visible(strip: Any) -> None:
     """Cards still decoding keep showing under any filter."""
-    del strip._meta[strip.paths[0]]
+    pending = strip.paths[0]
+    strip._entries[pending] = catalog.with_meta(
+        strip._entries[pending], "", "", ""
+    )
     strip.set_filter(model="X100F", lens=None, focal=None)
     assert visible(strip) == ["a.RAF", "b.RAF"]
