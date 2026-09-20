@@ -24,6 +24,7 @@ from gi.repository import (
     PangoCairo,
 )
 
+from grawji import catalog
 from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
 from grawji.settings import cache_dir
 from grawji.sidecar import edit_flags
@@ -35,10 +36,7 @@ _GLIDE_PX_PER_S_DEFAULT = 600
 
 def _focal_mm(focal: str) -> float | None:
     """Parse a formatted focal length into millimeters."""
-    try:
-        return float(focal.split(maxsplit=1)[0])
-    except (ValueError, IndexError):
-        return None
+    return catalog.focal_mm(focal)
 
 
 # The focal sliders need at least two distinct stops to range over.
@@ -142,10 +140,8 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._glide_dir = 0
         self._glide_speed = float(_GLIDE_PX_PER_S_DEFAULT)
         self._folder: str | None = None
-        self._meta: dict[str, ThumbMeta] = {}
-        self._filter_model: str | None = None
-        self._filter_lens: str | None = None
-        self._filter_focal: tuple[float, float] | None = None
+        self._entries: dict[str, catalog.Entry] = {}
+        self._init_filter_state()
         self._monitor: Any = None
         self._reload_pending_id = 0
         self._thumbs = ThumbnailLoader(
@@ -175,6 +171,12 @@ class FilmStrip(Gtk.ScrolledWindow):
         self.get_hadjustment().connect("changed", self._on_range_changed)
         self.filter_button: Gtk.MenuButton | None = None
         self._filter_actions: dict[str, Gio.SimpleAction] = {}
+
+    def _init_filter_state(self) -> None:
+        """Start with every filter axis off."""
+        self._filter_model: str | None = None
+        self._filter_lens: str | None = None
+        self._filter_focal: tuple[float, float] | None = None
 
     def adopt_filter_button(self, button: Gtk.MenuButton) -> None:
         """Drive the window's funnel button with the filter menu."""
@@ -432,7 +434,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         if folder == self._folder and 0 <= self._current < len(self._paths):
             keep = self._paths[self._current]
         self._clear()
-        self._meta = {}
+        self._entries = {}
         if folder != self._folder:
             self._select_mode = False
             self.clear_selection()
@@ -440,11 +442,10 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._folder = folder
             self._watch(folder)
 
-        base = Path(folder)
-        paths = sorted(
-            {p for pat in ("*.RAF", "*.raf") for p in base.glob(pat)}
-        )
-        self._paths = [str(p) for p in paths]
+        entries = catalog.scan(folder)
+        self._entries = {entry.path: entry for entry in entries}
+        paths = [Path(entry.path) for entry in entries]
+        self._paths = [entry.path for entry in entries]
         self._buttons = []
         self._current = -1
         cards = []
@@ -791,9 +792,7 @@ class FilmStrip(Gtk.ScrolledWindow):
             if action is not None:
                 action.set_state(GLib.Variant.new_string(value or ""))
         if self.filter_button is not None:
-            active = bool(
-                self._filter_model or self._filter_lens or self._filter_focal
-            )
+            active = self._filter().is_active
             if active:
                 self.filter_button.add_css_class("accent")
             else:
@@ -801,40 +800,32 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def known_models(self) -> list[str]:
         """Camera models present in the folder, sorted."""
-        return sorted({m.model for m in self._meta.values() if m.model})
+        return catalog.cameras(self._entries.values())
 
     def known_lenses(self) -> list[str]:
         """Lens models present in the folder, sorted."""
-        return sorted({m.lens for m in self._meta.values() if m.lens})
+        return catalog.lenses(self._entries.values())
 
     def known_focals(self) -> list[str]:
         """Focal lengths present in the folder, sorted numerically."""
-        focals = {m.focal for m in self._meta.values() if m.focal}
+        focals = {e.focal for e in self._entries.values() if e.focal}
         return sorted(
             focals,
             key=lambda f: (_focal_mm(f) is None, _focal_mm(f) or 0.0, f),
         )
 
-    def _focal_passes(self, focal: str) -> bool:
-        """Whether a card's focal length passes the focal filter."""
-        if self._filter_focal is None:
-            return True
-        value = _focal_mm(focal)
-        if value is None:
-            return False
-        lo, hi = self._filter_focal
-        return lo <= value <= hi
+    def _filter(self) -> catalog.Filter:
+        """The active filter, as the model states it."""
+        return catalog.Filter(
+            camera=self._filter_model,
+            lens=self._filter_lens,
+            focal=self._filter_focal,
+        )
 
     def _matches_filter(self, path: str) -> bool:
         """Whether a card passes the active filter."""
-        meta = self._meta.get(path)
-        if meta is None:
-            return True
-        if self._filter_model is not None and meta.model != self._filter_model:
-            return False
-        if self._filter_lens is not None and meta.lens != self._filter_lens:
-            return False
-        return self._focal_passes(meta.focal)
+        entry = self._entries.get(path)
+        return entry is None or self._filter().matches(entry)
 
     def _apply_filter(self) -> None:
         """Show/hide cards per the filter, dropping hidden marks."""
@@ -932,7 +923,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         picture.set_size_request(pixbuf.get_width(), self._thumb_height)
         picture.set_paintable(texture_for_pixbuf(pixbuf))
         camera_label.set_text(meta.model)
-        self._meta[path] = meta
+        stored = self._entries.get(path)
+        if stored is not None:
+            self._entries[path] = catalog.with_meta(
+                stored, meta.model, meta.lens, meta.focal
+            )
         if self._filter_model or self._filter_lens or self._filter_focal:
             self._apply_filter()
 
