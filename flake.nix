@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rawji-src = {
-      url = "github:pinpox/rawji/3b68b9c7ba23f2bef1cd9203652035a980eca1f7";
+      url = "github:pinpox/rawji/02cb559bb1555b3f77e4b246cad06c44cff56c8e";
       flake = false;
     };
   };

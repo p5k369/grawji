@@ -87,13 +87,14 @@ def with_border(
 
 
 # Export formats, in the order the preferences list them.
-FORMATS = ("jpeg", "jxl", "jxl16", "heif", "tiff8", "tiff16")
+FORMATS = ("jpeg", "jxl", "jxl8", "jxl16", "heif", "tiff8", "tiff16")
 # Every JPEG ends with an end-of-image marker.
 _JPEG_END = b"\xff\xd9"
 _SUFFIXES = {
     "jpeg": ".jpg",
     "jxl": ".jxl",
     "heif": ".heif",
+    "jxl8": ".jxl",
     "jxl16": ".jxl",
     "tiff8": ".tif",
     "tiff16": ".tif",
@@ -103,14 +104,17 @@ _CAMERA_TYPES = {
     "heif": "heif",
     "tiff8": "tiff8",
     "tiff16": "tiff16",
+    "jxl8": "tiff8",
     "jxl16": "tiff16",
 }
 # The formats that arrive from the camera as a TIFF.
-_FROM_TIFF = ("tiff8", "tiff16", "jxl16")
+_FROM_TIFF = ("tiff8", "tiff16", "jxl8", "jxl16")
+# The JPEG XL formats the camera renders as a TIFF first.
+_JXL_FROM_TIFF = ("jxl8", "jxl16")
 _TIFF_BITS = {"tiff8": 8, "tiff16": 16}
 _EIGHT_BIT = 8
 # Formats whose file size and fidelity answer to the quality setting.
-_SCALES_QUALITY = ("jpeg", "jxl", "jxl16", "heif")
+_SCALES_QUALITY = ("jpeg", "jxl", "jxl8", "jxl16", "heif")
 # A four-pixel frame and the smallest valid Exif stream, used once to
 # ask cjxl what it can really do.
 _PROBE_PPM = b"P6\n2 2\n65535\n" + bytes(24)
@@ -176,12 +180,15 @@ def available_formats(
     body_can_tiff16 = capabilities is None or capabilities.has_tiff16
     if jxl_available():
         usable.append("jxl")
+    body_can_tiff8 = capabilities is None or capabilities.has_tiff8
+    if jxl16_available() and body_can_tiff8:
+        usable.append("jxl8")
     if jxl16_available() and body_can_tiff16:
         usable.append("jxl16")
     body_can_heif = capabilities is None or capabilities.has_heif
     if heif_available() and body_can_heif:
         usable.append("heif")
-    if capabilities is None or capabilities.has_tiff8:
+    if body_can_tiff8:
         usable.append("tiff8")
     if body_can_tiff16:
         usable.append("tiff16")
@@ -195,8 +202,9 @@ def missing_tools(formats: tuple[str, ...]) -> tuple[str, ...]:
         missing.append("cjxl")
     if "heif" not in formats and not heif_codec.available():
         missing.append("libheif with an HEVC encoder and decoder")
-    if "jxl16" not in formats and jxl_available() and not jxl16_available():
-        missing.append("a newer cjxl for 16-bit JPEG XL")
+    camera_jxl = {"jxl8", "jxl16"} - set(formats)
+    if camera_jxl and jxl_available() and not jxl16_available():
+        missing.append("a newer cjxl for camera-rendered JPEG XL")
     return tuple(missing)
 
 
@@ -369,12 +377,13 @@ def write_passthrough(  # noqa: PLR0913
 ) -> None:
     """Write the camera's own bytes, credits stamped, no re-encode."""
     _check_complete(data, fmt)
-    if fmt == "jxl16":
-        write_jxl16(
+    if fmt in _JXL_FROM_TIFF:
+        write_jxl_from_tiff(
             data,
             path,
             quality=quality,
             geometry=Geometry(crop=CropRotate()),
+            fmt=fmt,
             artist=artist,
             rights=rights,
             comment=comment,
@@ -524,18 +533,19 @@ def write_tiff(
     )
 
 
-def write_jxl16(  # noqa: PLR0913
+def write_jxl_from_tiff(  # noqa: PLR0913
     data: bytes,
     path: str,
     *,
     quality: int,
     geometry: Geometry,
+    fmt: str = "jxl16",
     artist: str = "",
     rights: str = "",
     comment: str = "",
 ) -> None:
     """Pack an edited camera TIFF into JPEG XL at its own bit depth."""
-    _check_complete(data, "jxl16")
+    _check_complete(data, fmt)
     decoded = tiff.decode(data)
     upright = render16.exif_orient(decoded.samples, decoded.orientation)
     samples = render16.bake(upright, geometry.crop)
@@ -575,14 +585,15 @@ def write_jpeg(  # noqa: PLR0913
     geometry: Geometry | None = None,
 ) -> None:
     """Write jpeg to path with orientation and rotation baked in."""
-    if fmt == "jxl16":
+    if fmt in _JXL_FROM_TIFF:
         if geometry is None:
-            raise ValueError("a 16-bit JPEG XL export needs its geometry")
-        write_jxl16(
+            raise ValueError("a camera-rendered JPEG XL needs its geometry")
+        write_jxl_from_tiff(
             jpeg,
             path,
             quality=quality,
             geometry=geometry,
+            fmt=fmt,
             artist=artist,
             rights=rights,
             comment=comment,

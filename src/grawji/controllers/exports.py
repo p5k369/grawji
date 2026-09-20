@@ -70,6 +70,7 @@ class _ExportJob:
 _EXPORT_TITLES = {
     "jpeg": "Export JPEG",
     "jxl": "Export JPEG XL",
+    "jxl8": "Export JPEG XL",
     "jxl16": "Export JPEG XL",
     "heif": "Export HEIF",
     "tiff8": "Export TIFF",
