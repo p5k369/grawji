@@ -31,6 +31,9 @@ _CHAIN_OFFSET = 3.0
 # Segments within this many degrees of a cluster's running mean fold
 # into one candidate.
 _CLUSTER_TOL = 1.0
+# A photograph is usually close to level, so a far-off candidate has to
+# be this much heavier to win.
+_TILT_PRIOR = 3.0
 # The Scharr window needs a pixel of border on every side.
 _MIN_SIZE = 3
 # A candidate needs at least this share of the total segment weight.
@@ -269,6 +272,18 @@ def _segments_of(
     return segments
 
 
+def _mean_delta(members: Sequence[Segment]) -> float:
+    """The weighted leveling angle of one cluster."""
+    weight = sum(member.weight for member in members)
+    return sum(member.delta * member.weight for member in members) / weight
+
+
+def _score(members: Sequence[Segment]) -> float:
+    """Cluster weight, damped by how far it would turn the image."""
+    weight = sum(member.weight for member in members)
+    return weight / (1.0 + (_mean_delta(members) / _TILT_PRIOR) ** 2)
+
+
 def suggest_candidates(
     gray: Sequence[Sequence[int]], limit: int = _MAX_CANDIDATES
 ) -> list[Candidate]:
@@ -285,16 +300,12 @@ def suggest_candidates(
     for segment in segments:
         if clusters:
             members = clusters[-1]
-            weight = sum(m.weight for m in members)
-            mean = sum(m.delta * m.weight for m in members) / weight
-            if abs(segment.delta - mean) <= _CLUSTER_TOL:
+            if abs(segment.delta - _mean_delta(members)) <= _CLUSTER_TOL:
                 members.append(segment)
                 continue
         clusters.append([segment])
     total = sum(seg.weight for seg in segments)
-    ranked = sorted(
-        clusters, key=lambda members: -sum(m.weight for m in members)
-    )
+    ranked = sorted(clusters, key=lambda members: -_score(members))
     out: list[Candidate] = []
     for members in ranked[:limit]:
         weight = sum(m.weight for m in members)
@@ -303,7 +314,7 @@ def suggest_candidates(
         heaviest = sorted(members, key=lambda m: -m.weight)
         out.append(
             Candidate(
-                delta=sum(m.delta * m.weight for m in members) / weight,
+                delta=_mean_delta(members),
                 segments=tuple(m.endpoints for m in heaviest[:_MARK_SEGMENTS]),
             )
         )

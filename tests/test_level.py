@@ -39,17 +39,17 @@ def edge_rows(tilt_deg: float, *, vertical: bool = False) -> list[list[int]]:
     return rows
 
 
-def two_family_rows() -> list[list[int]]:
-    """A strong edge tilted 3 degrees plus a weaker level edge."""
+def two_family_rows(level_amplitude: int = 165) -> list[list[int]]:
+    """An edge tilted 3 degrees plus a level one of the given strength."""
     slope = math.tan(math.radians(3.0))
     rows = []
     for y in range(HEIGHT):
         row = []
         for x in range(WIDTH):
-            strong = y - (HEIGHT * 0.3 + slope * x)
-            weak = y - HEIGHT * 0.72
-            value = 600 * min(1.0, max(0.0, 0.5 + strong / 2.0))
-            value += 165 * min(1.0, max(0.0, 0.5 + weak / 2.0))
+            tilted = y - (HEIGHT * 0.3 + slope * x)
+            flat = y - HEIGHT * 0.72
+            value = 600 * min(1.0, max(0.0, 0.5 + tilted / 2.0))
+            value += level_amplitude * min(1.0, max(0.0, 0.5 + flat / 2.0))
             row.append(round(value))
         rows.append(row)
     return rows
@@ -119,11 +119,17 @@ def test_single_edge_yields_one_candidate():
 
 
 def test_two_families_ranked():
-    """A dominant tilted line and a weaker level one both surface."""
+    """A barely heavier tilted line does not outvote a level one."""
     deltas = suggest_deltas(two_family_rows())
     assert len(deltas) == 2
+    assert abs(deltas[0]) < 0.1
+    assert abs(deltas[1] + 3.0) < 0.1
+
+
+def test_a_dominant_tilt_still_wins():
+    """Enough evidence beats the preference for a small correction."""
+    deltas = suggest_deltas(two_family_rows(level_amplitude=20))
     assert abs(deltas[0] + 3.0) < 0.1
-    assert abs(deltas[1]) < 0.1
 
 
 def test_candidates_carry_segments_along_the_edge():
