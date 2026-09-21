@@ -47,11 +47,26 @@ class FilmStripNav:
     def attach_keys(self, window: Gtk.Window) -> None:
         """Bind Left/Right on window to the same tap/hold scrolling."""
         self._window = window
+        window.connect("notify::is-active", self._on_window_active)
         keys = Gtk.EventControllerKey()
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         keys.connect("key-pressed", self._on_key_pressed)
         keys.connect("key-released", self._on_key_released)
         window.add_controller(keys)
+
+    def _on_window_active(self, window: Gtk.Window, _param: Any) -> None:
+        """Stop a held glide when the window stops being the active one."""
+        if window.is_active():
+            return
+        self.cancel_hold()
+
+    def cancel_hold(self) -> None:
+        """Forget a held key or button and stop any glide."""
+        if self._key_hold is not None:
+            GLib.source_remove(self._key_hold)
+            self._key_hold = None
+        self._key_dir = 0
+        self._strip.stop_glide()
 
     def update(self) -> None:
         """Enable each arrow only when the strip can scroll that way."""

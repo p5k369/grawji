@@ -159,3 +159,11 @@ def test_the_popover_lists_only_what_is_present():
     assert catalog.cameras(entries) == ["X-E5", "X-T3"]
     assert catalog.lenses(entries) == ["XF23mmF2"]
     assert catalog.focal_stops(entries) == [23.0]
+
+
+def test_an_edit_updates_the_entry():
+    """Saving a crop must reach the model, or the filter goes stale."""
+    plain = entry("a.RAF")
+    edited = catalog.with_edits(plain, True, False)
+    assert not plain.edited
+    assert edited.edited and edited.has_crop and not edited.has_ev

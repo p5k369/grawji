@@ -40,13 +40,14 @@ def strip(gtk: Any, tmp_path: Path) -> Any:
     return built
 
 
+def settle(strip: Any) -> None:
+    """Apply a focal range at once, the slider debounce aside."""
+    strip._apply_focal_now()
+
+
 def visible(strip: Any) -> list[str]:
-    """Basenames of the cards the filter shows."""
-    return [
-        Path(path).name
-        for path, button in zip(strip._paths, strip._buttons, strict=True)
-        if button.get_visible()
-    ]
+    """Basenames of the frames the filter leaves."""
+    return [Path(path).name for path in strip.visible_paths]
 
 
 def _descendants(widget: Any) -> list[Any]:
@@ -145,9 +146,11 @@ def test_focal_sliders_snap_to_folder_values(strip: Any) -> None:
     low, high = _scales(widget)
     assert (low.get_value(), high.get_value()) == (0.0, 2.0)
     low.set_value(1.0)  # from "35 mm" upward
+    settle(strip)
     assert strip._filter_focal == (35.0, 183.4)
     assert visible(strip) == ["a.RAF", "c.RAF"]
     high.set_value(1.0)  # collapse the range onto exactly 35 mm
+    settle(strip)
     assert strip._filter_focal == (35.0, 35.0)
     assert visible(strip) == ["a.RAF"]
 
@@ -156,6 +159,7 @@ def test_focal_sliders_push_each_other(strip: Any) -> None:
     """Dragging one handle past the other carries it along."""
     low, high = _scales(strip._build_focal_sliders())
     high.set_value(0.0)
+    settle(strip)
     assert low.get_value() == 0.0
     assert strip._filter_focal == (23.0, 23.0)
 
@@ -180,15 +184,16 @@ def test_edit_badges_are_independent(strip: Any, tmp_path: Path) -> None:
     target = strip.paths[0]
     sidecar_path(target).write_text(json.dumps({"exposure": 0.7}))
     strip.refresh_badges(target)
-    badges = strip._badges[target]
-    assert badges["ev"].get_visible()
-    assert not badges["crop"].get_visible()
+    entry = strip._entries[target]
+    assert entry.has_ev
+    assert not entry.has_crop
     sidecar_path(target).write_text(
         json.dumps({"crop": {"angle": 1.0, "rect": [0, 0, 1, 1]}})
     )
     strip.refresh_badges(target)
-    assert not badges["ev"].get_visible()
-    assert badges["crop"].get_visible()
+    entry = strip._entries[target]
+    assert not entry.has_ev
+    assert entry.has_crop
 
 
 def test_unknown_metadata_stays_visible(strip: Any) -> None:
@@ -199,3 +204,209 @@ def test_unknown_metadata_stays_visible(strip: Any) -> None:
     )
     strip.set_filter(model="X100F", lens=None, focal=None)
     assert visible(strip) == ["a.RAF", "b.RAF"]
+
+
+def test_the_focal_slider_waits_for_the_drag_to_settle(strip: Any) -> None:
+    """Every pixel of a drag must not re-filter the folder."""
+    low, _high = _scales(strip._build_focal_sliders())
+    low.set_value(1.0)
+    assert strip._filter_focal is None
+    assert strip._focal_pending
+    settle(strip)
+    assert strip._filter_focal == (35.0, 183.4)
+
+
+def test_a_saved_crop_lights_the_badge_on_the_card(
+    window: Any, tmp_path: Path
+) -> None:
+    """The card on screen shows the edit, not only the entry behind it."""
+    import json
+    import time
+
+    from grawji.sidecar import sidecar_path
+    from tests.gui_support import pump
+
+    (tmp_path / "a.RAF").write_bytes(b"not a real raf")
+    window.set_default_size(900, 700)
+    window.present()
+    window._scan_folder(str(tmp_path))
+    for _ in range(20):
+        pump()
+        time.sleep(0.004)
+    strip = window._filmstrip
+    target = strip.paths[0]
+    card = next(b for b, path in strip._card_path.items() if path == target)
+    assert not strip._cards[card]["crop"].get_visible()
+    sidecar_path(target).write_text(
+        json.dumps({"crop": {"angle": 1.0, "rect": [0, 0, 1, 1]}})
+    )
+    strip.refresh_badges(target)
+    assert strip._cards[card]["crop"].get_visible()
+
+
+def test_a_stale_glide_cannot_fight_the_next_scroll(
+    window: Any, tmp_path: Path
+) -> None:
+    """A missed key release must not leave the strip gliding forever."""
+    import time
+
+    from tests.gui_support import pump
+
+    for index in range(40):
+        (tmp_path / f"{index:03}.RAF").write_bytes(b"not a real raf")
+    window.set_size_request(900, 700)
+    window.present()
+    window._scan_folder(str(tmp_path))
+    for _ in range(20):
+        pump()
+        time.sleep(0.004)
+    strip = window._filmstrip
+    strip.start_glide(1)  # as if the release never arrived
+    for _ in range(10):
+        pump()
+        time.sleep(0.004)
+    strip.scroll_step(1)
+    resting = strip.get_hadjustment().get_value()
+    for _ in range(20):
+        pump()
+        time.sleep(0.004)
+    assert abs(strip.get_hadjustment().get_value() - resting) <= 2
+
+
+def test_leaving_the_window_ends_a_glide(window: Any, tmp_path: Path) -> None:
+    """Losing focus with a key down would otherwise glide on."""
+    (tmp_path / "a.RAF").write_bytes(b"not a real raf")
+    window._scan_folder(str(tmp_path))
+    strip = window._filmstrip
+    strip.start_glide(-1)
+    assert strip._glide_tick is not None
+    window._nav.cancel_hold()
+    assert strip._glide_tick is None
+
+
+def test_a_selection_made_before_the_window_shows_still_lays_out(
+    window: Any, tmp_path: Path
+) -> None:
+    """Startup picks a frame before the window appears, and that broke it."""
+    import time
+
+    from tests.gui_support import pump
+
+    for index in range(60):
+        (tmp_path / f"{index:03}.RAF").write_bytes(b"not a real raf")
+    strip = window._filmstrip
+    window._scan_folder(str(tmp_path))
+    strip.select_path(str(tmp_path / "030.RAF"))
+    window.set_size_request(900, 700)
+    window.present()
+    end = time.perf_counter() + 1.0
+    while time.perf_counter() < end:
+        pump()
+        time.sleep(0.004)
+    placed = 0
+    item = strip._view.get_first_child()
+    while item is not None:
+        button = item.get_first_child()
+        if button is not None and button.get_width() > 0:
+            placed += 1
+        item = item.get_next_sibling()
+    assert placed > 1
+
+
+def test_the_current_card_is_marked_and_the_css_can_reach_it(
+    strip: Any,
+) -> None:
+    """Cards are boxes now, so the rules must not name a button."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from grawji.views.window import _CANVAS_CSS
+    from tests.gui_support import pump
+
+    holder = Gtk.Window()
+    holder.set_default_size(800, 200)
+    holder.set_child(strip)
+    holder.present()
+    for _ in range(40):
+        pump()
+        if strip._card_path:
+            break
+    assert strip._card_path, "no card was bound"
+    strip.select_path(strip.paths[1], notify=False)
+    marked = [
+        card
+        for card, path in strip._card_path.items()
+        if card.has_css_class("thumb-selected")
+    ]
+    assert [strip._card_path[card] for card in marked] == [strip.paths[1]]
+    assert "button.thumb" not in _CANVAS_CSS
+    assert ".thumb.thumb-selected" in _CANVAS_CSS
+
+
+def test_selecting_a_far_frame_brings_the_strip_to_it(
+    gtk: Any, tmp_path: Path
+) -> None:
+    """The list defers its own scroll, so the strip jumps there itself."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from grawji.views.filmstrip import FilmStrip
+    from tests.gui_support import pump
+
+    for index in range(300):
+        (tmp_path / f"{index:03}.RAF").write_bytes(b"not a real raf")
+    strip = FilmStrip(on_select=lambda _p: None)
+    holder = Gtk.Window()
+    holder.set_default_size(800, 200)
+    holder.set_child(strip)
+    holder.present()
+    strip.scan(str(tmp_path))
+    for _ in range(60):
+        pump()
+        if strip._card_path:
+            break
+    adjustment = strip.get_hadjustment()
+    far = adjustment.get_upper() - adjustment.get_page_size()
+    assert far > 0, "the strip has to be scrollable for this to mean anything"
+    adjustment.set_value(far)
+    strip.select_path(strip.paths[0], notify=False)
+    assert adjustment.get_value() < adjustment.get_page_size()
+
+
+def test_one_arrow_press_moves_the_strip_by_one_card(
+    gtk: Any, tmp_path: Path
+) -> None:
+    """A step used to land mid card, which reads as barely moving."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from grawji.views.filmstrip import FilmStrip
+    from tests.gui_support import pump
+
+    for index in range(60):
+        (tmp_path / f"{index:03}.RAF").write_bytes(b"not a real raf")
+    strip = FilmStrip(on_select=lambda _p: None)
+    holder = Gtk.Window()
+    holder.set_default_size(800, 200)
+    holder.set_child(strip)
+    holder.present()
+    strip.scan(str(tmp_path))
+    for _ in range(60):
+        pump()
+        if strip._card_path:
+            break
+    card = next(iter(strip._card_path))
+    width = card.get_width()
+    assert width > 0
+    adjustment = strip.get_hadjustment()
+    strip.scroll_step(1)
+    moved = adjustment.get_value()
+    assert moved >= width / 2, f"a step moved {moved} of a {width} card"
+    strip.scroll_step(1)
+    assert adjustment.get_value() - moved >= width / 2

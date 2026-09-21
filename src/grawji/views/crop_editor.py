@@ -157,6 +157,7 @@ class CropEditor:
         self._sync_swap(active=self.geometry.aspect_swapped)
         self.conform()
         self._sync_angle(self.geometry.angle)
+        self._view.crop_bar.set_visible(True)
         self._view.crop_bar.set_reveal_child(True)
         self._view.crop_overlay.set_visible(True)
         self._redisplay(histogram=False)

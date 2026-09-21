@@ -35,6 +35,9 @@ class Entry:
     # Exif spells capture time as "YYYY:MM:DD HH:MM:SS", which sorts
     # correctly as text, so it stays a string until someone needs more.
     shot: str = ""
+    # Width over height of the frame as shown, known once a thumbnail
+    # has been decoded.
+    aspect: float = 0.0
 
     @property
     def edited(self) -> bool:
@@ -157,6 +160,16 @@ def scan(folder: Path | str) -> list[Entry]:
 def with_meta(entry: Entry, model: str, lens: str, focal: str) -> Entry:
     """The entry again, with the metadata the thumbnail pass read."""
     return replace(entry, model=model, lens=lens, focal=focal)
+
+
+def with_aspect(entry: Entry, aspect: float) -> Entry:
+    """The entry again, now that the frame's shape is known."""
+    return replace(entry, aspect=aspect)
+
+
+def with_edits(entry: Entry, has_crop: bool, has_ev: bool) -> Entry:
+    """The entry again, with the sidecar read afresh."""
+    return replace(entry, has_crop=has_crop, has_ev=has_ev)
 
 
 def apply(

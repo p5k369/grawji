@@ -37,6 +37,7 @@ _SHORTCUT_GROUPS = {
         ("Cycle background", "b"),
         ("Show original (before/after)", "backslash"),
         ("Toggle histogram", "h"),
+        ("Switch between developing and browsing", "g"),
         ("Crop and straighten", "c"),
         ("Apply crop", "Return"),
         ("Cancel crop", "Escape"),

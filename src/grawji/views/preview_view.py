@@ -40,6 +40,8 @@ from grawji.views.paintables import (
 from grawji.views.textures import texture_for_pixbuf
 from grawji.views.widgets import Histogram
 
+# Allocations forced per shown image to straighten a stale offset.
+_MAX_REPAIRS = 4
 # Longest edge of the image used while crop-editing.
 _EDIT_MAX_EDGE = 2560
 
@@ -48,7 +50,7 @@ ZOOM_STEP = 1.15
 # Zoom ceiling relative to the image's native pixels (800%)
 MAX_NATIVE_ZOOM = 8.0
 
-# Preview canvas backgrounds, cycled by the toolbar button (darktable-style).
+# Preview canvas backgrounds, cycled by the toolbar button.
 BACKGROUNDS = ["", "canvas-white", "canvas-gray", "canvas-black"]
 
 _UI = (
@@ -56,6 +58,14 @@ _UI = (
     .joinpath("ui", "preview_view.ui")
     .read_text(encoding="utf-8")
 )
+
+
+def _fraction(adjustment: Any, content: float) -> float:
+    """Fraction of the content the middle of the viewport covers."""
+    if content <= 0:
+        return 0.5
+    seen = min(adjustment.get_page_size(), content)
+    return (adjustment.get_value() + seen / 2) / content
 
 
 def _capped_copy(pixbuf: Any) -> Any:
@@ -96,6 +106,9 @@ class PreviewView(Gtk.Box):
     spinner = Gtk.Template.Child()
     status = Gtk.Template.Child()
     zoom_label = Gtk.Template.Child()
+    camera_status = Gtk.Template.Child()
+    camera_status_icon = Gtk.Template.Child()
+    camera_status_label = Gtk.Template.Child()
     size_label = Gtk.Template.Child()
     peek_button = Gtk.Template.Child()
     clip_button = Gtk.Template.Child()
@@ -147,7 +160,16 @@ class PreviewView(Gtk.Box):
         self._clip_overlay: Any = None
         self._clip_generation = 0
         self._clip_dispatch = GLib.idle_add
+        self._viewport = (0, 0)
+        self._refit_pending = 0
+        self._repairs = _MAX_REPAIRS
+        self._centre = (0.5, 0.5)
+        self._clamping = False
+        self._check_tick = 0
 
+        self.crop_bar.connect(
+            "notify::child-revealed", self._on_crop_bar_revealed
+        )
         self.rotate_left.connect("clicked", lambda *_a: self.rotate(-90))
         self.rotate_right.connect("clicked", lambda *_a: self.rotate(90))
         self.clip_button.connect("toggled", self._on_clip_toggled)
@@ -159,6 +181,11 @@ class PreviewView(Gtk.Box):
         self._histogram.set_vexpand(True)
         self.histogram_slot.append(self._histogram)
         self._init_viewport_controllers()
+
+    def _on_crop_bar_revealed(self, *_args: object) -> None:
+        """Take the crop bar out of the layout once it has slid away."""
+        if not self.crop_bar.get_child_revealed():
+            self.crop_bar.set_visible(False)
 
     def _init_edit_state(self) -> None:
         """Initialize the geometry and edit-display state fields."""
@@ -227,6 +254,18 @@ class PreviewView(Gtk.Box):
     def peeking(self) -> bool:
         """Whether the in-camera original is currently shown."""
         return self._peek
+
+    def set_camera(self, model: str | None) -> None:
+        """Show which body is connected, beside the other readouts."""
+        self.camera_status_label.set_label(model or "")
+        self.camera_status.set_tooltip_text(
+            f"{model} connected" if model else "No camera connected"
+        )
+        for widget in (self.camera_status, self.camera_status_icon):
+            if model:
+                widget.add_css_class("camera-connected")
+            else:
+                widget.remove_css_class("camera-connected")
 
     def set_status(self, text: str) -> None:
         """Set the status-line text."""
@@ -566,6 +605,21 @@ class PreviewView(Gtk.Box):
         self._anchor_scroll(hadj, fx, ax, self._content_w, vw)
         self._anchor_scroll(vadj, fy, ay, self._content_h, vh)
 
+    def _refit_now(self) -> bool:
+        """Re-apply the zoom for the new viewport, around its center."""
+        self._refit_pending = 0
+        hadj = self.scroll.get_hadjustment()
+        vadj = self.scroll.get_vadjustment()
+        vw, vh = self.scroll.get_width(), self.scroll.get_height()
+        if vw <= 0 or vh <= 0:
+            return GLib.SOURCE_REMOVE
+        fx, fy = self._centre
+        self._apply_zoom()
+        self._anchor_scroll(hadj, fx, vw / 2, self._content_w, vw)
+        self._anchor_scroll(vadj, fy, vh / 2, self._content_h, vh)
+        self._refit_pending = 0
+        return GLib.SOURCE_REMOVE
+
     def _fit_scale(self) -> float | None:
         """The fit-to-viewport scale of the shown image."""
         dims = self._display_dims()
@@ -759,13 +813,79 @@ class PreviewView(Gtk.Box):
         return True
 
     def _on_viewport_scrolled(self, _adj: Any) -> None:
-        """Keep the crop overlay glued to the image while panning."""
+        """Follow a pan."""
         if self._crop_editor.editing:
             self.crop_overlay.queue_draw()
+        self._clamp_scroll()
+        self._note_centre()
+        self._verify_placement()
 
     def _on_viewport_changed(self, _adj: Any) -> None:
-        """Refresh the zoom readout when the viewport geometry changes."""
+        """Follow a viewport change."""
         self._update_zoom_label()
+        self._refit_for_viewport()
+        self._clamp_scroll()
+        self._verify_placement()
+
+    def _refit_for_viewport(self) -> None:
+        """Re-center a zoomed image when the viewport changes size."""
+        size = (
+            int(self.scroll.get_hadjustment().get_page_size()),
+            int(self.scroll.get_vadjustment().get_page_size()),
+        )
+        if size == self._viewport or 0 in size:
+            return
+        self._viewport = size
+        if self._zoom == 1.0 or self._refit_pending:
+            return
+        self._refit_pending = GLib.idle_add(
+            self._refit_now, priority=GLib.PRIORITY_HIGH_IDLE
+        )
+
+    def _check_placement_next_frame(self) -> None:
+        """Look at where the image landed once the layout has run."""
+        if self._check_tick:
+            return
+        self._check_tick = self.add_tick_callback(self._on_check_tick)
+
+    def _on_check_tick(self, _widget: Any, _clock: Any) -> bool:
+        """Straighten the image one frame after it was resized."""
+        self._check_tick = 0
+        self._clamp_scroll()
+        self._verify_placement()
+        return GLib.SOURCE_REMOVE
+
+    def _verify_placement(self) -> None:
+        """Put the image back when the viewport keeps a stale offset."""
+        if self._repairs <= 0:
+            return
+        found, rect = self.picture.compute_bounds(self.scroll)
+        if not found:
+            return
+        sides = (
+            (self.scroll.get_width(), rect.origin.x, rect.size.width),
+            (self.scroll.get_height(), rect.origin.y, rect.size.height),
+        )
+        for size, origin, extent in sides:
+            if extent <= 0 or extent > size:
+                continue
+            if abs(origin - (size - origin - extent)) > 1:
+                self._repairs -= 1
+                self.scroll.queue_allocate()
+                self.picture.queue_allocate()
+                return
+
+    def _note_centre(self) -> None:
+        """Remember which point of the image the viewport has centred."""
+        hadj = self.scroll.get_hadjustment()
+        vadj = self.scroll.get_vadjustment()
+        page = (int(hadj.get_page_size()), int(vadj.get_page_size()))
+        if self._refit_pending or page != self._viewport:
+            return
+        self._centre = (
+            _fraction(hadj, self._content_w),
+            _fraction(vadj, self._content_h),
+        )
 
     def _update_zoom_label(self) -> None:
         """Show the on-screen scale as a percentage of native pixels."""
@@ -842,6 +962,9 @@ class PreviewView(Gtk.Box):
         vw = self.scroll.get_width() or pw
         vh = self.scroll.get_height() or ph
         if self._zoom == 1.0:
+            self._content_w, self._content_h = vw, vh
+            self._repairs = _MAX_REPAIRS
+            self._clamp_scroll()
             self.picture.set_can_shrink(True)
             self.picture.set_halign(Gtk.Align.FILL)
             self.picture.set_valign(Gtk.Align.FILL)
@@ -850,20 +973,42 @@ class PreviewView(Gtk.Box):
             )
             if not comparing:
                 self._split = None
-            self._content_w, self._content_h = vw, vh
             self._shown_size = (pw, ph)
+            self._check_placement_next_frame()
             self._update_zoom_label()
             return
         fit = min(vw / pw, vh / ph)
         sw = max(1, int(pw * fit * self._zoom))
         sh = max(1, int(ph * fit * self._zoom))
+        self._content_w, self._content_h = sw, sh
+        self._repairs = _MAX_REPAIRS
+        self._clamp_scroll()
         self.picture.set_can_shrink(False)
         self.picture.set_halign(Gtk.Align.CENTER)
         self.picture.set_valign(Gtk.Align.CENTER)
         self.picture.set_paintable(paintable(sw, sh))
-        self._content_w, self._content_h = sw, sh
         self._shown_size = (pw, ph)
+        self._check_placement_next_frame()
         self._update_zoom_label()
+
+    def _clamp_scroll(self) -> None:
+        """Keep the scroll inside the image that is shown now."""
+        if self._clamping:
+            return
+        self._clamping = True
+        try:
+            for adjustment, content in (
+                (self.scroll.get_hadjustment(), self._content_w),
+                (self.scroll.get_vadjustment(), self._content_h),
+            ):
+                page = adjustment.get_page_size()
+                top = max(0.0, content - page)
+                if adjustment.get_value() > top:
+                    adjustment.set_value(top)
+                if top <= 0 and adjustment.get_upper() > page:
+                    adjustment.set_upper(page)
+        finally:
+            self._clamping = False
 
     def apply_crop(self) -> None:
         """Commit the crop edit."""

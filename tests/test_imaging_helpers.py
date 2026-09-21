@@ -148,3 +148,46 @@ def test_flatten_alpha_passes_rgb_through():
     """An already-RGB pixbuf is returned as-is, not copied."""
     rgb = _flat_pixbuf(4, 4, 90)
     assert flatten_alpha(rgb) is rgb
+
+
+@pytest.mark.parametrize(
+    ("ratio", "expected"),
+    [
+        (3 / 2, (160, 107)),
+        (16 / 9, (160, 90)),
+        (1.0, (120, 120)),
+        (65 / 24, (160, 59)),
+        (4 / 3, (160, 120)),
+    ],
+)
+def test_the_camera_padding_comes_off_every_aspect(gtk, ratio, expected):
+    """A 4:3 thumbnail holds any shape, and only the padding goes."""
+    from grawji.imaging.pixbufs import crop_to_aspect
+
+    padded = _solid(160, 120)
+    cut = crop_to_aspect(padded, ratio)
+    assert (cut.get_width(), cut.get_height()) == expected
+
+
+def test_a_dark_frame_keeps_its_content(gtk):
+    """Arithmetic, not darkness, decides the crop, so a night sky stays."""
+    from grawji.imaging.pixbufs import crop_to_aspect, trim_letterbox
+
+    night = _solid(160, 120, value=150)
+    night.fill(0x080808FF)
+    assert trim_letterbox(night).get_height() < 120
+    assert crop_to_aspect(_solid(160, 120), 3 / 2).get_height() == 107
+
+
+def _solid(width: int, height: int, value: int = 150):
+    """A plain pixbuf to cut up."""
+    import gi
+
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+
+    pixbuf = GdkPixbuf.Pixbuf.new(
+        GdkPixbuf.Colorspace.RGB, False, 8, width, height
+    )
+    pixbuf.fill((value << 24) | (value << 16) | (value << 8) | 0xFF)
+    return pixbuf
