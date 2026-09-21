@@ -143,11 +143,6 @@ _UI = (
 )
 
 
-# Tile size range of the folder grid, in pixels.
-_GRID_MIN_PX = 120
-_GRID_MAX_PX = 400
-
-
 @Gtk.Template(string=_UI)
 class MainWindow(Adw.ApplicationWindow):
     """grawji main window: browse RAFs, tune recipe, preview, export."""
@@ -508,9 +503,6 @@ class MainWindow(Adw.ApplicationWindow):
                 # this size comes from the RAF's full preview instead.
                 sharp=True,
                 dispatch=GLib.idle_add,
-                is_stale=lambda _scan: False,
-                on_thumb=lambda *_a: None,
-                on_finished=lambda _scan: None,
             ),
             tile=self._settings.grid_tile_px,
             on_activate=self._on_grid_activated,

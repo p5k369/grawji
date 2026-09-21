@@ -9,7 +9,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -116,15 +115,13 @@ class ThumbMeta(NamedTuple):
 
 
 Dispatch = Callable[[Callable[[], None]], Any]
-OnThumb = Callable[[str, Any, Any, Any, ThumbMeta, int], None]
-OnFinished = Callable[[int], None]
 OnOne = Callable[[str, Any, ThumbMeta], None]
 
 
 class ThumbnailLoader:
     """Loads a scan's thumbnails in parallel and reports each result."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         *,
         height: int,
@@ -132,9 +129,6 @@ class ThumbnailLoader:
         workers: int,
         sharp: bool = False,
         dispatch: Dispatch,
-        is_stale: Callable[[int], bool],
-        on_thumb: OnThumb,
-        on_finished: OnFinished,
     ) -> None:
         """Create the loader.
 
@@ -145,20 +139,12 @@ class ThumbnailLoader:
             sharp: Decode the RAF's full preview instead of its small
                 Exif thumbnail.
             dispatch: Schedules a callback on the main loop.
-            is_stale: Whether a scan id has been superseded (results
-                for it are dropped).
-            on_thumb: Called on the main loop per finished thumbnail.
-            on_finished: Called on the main loop with the scan id once
-                every thumbnail of that scan is done.
         """
         self._height = height
         self._cache_dir = cache_dir
         self._workers = workers
         self._sharp = sharp
         self._dispatch = dispatch
-        self._is_stale = is_stale
-        self._on_thumb = on_thumb
-        self._on_finished = on_finished
         self._pruned = False
         self._shapes: dict[str, float] | None = None
         self._pool: ThreadPoolExecutor | None = None
@@ -172,6 +158,9 @@ class ThumbnailLoader:
         """Decode one thumbnail off the main loop."""
         if self._pool is None:
             self._pool = ThreadPoolExecutor(max_workers=self._workers)
+        if not self._pruned:
+            self._pruned = True
+            self._pool.submit(prune_cache, self._cache_dir)
         self._pool.submit(self._request_one, path, on_ready)
 
     def _request_one(self, path: str, on_ready: OnOne) -> None:
@@ -181,51 +170,6 @@ class ThumbnailLoader:
         except (ValueError, OSError, GLib.Error):
             return
         self._dispatch(partial(on_ready, path, pixbuf, meta))
-
-    def load(self, cards: list[tuple[str, Any, Any]], scan_id: int) -> None:
-        """Decode cards on worker threads."""
-        threading.Thread(
-            target=self._load_all,
-            args=(cards, scan_id),
-            name="grawji-thumbs",
-            daemon=True,
-        ).start()
-
-    def _load_all(
-        self, cards: list[tuple[str, Any, Any]], scan_id: int
-    ) -> None:
-        """Decode this scan's thumbnails in parallel and dispatch each."""
-        if not self._pruned:
-            self._pruned = True
-            prune_cache(self._cache_dir)
-        with ThreadPoolExecutor(max_workers=self._workers) as pool:
-            for path, picture, camera_label in cards:
-                pool.submit(
-                    self._decode_one, path, picture, camera_label, scan_id
-                )
-        self._dispatch(partial(self._on_finished, scan_id))
-
-    def _decode_one(
-        self, path: str, picture: Any, camera_label: Any, scan_id: int
-    ) -> None:
-        """Produce one thumbnail and dispatch it."""
-        if self._is_stale(scan_id):
-            return
-        try:
-            pixbuf, meta = self._thumbnail(path)
-        except (ValueError, OSError, GLib.Error):
-            return
-        self._dispatch(
-            partial(
-                self._on_thumb,
-                path,
-                picture,
-                camera_label,
-                pixbuf,
-                meta,
-                scan_id,
-            )
-        )
 
     def _thumbnail(self, path: str) -> tuple[Any, ThumbMeta]:
         """Return path's pixbuf and meta, cached when possible."""

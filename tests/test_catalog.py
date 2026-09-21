@@ -158,7 +158,7 @@ def test_the_popover_lists_only_what_is_present():
     ]
     assert catalog.cameras(entries) == ["X-E5", "X-T3"]
     assert catalog.lenses(entries) == ["XF23mmF2"]
-    assert catalog.focal_stops(entries) == [23.0]
+    assert catalog.focal_labels(entries) == ["23.0 mm"]
 
 
 def test_an_edit_updates_the_entry():

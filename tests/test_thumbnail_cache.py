@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -51,3 +52,33 @@ def test_prune_also_ages_out_the_old_png_cache(tmp_path: Path) -> None:
     _aged(tmp_path / "old.jpg", 40 * _DAY, now)
     assert prune_cache(tmp_path, max_age_s=30 * _DAY, now=now) == 2
     assert not (tmp_path / "old.png").exists()
+
+
+def test_the_cache_is_pruned_once_a_session(tmp_path: Path) -> None:
+    """Pruning used to ride along with a bulk load that is gone."""
+    from grawji.imaging.thumbnails import ThumbnailLoader
+
+    pruned: list[Path] = []
+    calls: list[str] = []
+
+    class Pool:
+        """Stand-in for the decoder pool."""
+
+        def submit(self, call: Any, *args: Any) -> None:
+            """Record what would have run on a worker."""
+            if getattr(call, "__name__", "") == "prune_cache":
+                pruned.append(args[0])
+            else:
+                calls.append(args[0])
+
+    loader = ThumbnailLoader(
+        height=110,
+        cache_dir=tmp_path,
+        workers=1,
+        dispatch=lambda call: call(),
+    )
+    loader._pool = Pool()
+    loader.request("/frames/a.RAF", lambda *_a: None)
+    loader.request("/frames/b.RAF", lambda *_a: None)
+    assert pruned == [tmp_path]
+    assert calls == ["/frames/a.RAF", "/frames/b.RAF"]

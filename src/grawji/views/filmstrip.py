@@ -40,11 +40,6 @@ _GLIDE_AHEAD_BOOST = 1.18
 _GLIDE_PX_PER_S_DEFAULT = 600
 
 
-def _focal_mm(focal: str) -> float | None:
-    """Parse a formatted focal length into millimeters."""
-    return catalog.focal_mm(focal)
-
-
 # A focal slider settles this long before the filter is applied.
 _FOCAL_SETTLE_MS = 120
 # Frames the strip waits for a card to be placed before centring it.
@@ -166,9 +161,6 @@ class FilmStrip(Gtk.ScrolledWindow):
             cache_dir=cache_dir() / "thumbs",
             workers=max(1, (os.cpu_count() or 2) - 1),
             dispatch=dispatch,
-            is_stale=lambda scan_id: scan_id != self._scan_id,
-            on_thumb=lambda *_args: None,
-            on_finished=lambda _scan_id: None,
         )
 
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
@@ -288,7 +280,9 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _build_focal_sliders(self) -> Gtk.Widget | None:
         """The from/to focal-length sliders, snapping to folder values."""
-        focals = [f for f in self.known_focals() if _focal_mm(f) is not None]
+        focals = [
+            f for f in self.known_focals() if catalog.focal_mm(f) is not None
+        ]
         if len(focals) < _MIN_SLIDER_STOPS:
             return None
         top = len(focals) - 1
@@ -336,8 +330,8 @@ class FilmStrip(Gtk.ScrolledWindow):
             summary.set_text(f"{focals[lo]}  to  {focals[hi]}")
             wanted = None
             if (lo, hi) != (0, top):
-                mm_lo = _focal_mm(focals[lo])
-                mm_hi = _focal_mm(focals[hi])
+                mm_lo = catalog.focal_mm(focals[lo])
+                mm_hi = catalog.focal_mm(focals[hi])
                 if mm_lo is not None and mm_hi is not None:
                     wanted = (mm_lo, mm_hi)
             if wanted != self._filter_focal:
@@ -373,7 +367,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         if self._filter_focal is None:
             return 0, top
         lo_mm, hi_mm = self._filter_focal
-        values = [_focal_mm(f) or 0.0 for f in focals]
+        values = [catalog.focal_mm(f) or 0.0 for f in focals]
         lo = next((i for i, v in enumerate(values) if v >= lo_mm), 0)
         hi = next((i for i in range(top, -1, -1) if values[i] <= hi_mm), top)
         return lo, max(lo, hi)
@@ -1041,11 +1035,7 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def known_focals(self) -> list[str]:
         """Focal lengths present in the folder, sorted numerically."""
-        focals = {e.focal for e in self._entries.values() if e.focal}
-        return sorted(
-            focals,
-            key=lambda f: (_focal_mm(f) is None, _focal_mm(f) or 0.0, f),
-        )
+        return catalog.focal_labels(self._entries.values())
 
     def _filter(self) -> catalog.Filter:
         """The active filter, as the model states it."""

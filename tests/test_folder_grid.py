@@ -21,9 +21,6 @@ def loader(tmp_path: Path) -> Any:
         cache_dir=tmp_path / "cache",
         workers=1,
         dispatch=lambda call: call(),
-        is_stale=lambda _scan: False,
-        on_thumb=lambda *_a: None,
-        on_finished=lambda _scan: None,
     )
 
 
@@ -332,3 +329,20 @@ def test_the_rest_of_the_folder_is_fetched_behind_the_viewport(
     assert asked, "the folder has to be worked through in the background"
     assert asked[0] == paths[10]
     assert set(asked[:3]) <= {paths[9], paths[10], paths[11]}
+
+
+def test_showing_the_same_folder_again_keeps_the_grid(grid: Any) -> None:
+    """Rebuilding it would drop every measured size and decoded frame."""
+    cleared: list[str] = []
+    grid._thumbs.clear = lambda: cleared.append("cleared")
+    same = catalog.scan(grid.folder)
+    grid.show_entries(same)
+    assert cleared == []
+    assert grid.shown == 3
+    # A different folder still replaces it.
+    other = grid.folder / "other"
+    other.mkdir()
+    (other / "x.RAF").write_bytes(b"not a real raf")
+    grid.show_entries(catalog.scan(other))
+    assert cleared == ["cleared"]
+    assert grid.shown == 1

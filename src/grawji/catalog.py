@@ -196,9 +196,14 @@ def lenses(entries: Iterable[Entry]) -> list[str]:
     return sorted({entry.lens for entry in entries if entry.lens})
 
 
-def focal_stops(entries: Iterable[Entry]) -> list[float]:
-    """The focal lengths present, for the focal sliders."""
-    values = {
-        entry.focal_value for entry in entries if entry.focal_value is not None
-    }
-    return sorted(values)
+def focal_labels(entries: Iterable[Entry]) -> list[str]:
+    """The focal lengths present, in numeric order, as written."""
+    labels = {entry.focal for entry in entries if entry.focal}
+    return sorted(
+        labels,
+        key=lambda label: (
+            focal_mm(label) is None,
+            focal_mm(label) or 0.0,
+            label,
+        ),
+    )

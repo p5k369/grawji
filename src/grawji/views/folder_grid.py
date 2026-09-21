@@ -40,6 +40,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         """Build the grid."""
         super().__init__()
         self._tile = tile
+        self._shown_paths: list[str] = []
         self._on_activate = on_activate
         self._on_select = on_select
         # True while the grid is being told where to stand, so
@@ -127,6 +128,10 @@ class FolderGrid(Gtk.ScrolledWindow):
         the model would otherwise report one item at a time.
         """
         self._fit_columns()
+        paths = [entry.path for entry in entries]
+        if paths == self._shown_paths:
+            return
+        self._shown_paths = paths
         self._thumbs.clear()
         self._store.splice(
             0,
