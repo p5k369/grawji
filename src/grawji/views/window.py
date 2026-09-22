@@ -102,14 +102,12 @@ _CANVAS_CSS = """
     margin-top: 0;
     margin-bottom: 16px;
 }
-/* The current frame gets an accent ring, a batch-marked one a tint. */
 .thumb.thumb-selected {
     box-shadow: inset 0 0 0 2px @accent_bg_color;
 }
 .thumb.thumb-marked {
     background-color: alpha(@accent_bg_color, 0.30);
 }
-/* Camera presence, beside the other readouts under the image. */
 .camera-state image { opacity: 0.4; }
 .camera-state.camera-connected image {
     color: @accent_color;
@@ -119,18 +117,31 @@ _CANVAS_CSS = """
     color: @accent_color;
     opacity: 1;
 }
-/* Soften the folder tree: slightly dimmed text and a gentler selection. */
+.grid-tile { padding: 6px 6px 3px; }
+.dim-cards .grid-tile {
+    background-color: alpha(#ffffff, 0.05);
+    box-shadow: none;
+}
+gridview.folder-grid > child,
+gridview.folder-grid > child:hover,
+gridview.folder-grid > child:selected {
+    background: none;
+}
+gridview.folder-grid > child:hover .grid-tile {
+    background-color: alpha(currentColor, 0.1);
+}
+gridview.folder-grid > child:selected .grid-tile {
+    background-color: alpha(@accent_bg_color, 0.25);
+    box-shadow: inset 0 0 0 2px @accent_bg_color;
+}
 .folder-tree { color: alpha(currentColor, 0.85); font-weight: normal; }
 .folder-tree image { opacity: 0.7; }
 .folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
-/* Filmstrip nav buttons: round only the edge facing the window border. */
 .filmstrip-nav-start { border-radius: 0 0 0 8px; }
 .filmstrip-nav-end { border-radius: 0 0 8px 0; }
-/* Subtle tint on recipe rows that differ from the applied recipe. */
 row.recipe-modified {
     background-color: alpha(@accent_bg_color, 0.08);
 }
-/* Zero tick under the straighten slider. */
 .angle-zero-mark {
     background-color: alpha(currentColor, 0.55);
     border-radius: 1px;
@@ -517,12 +528,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.grid_slot.append(self._grid)
         self.grid_size.set_value(self._settings.grid_tile_px)
         self.grid_size.connect("value-changed", self._on_tile_size)
+        style = Adw.StyleManager.get_default()
+        style.connect("notify::dark", self._on_dark_changed)
+        self._on_dark_changed(style)
         self.view_stack.connect(
             "notify::visible-child-name", self._on_view_changed
         )
         # Browse is the first tab, but grawji opens on one image.
         self.view_stack.set_visible_child_name("preview")
         self._style_grid_canvas(self._settings.canvas_background)
+
+    def _on_dark_changed(
+        self, style: Adw.StyleManager, *_args: object
+    ) -> None:
+        """Soften the grid cards when the theme goes dark."""
+        if style.get_dark():
+            self._grid.add_css_class("dim-cards")
+        else:
+            self._grid.remove_css_class("dim-cards")
 
     def _on_tile_size(self, scale: Gtk.Scale) -> None:
         """Resize the grid's tiles and remember the choice."""

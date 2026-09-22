@@ -32,6 +32,9 @@ from grawji.views.tile_thumbs import TileThumbs
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_AHEAD_BOOST = 1.18
+# Every card gets the same 4:3 slot with the frame centred in
+# it whole. Uniform slots keep the list's size arithmetic exact.
+_SLOT_RATIO = 4 / 3
 _GLIDE_PX_PER_S_DEFAULT = 600
 
 
@@ -162,7 +165,6 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._thumbs,
             self,
             on_meta=self._note_meta,
-            sizes_to_content=True,
         )
         self.set_min_content_height(thumb_height + 52)
 
@@ -173,12 +175,33 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._filter_actions: dict[str, Gio.SimpleAction] = {}
 
     def _watch_scroll(self) -> None:
-        """Wire the wheel to the strip."""
+        """Wire the wheel, and let a hand on the scrollbar win."""
         scroll = Gtk.EventControllerScroll.new(
             Gtk.EventControllerScrollFlags.BOTH_AXES
         )
         scroll.connect("scroll", self._on_scroll)
         self.add_controller(scroll)
+        grab = Gtk.GestureClick()
+        grab.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        grab.connect("pressed", lambda *_a: self._user_takes_over())
+        self.get_hscrollbar().add_controller(grab)
+
+    def _user_takes_over(self) -> None:
+        """Yield to the scrollbar."""
+        self.stop_glide()
+        self._cancel_center()
+        self._reveal_wanted = None
+        mainloop.call(self._neutralize_anchor)
+
+    def _neutralize_anchor(self) -> None:
+        """Replace the list's pending scroll anchor with a satisfied one."""
+        first = (
+            self._shown_position(self.visible_paths[0])
+            if self.visible_paths
+            else None
+        )
+        if first is not None:
+            self._view.scroll_to(first, Gtk.ListScrollFlags.NONE, None)
 
     def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
         """Look at the viewport again once the strip changed size."""
@@ -524,11 +547,12 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._on_loading(True)
 
     def _on_setup(self, _factory: Any, item: Gtk.ListItem) -> None:
-        """Build one reusable card: camera on top, name at the bottom."""
+        """Build one reusable card."""
         picture = Gtk.Picture()
         picture.set_size_request(
-            int(self._thumb_height * 1.5), self._thumb_height
+            int(self._thumb_height * _SLOT_RATIO), self._thumb_height
         )
+        picture.set_content_fit(Gtk.ContentFit.CONTAIN)
 
         def caption(text: str) -> Gtk.Label:
             label = Gtk.Label(label=text, halign=Gtk.Align.FILL)
@@ -590,14 +614,6 @@ class FilmStrip(Gtk.ScrolledWindow):
         entry = entry_item.entry
         parts = self._cards[button]
         self._card_path[button] = entry.path
-        # A known shape sizes the card up front, so it does not jump
-        # from the placeholder when the thumbnail lands.
-        width = (
-            round(self._thumb_height * entry.aspect)
-            if entry.aspect
-            else int(self._thumb_height * 1.5)
-        )
-        parts["picture"].set_size_request(width, self._thumb_height)
         parts["name"].set_text(Path(entry.path).stem)
         parts["camera"].set_text(entry.model)
         parts["crop"].set_visible(entry.has_crop)
@@ -1095,10 +1111,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         now = clock.get_frame_time()  # microseconds
         if self._glide_last is not None:
             elapsed = (now - self._glide_last) / 1e6
-            step = self._glide_speed * elapsed * self._glide_dir
-            if self._glide_dir > 0:
-                step *= _GLIDE_AHEAD_BOOST
-            self._scroll_by(step)
+            self._scroll_by(self._glide_speed * elapsed * self._glide_dir)
         self._glide_last = now
         return GLib.SOURCE_CONTINUE
 
@@ -1123,8 +1136,8 @@ class FilmStrip(Gtk.ScrolledWindow):
         return True
 
     def _card_width(self) -> float:
-        """How far one step moves: one landscape card."""
-        return self._thumb_height * 1.5 + 6  # + list spacing
+        """How far one step moves."""
+        return self._thumb_height * _SLOT_RATIO + 6  # + list spacing
 
     def select_path(self, path: str, *, notify: bool = True) -> bool:
         """Select the thumbnail for path."""

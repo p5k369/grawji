@@ -166,8 +166,6 @@ def test_focal_sliders_push_each_other(strip: Any) -> None:
 
 def test_sliders_absent_without_two_focals(strip: Any) -> None:
     """A single distinct focal length offers no range to filter."""
-    from grawji.imaging.thumbnails import ThumbMeta
-
     strip._entries = {
         path: catalog.with_meta(strip._entries[path], "X-E5", PRIME, "35 mm")
         for path in strip.paths
@@ -410,3 +408,22 @@ def test_one_arrow_press_moves_the_strip_by_one_card(
     assert moved >= width / 2, f"a step moved {moved} of a {width} card"
     strip.scroll_step(1)
     assert adjustment.get_value() - moved >= width / 2
+
+
+def test_a_hand_on_the_scrollbar_outranks_pending_moves(
+    gtk: Any, tmp_path: Path
+) -> None:
+    """A reveal still in flight must not fight the user's drag."""
+    from grawji.views.filmstrip import FilmStrip
+
+    (tmp_path / "a.RAF").write_bytes(b"not a real raf")
+    strip = FilmStrip(on_select=lambda _p: None)
+    strip.scan(str(tmp_path))
+    strip._reveal_wanted = ("wanted", True)
+    strip._center_path = "wanted"
+    strip._center_frames = 30
+    strip._glide_dir = 1
+    strip._user_takes_over()
+    assert strip._reveal_wanted is None
+    assert strip._center_path is None
+    assert strip._center_frames == 0

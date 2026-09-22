@@ -18,6 +18,8 @@ from grawji.views.tile_thumbs import TileThumbs
 
 # Decoded frames the grid holds on to.
 _KEEP_TILES = 400
+# Grid cells are square.
+_CELL_RATIO = 1.0
 # Room for the caption under each thumbnail.
 _CAPTION_PX = 22
 # Breathing room between tiles.
@@ -68,6 +70,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         factory.connect("bind", self._on_bind)
         factory.connect("unbind", self._on_unbind)
         self._view = Gtk.GridView(model=self._selection, factory=factory)
+        self._view.add_css_class("folder-grid")
         self._view.set_min_columns(1)
         self._view.set_max_columns(1)
         self._fit_pending = 0
@@ -79,6 +82,10 @@ class FolderGrid(Gtk.ScrolledWindow):
         self._cells: dict[Gtk.Widget, Gtk.AspectFrame] = {}
         self._view.connect("activate", self._on_activated)
         self.set_child(self._view)
+        grab = Gtk.GestureClick()
+        grab.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        grab.connect("pressed", lambda *_a: self._user_takes_over())
+        self.get_vscrollbar().add_controller(grab)
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.set_vexpand(True)
 
@@ -103,7 +110,7 @@ class FolderGrid(Gtk.ScrolledWindow):
             return
         self._tile = height
         for cell in self._cells.values():
-            cell.set_size_request(int(height * 1.5), height)
+            cell.set_size_request(int(height * _CELL_RATIO), height)
         self._fit_columns()
         if self._resize_pending:
             GLib.source_remove(self._resize_pending)
@@ -123,7 +130,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         width = self.get_width() or self.get_hadjustment().get_page_size()
         if width <= 0:
             return
-        columns = max(1, int(width // (self._tile * 1.5 + _GAP_PX)))
+        columns = max(1, int(width // (self._tile * _CELL_RATIO + _GAP_PX)))
         if columns != self._view.get_max_columns():
             self._view.set_max_columns(columns)
 
@@ -199,6 +206,12 @@ class FolderGrid(Gtk.ScrolledWindow):
         columns = max(1, self._view.get_max_columns())
         return -(-self._shown.get_n_items() // columns)
 
+    def _user_takes_over(self) -> None:
+        """Yield to the scrollbar."""
+        self._center_path = None
+        self._center_frames = 0
+        self._reveal_wanted = None
+
     def _catch_up_reveal(self) -> bool:
         """Show a frame that was selected while the page was hidden."""
         wanted = self._reveal_wanted
@@ -258,6 +271,8 @@ class FolderGrid(Gtk.ScrolledWindow):
     def _on_setup(self, _factory: Any, item: Gtk.ListItem) -> None:
         """Build one reusable tile."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.add_css_class("card")
+        box.add_css_class("grid-tile")
         box.set_margin_start(_GAP_PX // 2)
         box.set_margin_end(_GAP_PX // 2)
         box.set_margin_top(_GAP_PX // 2)
@@ -265,11 +280,12 @@ class FolderGrid(Gtk.ScrolledWindow):
         picture = Gtk.Picture()
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-        cell = Gtk.AspectFrame(ratio=1.5, obey_child=False)
-        cell.set_size_request(int(self._tile * 1.5), self._tile)
+        cell = Gtk.AspectFrame(ratio=_CELL_RATIO, obey_child=False)
+        cell.set_size_request(int(self._tile * _CELL_RATIO), self._tile)
         cell.set_child(picture)
         caption = Gtk.Label(ellipsize=3, max_width_chars=1)
         caption.add_css_class("caption")
+        caption.add_css_class("dim-label")
         caption.set_size_request(-1, _CAPTION_PX)
         box.append(cell)
         box.append(caption)
