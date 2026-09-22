@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import replace
 from functools import partial
@@ -23,7 +24,7 @@ from gi.repository import (
     Gtk,
 )
 
-from grawji import crop
+from grawji import crop, mainloop
 from grawji.imaging.clipping import clip_overlay
 from grawji.imaging.render import (
     add_border,
@@ -40,6 +41,7 @@ from grawji.views.paintables import (
 from grawji.views.textures import texture_for_pixbuf
 from grawji.views.widgets import Histogram
 
+_LOG = logging.getLogger("grawji")
 # Allocations forced per shown image to straighten a stale offset.
 _MAX_REPAIRS = 4
 # Longest edge of the image used while crop-editing.
@@ -159,7 +161,7 @@ class PreviewView(Gtk.Box):
         self._clip_base: Any = None
         self._clip_overlay: Any = None
         self._clip_generation = 0
-        self._clip_dispatch = GLib.idle_add
+        self._clip_dispatch = mainloop.call
         self._viewport = (0, 0)
         self._refit_pending = 0
         self._repairs = _MAX_REPAIRS
@@ -268,12 +270,14 @@ class PreviewView(Gtk.Box):
                 widget.remove_css_class("camera-connected")
 
     def set_status(self, text: str) -> None:
-        """Set the status-line text."""
+        """Set the status-line text, and log it for a verbose run."""
+        _LOG.debug("status: %s", text)
         self.status.set_use_markup(False)
         self.status.set_label(text)
 
     def set_status_link(self, text: str, path: str) -> None:
         """Set a status line that opens path's location when clicked."""
+        _LOG.debug("status: %s (%s)", text, path)
         uri = GLib.markup_escape_text(GLib.filename_to_uri(path))
         label = GLib.markup_escape_text(text)
         self.status.set_markup(f'<a href="{uri}">{label}</a>')

@@ -39,10 +39,14 @@ class TileThumbs:
         *,
         on_meta: Any = None,
         sizes_to_content: bool = False,
+        keep: int = _TEXTURE_CAP,
+        stand_in: Any = None,
     ) -> None:
         """Serve tiles of scroller from loader."""
         self._loader = loader
         self._scroller = scroller
+        self._keep = keep
+        self._stand_in = stand_in
         self._on_meta = on_meta
         self._sizes_to_content = sizes_to_content
         self._bound: dict[Gtk.Widget, tuple[Gtk.Picture, str]] = {}
@@ -83,10 +87,12 @@ class TileThumbs:
         self._bound[tile] = (picture, path)
         known = self._textures.get(path)
         if known is not None:
+            self._textures[path] = self._textures.pop(path)
             self._paint(picture, known)
             self._waiting.pop(tile, None)
             return
-        picture.set_paintable(None)
+        rough = self._stand_in(path) if self._stand_in else None
+        picture.set_paintable(rough)
         self._waiting[tile] = (picture, path)
         self.schedule()
 
@@ -118,6 +124,19 @@ class TileThumbs:
             )
         picture.set_paintable(texture)
 
+    def _evict(self) -> None:
+        """Drop the least recently shown frames over the cap."""
+        on_screen = {shown for _p, shown in self._bound.values()}
+        for path in list(self._textures):
+            if len(self._textures) <= self._keep:
+                return
+            if path not in on_screen:
+                del self._textures[path]
+
+    def texture_for(self, path: str) -> Any | None:
+        """The decoded frame for a path, if this view has one."""
+        return self._textures.get(path)
+
     @property
     def bound(self) -> dict[Gtk.Widget, tuple[Gtk.Picture, str]]:
         """Every tile currently showing a frame."""
@@ -136,9 +155,10 @@ class TileThumbs:
     def prefetch(self, paths: list[str], around: int = 0) -> None:
         """Fetch the rest of the folder once the visible part is served."""
         start = max(0, min(len(paths) - 1, around))
+        order = {path: index for index, path in enumerate(paths)}
         self._queue = sorted(
             (path for path in paths if path not in self._textures),
-            key=lambda path: abs(paths.index(path) - start),
+            key=lambda path: abs(order[path] - start),
         )
         self._cursor = 0
         if self._queue and not self._prefetch_id:
@@ -149,10 +169,10 @@ class TileThumbs:
     def _prefetch_batch(self) -> bool:
         """Ask for a few more frames, unless the viewport is waiting."""
         done = self._cursor >= len(self._queue)
-        if done or len(self._textures) >= _TEXTURE_CAP:
+        if done or len(self._textures) >= self._keep:
             self._prefetch_id = 0
             return GLib.SOURCE_REMOVE
-        if self.busy:
+        if self.busy or self._ahead:
             return GLib.SOURCE_CONTINUE
         sent = 0
         while self._cursor < len(self._queue) and sent < _PREFETCH_BATCH:
@@ -165,9 +185,11 @@ class TileThumbs:
             sent += 1
         return GLib.SOURCE_CONTINUE
 
-    def schedule(self) -> None:
+    def schedule(self, *, fresh: bool = False) -> None:
         """Look at the viewport on the next few frames."""
         self._frames_left = _SETTLE_FRAMES
+        if fresh:
+            self._frames_total = 0
         if self._tick:
             return
         self._frames_total = 0
@@ -248,9 +270,14 @@ class TileThumbs:
         self._ahead.discard(path)
         texture = texture_for_pixbuf(pixbuf)
         self._textures[path] = texture
+        self._evict()
         for tile, (picture, wanted) in list(self._pending.items()):
             if wanted == path:
                 self._paint(picture, texture)
                 del self._pending[tile]
+        for tile, (picture, wanted) in list(self._waiting.items()):
+            if wanted == path:
+                self._paint(picture, texture)
+                del self._waiting[tile]
         if self._on_meta is not None:
             self._on_meta(path, meta, pixbuf.get_width(), pixbuf.get_height())

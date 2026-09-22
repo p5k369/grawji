@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +30,7 @@ from grawji.imaging.pixbufs import (
     orient_exif,
     trim_letterbox,
 )
+from grawji.mainloop import Dispatch
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 
 # How much of the embedded JPEG to read for the EXIF thumbnail.
@@ -38,18 +40,22 @@ _EXIF_PREFIX_BYTES = 256 * 1024
 _CACHE_MAX_AGE_S = 30 * 24 * 3600
 
 
-def remembered_shapes(cache_dir: Path) -> dict[str, float]:
-    """Frame shapes this cache has already seen, by cache key."""
-    shapes: dict[str, float] = {}
+def remembered_facts(cache_dir: Path) -> dict[str, Facts]:
+    """What this cache knows about the frames it has seen."""
+    facts: dict[str, Facts] = {}
     try:
-        with (cache_dir / _SHAPES_FILE).open() as handle:
+        with (cache_dir / _FACTS_FILE).open() as handle:
             for line in handle:
-                key, _, ratio = line.partition(" ")
+                key, _, rest = line.rstrip("\n").partition(" ")
+                ratio, _, meta = rest.partition(" ")
+                fields = meta.split("|")
+                if len(fields) != _FACT_FIELDS:
+                    continue
                 with contextlib.suppress(ValueError):
-                    shapes[key] = float(ratio)
+                    facts[key] = Facts(float(ratio), *fields)
     except OSError:
-        return shapes
-    return shapes
+        return facts
+    return facts
 
 
 def prune_cache(
@@ -74,33 +80,41 @@ def prune_cache(
             if now - entry.stat().st_mtime > max_age_s:
                 entry.unlink()
                 removed += 1
-    if removed:
-        _prune_shapes(cache_dir)
+    _prune_facts(cache_dir)
+    with contextlib.suppress(OSError):
+        (cache_dir / "shapes.v1").unlink(missing_ok=True)
     return removed
 
 
-def _prune_shapes(cache_dir: Path) -> None:
-    """Drop remembered shapes whose thumbnail is gone."""
-    shapes = remembered_shapes(cache_dir)
-    if not shapes:
+def _prune_facts(cache_dir: Path) -> None:
+    """Keep the memory of frames from growing without bound."""
+    facts = remembered_facts(cache_dir)
+    if len(facts) <= _FACTS_CAP:
         return
-    kept = {
-        key: ratio
-        for key, ratio in shapes.items()
-        if (cache_dir / f"{key}.jpg").exists()
-    }
-    if len(kept) == len(shapes):
-        return
-    lines = "".join(f"{key} {ratio:.4f}\n" for key, ratio in kept.items())
+    kept = dict(list(facts.items())[-_FACTS_CAP:])
+    lines = "".join(_fact_line(key, fact) for key, fact in kept.items())
     with contextlib.suppress(OSError):
-        (cache_dir / _SHAPES_FILE).write_text(lines)
+        (cache_dir / _FACTS_FILE).write_text(lines)
+
+
+def _fact_line(key: str, fact: Facts) -> str:
+    """One line of the memory file."""
+    meta = "|".join(
+        field.replace("|", " ").replace("\n", " ")
+        for field in (fact.model, fact.lens, fact.focal)
+    )
+    return f"{key} {fact.aspect:.4f} {meta}\n"
 
 
 # Filter metadata rides along in the cached JPEG's own Exif tags.
 _MODEL_TAG = "Exif.Image.Model"
 _LENS_TAG = "Exif.Photo.LensModel"
 _FOCAL_TAG = "Exif.Image.ImageDescription"
-_SHAPES_FILE = "shapes.v1"
+_FACTS_FILE = "facts.v1"
+# Model, lens and focal length, in that order, on every line.
+_FACT_FIELDS = 3
+# How many frames the memory holds before the oldest age out.
+_FACTS_CAP = 50_000
 _CACHE_QUALITY = "88"
 # What a cache entry can be called, past spellings included.
 _CACHE_SUFFIXES = (".jpg", ".png")
@@ -114,8 +128,22 @@ class ThumbMeta(NamedTuple):
     focal: str
 
 
-Dispatch = Callable[[Callable[[], None]], Any]
+class Facts(NamedTuple):
+    """Everything a folder listing needs about one frame."""
+
+    aspect: float
+    model: str
+    lens: str
+    focal: str
+
+    @property
+    def meta(self) -> ThumbMeta:
+        """The filter-relevant part."""
+        return ThumbMeta(self.model, self.lens, self.focal)
+
+
 OnOne = Callable[[str, Any, ThumbMeta], None]
+OnMeta = Callable[[str, ThumbMeta, "float | None"], None]
 
 
 class ThumbnailLoader:
@@ -146,8 +174,11 @@ class ThumbnailLoader:
         self._sharp = sharp
         self._dispatch = dispatch
         self._pruned = False
-        self._shapes: dict[str, float] | None = None
+        self._facts: dict[str, Facts] | None = None
+        self._facts_lock = threading.Lock()
+        self._real_dirs: dict[Path, Path] = {}
         self._pool: ThreadPoolExecutor | None = None
+        self._meta_pool: ThreadPoolExecutor | None = None
         GExiv2.initialize()
 
     def set_height(self, height: int) -> None:
@@ -162,6 +193,26 @@ class ThumbnailLoader:
             self._pruned = True
             self._pool.submit(prune_cache, self._cache_dir)
         self._pool.submit(self._request_one, path, on_ready)
+
+    def sweep_meta(self, paths: list[str], on_ready: OnMeta) -> None:
+        """Read the metadata of every path off the main loop."""
+        if self._meta_pool is None:
+            self._meta_pool = ThreadPoolExecutor(max_workers=2)
+        for path in paths:
+            self._meta_pool.submit(self._sweep_one, path, on_ready)
+
+    def _sweep_one(self, path: str, on_ready: OnMeta) -> None:
+        """Read one file's metadata and hand it to the main loop."""
+        found = read_frame_meta(path)
+        if found is None:
+            return
+        meta, aspect = found
+        key = self.cache_key(path)
+        if key is not None:
+            self._remember_fact(
+                key, Facts(aspect or 0.0, meta.model, meta.lens, meta.focal)
+            )
+        self._dispatch(partial(on_ready, path, meta, aspect))
 
     def _request_one(self, path: str, on_ready: OnOne) -> None:
         """Produce one thumbnail for a single request and dispatch it."""
@@ -184,8 +235,9 @@ class ThumbnailLoader:
                     os.utime(cache)
                 # A warm cache decodes nothing, so this is where the
                 # shape of an already known frame gets recorded.
-                self._remember_shape(cache, cached)
-                return cached, self._cached_meta(cache)
+                meta = self._cached_meta(cache)
+                self._remember(cache, cached, meta)
+                return cached, meta
         pixbuf, meta = self._decode_thumb(path)
         if cache is not None:
             self._store_cache(cache, pixbuf, meta)
@@ -217,10 +269,18 @@ class ThumbnailLoader:
     def _digest(self, target: Path, stat: os.stat_result) -> str:
         """Hash the identity a cached thumbnail is bound to."""
         key = (
-            f"v7|{target.resolve()}|{stat.st_mtime_ns}"
+            f"v7|{self._real(target)}|{stat.st_mtime_ns}"
             f"|{stat.st_size}|{self._height}|{int(self._sharp)}"
         )
         return hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
+
+    def _real(self, target: Path) -> Path:
+        """Resolve a file, resolving each folder only once."""
+        parent = self._real_dirs.get(target.parent)
+        if parent is None:
+            parent = target.parent.resolve()
+            self._real_dirs[target.parent] = parent
+        return parent / target.name
 
     def _cache_file(self, path: str) -> Path | None:
         """Return the cache path for path, keyed by its size and mtime."""
@@ -234,27 +294,34 @@ class ThumbnailLoader:
         # half a millisecond and 9 KB here.
         return self._cache_dir / f"{self._digest(target, stat)}.jpg"
 
-    def _remember_shape(self, cache: Path, pixbuf: Any) -> None:
-        """Note how wide this frame turned out, keyed like its cache."""
+    def _remember(self, cache: Path, pixbuf: Any, meta: ThumbMeta) -> None:
+        """Note what this frame turned out to be, keyed like its cache."""
         height = pixbuf.get_height()
         if height <= 0:
             return
-        if self._shapes is None:
-            self._shapes = remembered_shapes(self._cache_dir)
-        if cache.stem in self._shapes:
-            return
-        ratio = pixbuf.get_width() / height
-        self._shapes[cache.stem] = ratio
-        shapes = self._cache_dir / _SHAPES_FILE
-        with contextlib.suppress(OSError), shapes.open("a") as handle:
-            handle.write(f"{cache.stem} {ratio:.4f}\n")
+        fact = Facts(
+            pixbuf.get_width() / height, meta.model, meta.lens, meta.focal
+        )
+        self._remember_fact(cache.stem, fact)
+
+    def _remember_fact(self, key: str, fact: Facts) -> None:
+        """Append one frame to the memory, once, from any thread."""
+        with self._facts_lock:
+            if self._facts is None:
+                self._facts = remembered_facts(self._cache_dir)
+            if key in self._facts:
+                return
+            self._facts[key] = fact
+            memory = self._cache_dir / _FACTS_FILE
+            with contextlib.suppress(OSError), memory.open("a") as handle:
+                handle.write(_fact_line(key, fact))
 
     def _store_cache(self, cache: Path, pixbuf: Any, meta: ThumbMeta) -> None:
         """Write a decoded thumbnail to the cache, ignoring failures."""
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
             pixbuf.savev(str(cache), "jpeg", ["quality"], [_CACHE_QUALITY])
-            self._remember_shape(cache, pixbuf)
+            self._remember(cache, pixbuf, meta)
             if any((meta.model, meta.lens, meta.focal)):
                 tags = GExiv2.Metadata()
                 tags.open_path(str(cache))
@@ -358,6 +425,17 @@ def _exif_thumbnail(
     except (GLib.Error, ValueError):
         orientation = 1
     return bytes(thumb), orientation, _tags_of(meta), _frame_ratio(meta)
+
+
+def read_frame_meta(path: str) -> tuple[ThumbMeta, float | None] | None:
+    """Camera, lens, focal length and shape from the file's head alone."""
+    try:
+        prefix = embedded_jpeg_prefix(path, _EXIF_PREFIX_BYTES)
+        meta = GExiv2.Metadata()
+        meta.open_buf(prefix)
+    except (ValueError, OSError, GLib.Error):
+        return None
+    return _tags_of(meta), _frame_ratio(meta)
 
 
 def _tag_of(meta: Any, tag: str) -> str:

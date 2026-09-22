@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -24,15 +23,11 @@ from gi.repository import (
     PangoCairo,
 )
 
-from grawji import catalog
-from grawji.imaging.thumbnails import (
-    ThumbMeta,
-    ThumbnailLoader,
-    remembered_shapes,
-)
-from grawji.settings import cache_dir
+from grawji import catalog, mainloop
+from grawji.imaging.thumbnails import ThumbMeta
+from grawji.mainloop import Dispatch
 from grawji.sidecar import edit_flags
-from grawji.views.entry_item import EntryItem
+from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
@@ -49,8 +44,6 @@ _MIN_SLIDER_STOPS = 2
 
 # Folder-change events settle for this long before the strip re-scans.
 _RELOAD_DEBOUNCE_MS = 500
-
-Dispatch = Callable[[Callable[[], None]], Any]
 
 
 def _badged_paintable(
@@ -98,8 +91,9 @@ class FilmStrip(Gtk.ScrolledWindow):
         on_selection_changed: Callable[[int], None] | None = None,
         on_file_action: Callable[[str, list[str]], None] | None = None,
         drag_action: Callable[[], str] | None = None,
-        dispatch: Dispatch = GLib.idle_add,
+        dispatch: Dispatch = mainloop.call,
         thumb_height: int = 110,
+        model: FolderModel | None = None,
     ) -> None:
         """Create the filmstrip.
 
@@ -117,6 +111,7 @@ class FilmStrip(Gtk.ScrolledWindow):
                 ("move" or "copy") for an unmodified drag.
             dispatch: Schedules a callback on the GTK main loop.
             thumb_height: Thumbnail height in pixels.
+            model: The folder shared with other views.
         """
         super().__init__()
         self._on_select = on_select
@@ -152,16 +147,14 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._center_tick = 0
         self._center_frames = 0
         self._folder: str | None = None
-        self._entries: dict[str, catalog.Entry] = {}
         self._init_filter_state()
         self._monitor: Any = None
         self._reload_pending_id = 0
-        self._thumbs = ThumbnailLoader(
-            height=thumb_height,
-            cache_dir=cache_dir() / "thumbs",
-            workers=max(1, (os.cpu_count() or 2) - 1),
-            dispatch=dispatch,
+        self._model = model or FolderModel(
+            dispatch=dispatch, thumb_height=thumb_height
         )
+        self._model.add_listener(self._on_model_event)
+        self._thumbs = self._model.loader
 
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         self._build_view()
@@ -192,11 +185,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         Gtk.ScrolledWindow.do_size_allocate(self, width, height, baseline)
         self._tiles.schedule()
         if self._reveal_wanted is not None and width > 0:
-            GLib.idle_add(self._catch_up_reveal)
+            mainloop.call(self._catch_up_reveal)
 
     def _build_view(self) -> None:
-        """The list view and the model behind the cards."""
-        self._store = Gio.ListStore.new(EntryItem)
+        """The list view over the folder's shared store."""
+        self._store = self._model.store
         self._model_filter = Gtk.CustomFilter.new(self._passes)
         self._shown = Gtk.FilterListModel(
             model=self._store, filter=self._model_filter
@@ -442,7 +435,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
         popover.connect(
-            "closed", lambda p: GLib.idle_add(self._drop_popover, p)
+            "closed", lambda p: mainloop.call(self._drop_popover, p)
         )
         popover.popup()
 
@@ -505,8 +498,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         keep = None
         if folder == self._folder and 0 <= self._current < len(self._paths):
             keep = self._paths[self._current]
-        self._clear()
-        self._entries = {}
+        self._tiles.clear()
         if folder != self._folder:
             self._select_mode = False
             self.clear_selection()
@@ -514,15 +506,9 @@ class FilmStrip(Gtk.ScrolledWindow):
             self._folder = folder
             self._watch(folder)
 
-        entries = self._with_known_shapes(catalog.scan(folder))
-        self._entries = {entry.path: entry for entry in entries}
+        entries = self._model.scan(folder)
         self._paths = [entry.path for entry in entries]
         self._current = -1
-        self._store.splice(
-            0,
-            self._store.get_n_items(),
-            [EntryItem(entry) for entry in entries],
-        )
         self._tiles.prefetch(self._paths, max(0, self._current))
 
         if self._selected:
@@ -532,7 +518,7 @@ class FilmStrip(Gtk.ScrolledWindow):
 
         if keep is not None and keep in self._paths:
             # Restore the selection once the new cards have a layout
-            GLib.idle_add(partial(self._restore_current, scan_id, keep))
+            mainloop.call(partial(self._restore_current, scan_id, keep))
 
         if entries and self._on_loading is not None:
             self._on_loading(True)
@@ -643,32 +629,28 @@ class FilmStrip(Gtk.ScrolledWindow):
     def _note_meta(
         self, path: str, meta: ThumbMeta, width: int, height: int
     ) -> None:
-        """Fold a decoded frame's metadata and shape into its entry."""
-        entry = self._entries.get(path)
-        if entry is None:
-            return
-        entry = catalog.with_meta(entry, meta.model, meta.lens, meta.focal)
-        if height > 0:
-            entry = catalog.with_aspect(entry, width / height)
-        self._entries[path] = entry
-        item = self._item_for(path)
-        if item is not None:
-            item.entry = entry
-        for button, shown in self._card_path.items():
-            if shown == path:
-                self._cards[button]["camera"].set_text(meta.model)
-        if self._filter().is_active:
-            self._apply_filter()
+        """Fold a decoded frame's metadata into the shared folder."""
+        aspect = width / height if height > 0 else None
+        self._model.fold_meta(path, meta, aspect)
         if not self._tiles.busy and self._on_loading is not None:
             self._on_loading(False)
 
+    def _on_model_event(self, reason: str, path: str | None) -> None:
+        """Follow the shared folder."""
+        if reason == "filter":
+            self._apply_filter()
+            if self._on_filter_changed is not None:
+                self._on_filter_changed()
+            return
+        if reason == "entry" and path is not None:
+            entry = self._model.entry_for(path)
+            for button, shown in self._card_path.items():
+                if shown == path and entry is not None:
+                    self._cards[button]["camera"].set_text(entry.model)
+
     def _item_for(self, path: str) -> EntryItem | None:
         """The list item holding one frame, if the folder still has it."""
-        for position in range(self._store.get_n_items()):
-            item = self._store.get_item(position)
-            if item is not None and item.entry.path == path:
-                return item
-        return None
+        return self._model.item_for(path)
 
     def _path_of(self, button: Gtk.Widget) -> str | None:
         """Which frame a card currently shows."""
@@ -689,6 +671,16 @@ class FilmStrip(Gtk.ScrolledWindow):
         ]
 
     @property
+    def _entries(self) -> dict[str, catalog.Entry]:
+        """The shared folder's entries, by path."""
+        return self._model.entries
+
+    @_entries.setter
+    def _entries(self, entries: dict[str, catalog.Entry]) -> None:
+        """Replace the shared folder's entries wholesale."""
+        self._model.entries = entries
+
+    @property
     def active_filter(self) -> catalog.Filter:
         """What the folder is narrowed down to right now."""
         return self._filter()
@@ -700,25 +692,8 @@ class FilmStrip(Gtk.ScrolledWindow):
             return self._paths[self._current]
         return None
 
-    def _with_known_shapes(
-        self, entries: list[catalog.Entry]
-    ) -> list[catalog.Entry]:
-        """Fill in the shapes the thumbnail cache has already seen."""
-        shapes = remembered_shapes(cache_dir() / "thumbs")
-        if not shapes:
-            return entries
-        known = []
-        for entry in entries:
-            key = self._thumbs.cache_key(entry.path)
-            aspect = shapes.get(key) if key else None
-            known.append(
-                catalog.with_aspect(entry, aspect) if aspect else entry
-            )
-        return known
-
     def _clear(self) -> None:
         """Drop every thumbnail currently in the strip."""
-        self._store.remove_all()
         self._tiles.clear()
         self._cards.clear()
         self._card_path.clear()
@@ -1010,7 +985,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._filter_model = model or None
         self._filter_lens = lens or None
         self._filter_focal = focal
-        self._apply_filter()
+        self._model.set_filter(self._filter())
         states = (("model", self._filter_model), ("lens", self._filter_lens))
         for axis, value in states:
             action = self._filter_actions.get(axis)
@@ -1022,20 +997,18 @@ class FilmStrip(Gtk.ScrolledWindow):
                 self.filter_button.add_css_class("accent")
             else:
                 self.filter_button.remove_css_class("accent")
-        if self._on_filter_changed is not None:
-            self._on_filter_changed()
 
     def known_models(self) -> list[str]:
         """Camera models present in the folder, sorted."""
-        return catalog.cameras(self._entries.values())
+        return self._model.known_models()
 
     def known_lenses(self) -> list[str]:
         """Lens models present in the folder, sorted."""
-        return catalog.lenses(self._entries.values())
+        return self._model.known_lenses()
 
     def known_focals(self) -> list[str]:
         """Focal lengths present in the folder, sorted numerically."""
-        return catalog.focal_labels(self._entries.values())
+        return self._model.known_focals()
 
     def _filter(self) -> catalog.Filter:
         """The active filter, as the model states it."""
@@ -1045,15 +1018,22 @@ class FilmStrip(Gtk.ScrolledWindow):
             focal=self._filter_focal,
         )
 
+    def texture_for(self, path: str) -> Any | None:
+        """The small frame the strip has decoded for a path."""
+        return self._tiles.texture_for(path)
+
+    def entry_for(self, path: str) -> catalog.Entry | None:
+        """The folder entry behind a path."""
+        return self._model.entry_for(path)
+
     def _matches_filter(self, path: str) -> bool:
         """Whether a card passes the active filter."""
-        entry = self._entries.get(path)
-        return entry is None or self._filter().matches(entry)
+        entry = self._model.entry_for(path)
+        return entry is None or self._model.passes(entry)
 
     def _passes(self, item: EntryItem) -> bool:
         """Whether one entry survives the active filter."""
-        entry = self._entries.get(item.entry.path, item.entry)
-        return self._filter().matches(entry)
+        return self._model.passes(item.entry)
 
     def _apply_filter(self) -> None:
         """Re-run the filter over the model, dropping hidden marks."""

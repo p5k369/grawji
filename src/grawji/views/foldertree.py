@@ -54,6 +54,7 @@ class FolderTree(Gtk.ScrolledWindow):
         on_drop_paths: (
             Callable[[list[str], str, bool | None], None] | None
         ) = None,
+        on_activate: Callable[[str], None] | None = None,
     ) -> None:
         """Create the tree.
 
@@ -70,6 +71,8 @@ class FolderTree(Gtk.ScrolledWindow):
                 copy flag is True when Ctrl forced a copy, False when
                 Shift forced a move, and None for an unmodified drag
                 (the caller applies its default).
+            on_activate: Called with a folder path when a row is opened
+                with a double click or Enter.
         """
         super().__init__()
         self._on_select = on_select
@@ -77,6 +80,7 @@ class FolderTree(Gtk.ScrolledWindow):
         self._on_bookmarks_changed = on_bookmarks_changed
         self._on_expansion_changed = on_expansion_changed
         self._on_drop_paths = on_drop_paths
+        self._on_activate = on_activate
         self._restoring = False
         self._save_pending = False
         self._launcher: Any = None
@@ -202,9 +206,15 @@ class FolderTree(Gtk.ScrolledWindow):
         return False
 
     def _on_row_activated(self, _list: Gtk.ListView, position: int) -> None:
-        """Toggle a folder's expansion on double-click or Enter."""
+        """Open a folder on double-click or Enter, or expand it."""
         row = self._selection.get_item(position)
-        if row is not None and row.is_expandable():
+        if row is None:
+            return
+        path = row.get_item().file.get_path()
+        if self._on_activate is not None and path:
+            self._on_activate(path)
+            return
+        if row.is_expandable():
             row.set_expanded(not row.get_expanded())
 
     def _find_row(

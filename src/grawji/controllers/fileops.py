@@ -16,7 +16,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from grawji import fileops
+from grawji import fileops, mainloop
 from grawji.imaging.export import initial_folder
 from grawji.settings import Settings
 from grawji.views.filmstrip import FilmStrip
@@ -204,7 +204,7 @@ class FileOpsController:
                     _log.warning("%s failed for %s: %s", kind, path, exc)
                     failed += 1
             done = len(paths) - failed
-            GLib.idle_add(self._on_done, kind, done, failed, moves)
+            mainloop.call(self._on_done, kind, done, failed, moves)
 
         threading.Thread(
             target=work, name="grawji-fileops", daemon=True
@@ -244,7 +244,7 @@ class FileOpsController:
                     fileops.move_raf(target, str(Path(source).parent))
                 except (OSError, GLib.Error) as exc:
                     _log.warning("undo move failed for %s: %s", target, exc)
-            GLib.idle_add(self._on_undo_done)
+            mainloop.call(self._on_undo_done)
 
         threading.Thread(
             target=work, name="grawji-fileops", daemon=True

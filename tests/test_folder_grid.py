@@ -28,14 +28,19 @@ def loader(tmp_path: Path) -> Any:
 def grid(gtk: Any, tmp_path: Path) -> Any:
     """A grid over three RAFs, with the frames it opened recorded."""
     from grawji.views.folder_grid import FolderGrid
+    from grawji.views.folder_model import FolderModel
 
     for name in ("a.RAF", "b.RAF", "c.RAF"):
         (tmp_path / name).write_bytes(b"not a real raf")
     opened: list[str] = []
-    built = FolderGrid(loader=loader(tmp_path), on_activate=opened.append)
+    model = FolderModel(dispatch=lambda call: call())
+    built = FolderGrid(
+        model=model, loader=loader(tmp_path), on_activate=opened.append
+    )
     built.opened = opened
     built.folder = tmp_path
-    built.show_entries(catalog.scan(tmp_path))
+    built.model = model
+    model.scan(str(tmp_path))
     return built
 
 
@@ -51,7 +56,7 @@ def test_showing_another_folder_replaces_the_content(
     other = tmp_path / "other"
     other.mkdir()
     (other / "x.RAF").write_bytes(b"not a real raf")
-    grid.show_entries(catalog.scan(other))
+    grid.model.scan(str(other))
     assert grid.shown == 1
 
 
@@ -253,8 +258,11 @@ def test_a_size_change_re_decodes_what_is_bound(grid: Any) -> None:
 class _Picture:
     """Stand-in for the tile's picture."""
 
-    def set_paintable(self, _paintable: Any) -> None:
-        """Ignore what is painted."""
+    painted: Any = None
+
+    def set_paintable(self, paintable: Any) -> None:
+        """Remember what was painted."""
+        self.painted = paintable
 
     def set_size_request(self, _width: int, _height: int) -> None:
         """Ignore the size."""
@@ -331,18 +339,185 @@ def test_the_rest_of_the_folder_is_fetched_behind_the_viewport(
     assert set(asked[:3]) <= {paths[9], paths[10], paths[11]}
 
 
+def test_the_filter_reads_the_metadata_as_it_stands(grid: Any) -> None:
+    """It arrives with the thumbnails, long after the grid was built."""
+    bodies = {"a.RAF": "X-E5", "b.RAF": "X100F", "c.RAF": "X-E5"}
+    for entry in catalog.scan(grid.folder):
+        grid.model.entries[entry.path] = catalog.with_meta(
+            entry, bodies[Path(entry.path).name], "XF23mmF2", "23 mm"
+        )
+    grid.model.set_filter(catalog.Filter(camera="X100F"))
+    assert grid.shown == 1
+
+
 def test_showing_the_same_folder_again_keeps_the_grid(grid: Any) -> None:
     """Rebuilding it would drop every measured size and decoded frame."""
     cleared: list[str] = []
     grid._thumbs.clear = lambda: cleared.append("cleared")
-    same = catalog.scan(grid.folder)
-    grid.show_entries(same)
+    grid.model.scan(str(grid.folder))
     assert cleared == []
     assert grid.shown == 3
     # A different folder still replaces it.
     other = grid.folder / "other"
     other.mkdir()
     (other / "x.RAF").write_bytes(b"not a real raf")
-    grid.show_entries(catalog.scan(other))
+    grid.model.scan(str(other))
     assert cleared == ["cleared"]
     assert grid.shown == 1
+
+
+def test_opening_a_folder_in_the_tree_shows_it_in_browse(
+    window: Any, tmp_path: Path
+) -> None:
+    """A double click in the tree is a request to look at that folder."""
+    from tests.gui_support import pump
+
+    folder = tmp_path / "shoot"
+    folder.mkdir()
+    (folder / "a.RAF").write_bytes(b"not a real raf")
+    window._browse_folder(str(folder))
+    pump()
+    assert window.view_stack.get_visible_child_name() == "grid"
+    assert window._grid.shown == 1
+
+
+def test_filtering_an_open_grid_uses_the_metadata_it_has_by_then(
+    window: Any, tmp_path: Path
+) -> None:
+    """The metadata arrives after the grid is built, not before."""
+    from grawji import catalog
+    from tests.gui_support import pump
+
+    for name in ("a.RAF", "b.RAF"):
+        (tmp_path / name).write_bytes(b"not a real raf")
+    window._scan_folder(str(tmp_path))
+    pump()
+    toggle(window, True)
+    pump()
+    assert window._grid.shown == 2
+    strip = window._filmstrip
+    bodies = {strip.paths[0]: "X-E5", strip.paths[1]: "X100F"}
+    for path, model in bodies.items():
+        strip._entries[path] = catalog.with_meta(
+            strip._entries[path], model, "XF23mmF2", "23 mm"
+        )
+    strip.set_filter(model="X100F", lens=None, focal=None)
+    pump()
+    assert window._grid.shown == 1
+
+
+def test_metadata_arriving_after_the_filter_reaches_the_grid(
+    window: Any, tmp_path: Path
+) -> None:
+    """Filtering happens long before every frame has been read."""
+    from grawji.imaging.thumbnails import ThumbMeta
+    from tests.gui_support import pump
+
+    for name in ("a.RAF", "b.RAF"):
+        (tmp_path / name).write_bytes(b"not a real raf")
+    window._scan_folder(str(tmp_path))
+    pump()
+    toggle(window, True)
+    pump()
+    strip = window._filmstrip
+    strip.set_filter(model=None, lens="XF23mmF2", focal=None)
+    pump()
+    assert window._grid.shown == 2
+    strip._note_meta(
+        strip.paths[0], ThumbMeta("X-E5", "XF23mmF2", "23 mm"), 3, 2
+    )
+    strip._note_meta(
+        strip.paths[1], ThumbMeta("X-E5", "XF56mmF1.2", "56 mm"), 3, 2
+    )
+    strip._model.refilter_now()
+    pump()
+    assert len(strip.visible_paths) == 1
+    assert window._grid.shown == 1
+
+
+def test_filtering_asks_for_the_frames_that_are_left(grid: Any) -> None:
+    """They used to sit blank until something else woke the view."""
+    asked: list[str] = []
+    grid._thumbs._loader.request = lambda path, _ready: asked.append(path)
+    for entry in catalog.scan(grid.folder):
+        grid.model.entries[entry.path] = catalog.with_meta(
+            entry,
+            "X-E5" if entry.path.endswith("b.RAF") else "X100F",
+            "XF23mmF2",
+            "23 mm",
+        )
+    grid.model.set_filter(catalog.Filter(camera="X-E5"))
+    assert grid.shown == 1
+    grid._thumbs._prefetch_batch()
+    assert asked == [str(grid.folder / "b.RAF")]
+
+
+def test_a_tile_shows_the_small_frame_until_its_own_arrives(
+    gtk: Any, tmp_path: Path
+) -> None:
+    """An empty tile is worse than a soft one."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from grawji.views.tile_thumbs import TileThumbs
+
+    small = object()
+    thumbs = TileThumbs(
+        loader(tmp_path),
+        Gtk.ScrolledWindow(),
+        stand_in=lambda _path: small,
+    )
+    thumbs._loader.request = lambda *_a: None
+    picture = _Picture()
+    tile = object()
+    thumbs.want(tile, picture, "/frames/a.RAF")
+    assert picture.painted is small
+    assert tile in thumbs._waiting
+    thumbs._on_thumb("/frames/a.RAF", _pixbuf(), None)
+    assert picture.painted is not small
+    assert tile not in thumbs._waiting
+
+
+def test_old_frames_make_room_instead_of_stopping(
+    gtk: Any, tmp_path: Path
+) -> None:
+    """A huge folder must not end up half loaded for good."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from grawji.views.tile_thumbs import TileThumbs
+
+    thumbs = TileThumbs(loader(tmp_path), Gtk.ScrolledWindow(), keep=3)
+    for index in range(5):
+        thumbs._on_thumb(f"/frames/{index}.RAF", _pixbuf(), None)
+    assert len(thumbs._textures) == 3
+    assert "/frames/0.RAF" not in thumbs._textures
+    assert "/frames/4.RAF" in thumbs._textures
+    thumbs._bound[object()] = (_Picture(), "/frames/2.RAF")
+    for index in range(5, 9):
+        thumbs._on_thumb(f"/frames/{index}.RAF", _pixbuf(), None)
+    assert "/frames/2.RAF" in thumbs._textures
+
+
+def test_what_one_view_learns_every_view_knows(
+    window: Any, tmp_path: Path
+) -> None:
+    """The folder lives once, so there is nothing to ferry across."""
+    from grawji.imaging.thumbnails import ThumbMeta
+    from tests.gui_support import pump
+
+    (tmp_path / "a.RAF").write_bytes(b"not a real raf")
+    window._scan_folder(str(tmp_path))
+    pump()
+    strip = window._filmstrip
+    path = strip.paths[0]
+    window._folder_model.fold_meta(
+        path, ThumbMeta("X-E5", "XF23mmF2", "23 mm"), 1.5
+    )
+    assert strip.entry_for(path).model == "X-E5"
+    assert window._grid._folder.entry_for(path).model == "X-E5"
+    assert strip._store is window._grid._store

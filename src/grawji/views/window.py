@@ -21,7 +21,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import raf, sidecar
+from grawji import mainloop, raf, sidecar
 from grawji.camera import camera_info
 from grawji.camera.capabilities import (
     Capabilities,
@@ -65,6 +65,7 @@ from grawji.views import dialogs
 from grawji.views.filmstrip import FilmStrip
 from grawji.views.filmstrip_nav import FilmStripNav
 from grawji.views.folder_grid import FolderGrid
+from grawji.views.folder_model import FolderModel
 from grawji.views.foldertree import FolderTree
 from grawji.views.navigator import Navigator
 from grawji.views.preferences import PreferencesDialog
@@ -173,7 +174,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Wire up the worker, the composite widgets and the controllers."""
         super().__init__(**kwargs)
         self._session = CameraSession()
-        self._worker = CameraWorker(self._session, dispatch=GLib.idle_add)
+        self._worker = CameraWorker(self._session, dispatch=mainloop.call)
         self._worker.start()
         self.connect("close-request", self._on_close_request)
 
@@ -233,6 +234,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_bookmarks_changed=self._on_bookmarks_changed,
             on_expansion_changed=self._on_expanded_changed,
             on_drop_paths=self._fileops.on_tree_drop,
+            on_activate=self._browse_folder,
         )
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
@@ -473,10 +475,12 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _init_filmstrip(self) -> None:
         """Build the filmstrip flanked by previous/next navigation."""
+        self._folder_model = FolderModel()
+        self._folder_model.add_listener(self._on_folder_event)
         self._filmstrip = FilmStrip(
+            model=self._folder_model,
             on_select=self._on_raf_selected,
             on_loading=self._on_thumbs_loading,
-            on_filter_changed=self._on_filter_changed,
             on_selection_changed=self._on_selection_changed,
             on_file_action=self._fileops.on_file_action,
             drag_action=lambda: self._settings.drag_action,
@@ -495,6 +499,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _init_grid(self) -> None:
         """Build the folder grid that shares the preview's place."""
         self._grid = FolderGrid(
+            model=self._folder_model,
             loader=ThumbnailLoader(
                 height=self._settings.grid_tile_px,
                 cache_dir=cache_dir() / "thumbs",
@@ -502,11 +507,12 @@ class MainWindow(Adw.ApplicationWindow):
                 # The camera's own thumbnail is 160 by 120, so a tile
                 # this size comes from the RAF's full preview instead.
                 sharp=True,
-                dispatch=GLib.idle_add,
+                dispatch=mainloop.call,
             ),
             tile=self._settings.grid_tile_px,
             on_activate=self._on_grid_activated,
             on_select=self._on_grid_selected,
+            stand_in=self._filmstrip.texture_for,
         )
         self.grid_slot.append(self._grid)
         self.grid_size.set_value(self._settings.grid_tile_px)
@@ -579,21 +585,23 @@ class MainWindow(Adw.ApplicationWindow):
             self.grid_count.set_label(f"{shown} of {held} frames")
 
     def _fill_grid(self) -> bool:
-        """Show what the filmstrip shows, as a grid. False with no folder."""
+        """Line the grid up with the strip. False with no folder."""
         if self._current_folder is None:
             return False
-        self._grid.show_entries(self._filmstrip.entries)
-        self._grid.set_filter(self._filmstrip.active_filter)
         current = self._filmstrip.current_path
         if current is not None:
             self._grid.select_path(current)
         self._update_grid_count()
         return True
 
-    def _on_filter_changed(self) -> None:
-        """Keep an open grid in step with the filter."""
-        if self._grid_is_open():
-            self._grid.set_filter(self._filmstrip.active_filter)
+    def _browse_folder(self, path: str) -> None:
+        """Open a folder in Browse, which is what a double click asks."""
+        self._scan_folder(path)
+        self._set_grid_open(open_it=True)
+
+    def _on_folder_event(self, reason: str, _path: str | None) -> None:
+        """Keep the frame count fresh while the grid shows."""
+        if reason in ("folder", "filter") and self._grid_is_open():
             self._update_grid_count()
 
     def _set_grid_open(self, *, open_it: bool) -> None:
@@ -709,11 +717,11 @@ class MainWindow(Adw.ApplicationWindow):
             pixbuf = oriented_pixbuf(jpeg)
             rows = imagemeta.exif_rows(jpeg)
         except (ValueError, OSError, GLib.Error):
-            GLib.idle_add(
+            mainloop.call(
                 self._apply_selection, generation, None, None, [], native
             )
             return
-        GLib.idle_add(
+        mainloop.call(
             self._apply_selection, generation, jpeg, pixbuf, rows, native
         )
 
@@ -1113,9 +1121,9 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             pixbuf = oriented_pixbuf(jpeg)
         except GLib.Error as exc:
-            GLib.idle_add(self._apply_preview, generation, seq, None, str(exc))
+            mainloop.call(self._apply_preview, generation, seq, None, str(exc))
             return
-        GLib.idle_add(self._apply_preview, generation, seq, pixbuf, "")
+        mainloop.call(self._apply_preview, generation, seq, pixbuf, "")
 
     def _apply_preview(
         self,

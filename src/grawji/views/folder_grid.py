@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import GLib, Gtk
 
-from grawji import catalog
+from grawji import mainloop
 from grawji.imaging.thumbnails import ThumbnailLoader
-from grawji.views.entry_item import EntryItem
+from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
+# Decoded frames the grid holds on to.
+_KEEP_TILES = 400
 # Room for the caption under each thumbnail.
 _CAPTION_PX = 22
 # Breathing room between tiles.
@@ -32,23 +34,27 @@ class FolderGrid(Gtk.ScrolledWindow):
     def __init__(
         self,
         *,
+        model: FolderModel,
         loader: ThumbnailLoader,
         tile: int = 240,
         on_activate: Callable[[str], None] | None = None,
         on_select: Callable[[str], None] | None = None,
+        stand_in: Callable[[str], Any] | None = None,
     ) -> None:
-        """Build the grid."""
+        """Build the grid over the folder shared with the strip."""
         super().__init__()
         self._tile = tile
-        self._shown_paths: list[str] = []
+        self._folder = model
+        self._folder.add_listener(self._on_model_event)
         self._on_activate = on_activate
         self._on_select = on_select
         # True while the grid is being told where to stand, so
         # syncing the selection cannot bounce back.
         self._syncing = False
-        self._thumbs = TileThumbs(loader, self)
-        self._store = Gio.ListStore.new(EntryItem)
-        self._filter = catalog.Filter()
+        self._thumbs = TileThumbs(
+            loader, self, keep=_KEEP_TILES, stand_in=stand_in
+        )
+        self._store = model.store
         self._model_filter = Gtk.CustomFilter.new(self._passes)
         self._shown = Gtk.FilterListModel(
             model=self._store, filter=self._model_filter
@@ -79,11 +85,11 @@ class FolderGrid(Gtk.ScrolledWindow):
     def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
         """Re-fit the columns and re-check the viewport on a resize."""
         Gtk.ScrolledWindow.do_size_allocate(self, width, height, baseline)
-        self._thumbs.schedule()
+        self._thumbs.schedule(fresh=True)
         if self._reveal_wanted is not None and width > 0:
-            GLib.idle_add(self._catch_up_reveal)
+            mainloop.call(self._catch_up_reveal)
         if not self._fit_pending:
-            self._fit_pending = GLib.idle_add(self._fit_now)
+            self._fit_pending = mainloop.call(self._fit_now)
 
     def _fit_now(self) -> bool:
         """Apply the column count once the allocation has settled."""
@@ -121,34 +127,30 @@ class FolderGrid(Gtk.ScrolledWindow):
         if columns != self._view.get_max_columns():
             self._view.set_max_columns(columns)
 
-    def show_entries(self, entries: Sequence[catalog.Entry]) -> None:
-        """Replace the folder the grid shows.
+    def _on_model_event(self, reason: str, _path: str | None) -> None:
+        """Follow the shared folder."""
+        if reason == "folder":
+            self._thumbs.clear()
+            self._thumbs.prefetch(self._folder.paths)
+            self._model_filter.changed(Gtk.FilterChange.DIFFERENT)
+            self._thumbs.schedule(fresh=True)
+        elif reason == "filter":
+            self._model_filter.changed(Gtk.FilterChange.DIFFERENT)
+            self._thumbs.prefetch(self._visible_paths())
+            self._thumbs.schedule(fresh=True)
 
-        One splice rather than a remove and hundreds of appends, which
-        the model would otherwise report one item at a time.
-        """
-        self._fit_columns()
-        paths = [entry.path for entry in entries]
-        if paths == self._shown_paths:
-            return
-        self._shown_paths = paths
-        self._thumbs.clear()
-        self._store.splice(
-            0,
-            self._store.get_n_items(),
-            [EntryItem(entry) for entry in entries],
-        )
-
-    def set_filter(self, entry_filter: catalog.Filter) -> None:
-        """Narrow the grid to what the filter leaves."""
-        if entry_filter == self._filter:
-            return
-        self._filter = entry_filter
-        self._model_filter.changed(Gtk.FilterChange.DIFFERENT)
+    def _visible_paths(self) -> list[str]:
+        """The frames the filter leaves, in the order they are shown."""
+        paths = []
+        for position in range(self._shown.get_n_items()):
+            item = self._shown.get_item(position)
+            if item is not None:
+                paths.append(item.entry.path)
+        return paths
 
     def _passes(self, item: EntryItem) -> bool:
-        """Whether one entry survives the active filter."""
-        return self._filter.matches(item.entry)
+        """Whether one entry survives the folder's filter."""
+        return self._folder.passes(item.entry)
 
     def select_path(self, path: str) -> bool:
         """Select the tile for path and put it in view."""

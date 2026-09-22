@@ -17,7 +17,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import GLib, Gtk
 
-from grawji import sidecar
+from grawji import mainloop, sidecar
 from grawji.camera.core import (
     CameraSession,
     ForeignRafError,
@@ -384,7 +384,7 @@ class BatchController:
                         skip_foreign,
                         tally,
                     )
-                GLib.idle_add(self._progress, done, total, Path(raf_file).name)
+                mainloop.call(self._progress, done, total, Path(raf_file).name)
             if current is not None:
                 self._session.open(current)
             return tally
