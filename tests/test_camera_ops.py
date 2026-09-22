@@ -30,7 +30,7 @@ class ImmediateThread:
 def immediate(monkeypatch):
     """Run worker threads and idle callbacks synchronously."""
     monkeypatch.setattr(module.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(module.GLib, "idle_add", lambda fn, *a: fn(*a))
+    monkeypatch.setattr(module.mainloop, "call", lambda fn, *a: fn(*a))
 
 
 class FakeSession:

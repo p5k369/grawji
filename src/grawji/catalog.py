@@ -35,6 +35,9 @@ class Entry:
     # Exif spells capture time as "YYYY:MM:DD HH:MM:SS", which sorts
     # correctly as text, so it stays a string until someone needs more.
     shot: str = ""
+    # Width over height of the frame as shown, known once a thumbnail
+    # has been decoded.
+    aspect: float = 0.0
 
     @property
     def edited(self) -> bool:
@@ -159,6 +162,16 @@ def with_meta(entry: Entry, model: str, lens: str, focal: str) -> Entry:
     return replace(entry, model=model, lens=lens, focal=focal)
 
 
+def with_aspect(entry: Entry, aspect: float) -> Entry:
+    """The entry again, now that the frame's shape is known."""
+    return replace(entry, aspect=aspect)
+
+
+def with_edits(entry: Entry, has_crop: bool, has_ev: bool) -> Entry:
+    """The entry again, with the sidecar read afresh."""
+    return replace(entry, has_crop=has_crop, has_ev=has_ev)
+
+
 def apply(
     entries: Sequence[Entry],
     *,
@@ -183,9 +196,14 @@ def lenses(entries: Iterable[Entry]) -> list[str]:
     return sorted({entry.lens for entry in entries if entry.lens})
 
 
-def focal_stops(entries: Iterable[Entry]) -> list[float]:
-    """The focal lengths present, for the focal sliders."""
-    values = {
-        entry.focal_value for entry in entries if entry.focal_value is not None
-    }
-    return sorted(values)
+def focal_labels(entries: Iterable[Entry]) -> list[str]:
+    """The focal lengths present, in numeric order, as written."""
+    labels = {entry.focal for entry in entries if entry.focal}
+    return sorted(
+        labels,
+        key=lambda label: (
+            focal_mm(label) is None,
+            focal_mm(label) or 0.0,
+            label,
+        ),
+    )

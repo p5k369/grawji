@@ -10,8 +10,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib
 
+from grawji import mainloop
 from grawji.camera.core import CameraSession
 
 
@@ -33,9 +33,9 @@ class CameraOpsController:
             try:
                 blob = self._session.download_settings_backup()
             except Exception as exc:
-                GLib.idle_add(on_error, exc)
+                mainloop.call(on_error, exc)
                 return
-            GLib.idle_add(on_done, blob)
+            mainloop.call(on_done, blob)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -51,9 +51,9 @@ class CameraOpsController:
             try:
                 model = self._session.restore_settings_backup(blob)
             except Exception as exc:
-                GLib.idle_add(on_error, exc)
+                mainloop.call(on_error, exc)
                 return
-            GLib.idle_add(on_done, model)
+            mainloop.call(on_done, model)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -68,7 +68,7 @@ class CameraOpsController:
                 model, names = self._session.read_bank_names()
             except Exception:
                 names = []
-            GLib.idle_add(on_loaded, model, names)
+            mainloop.call(on_loaded, model, names)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -104,7 +104,7 @@ class CameraOpsController:
                         f for fs in result.dropped.values() for f in fs
                     }
             except Exception as exc:
-                GLib.idle_add(on_error, f"Bank transfer failed: {exc}")
+                mainloop.call(on_error, f"Bank transfer failed: {exc}")
                 return
             slots = ", ".join(written)
             message = (
@@ -115,6 +115,6 @@ class CameraOpsController:
                 message += (
                     " Dropped unsupported: " + ", ".join(sorted(dropped)) + "."
                 )
-            GLib.idle_add(on_done, message)
+            mainloop.call(on_done, message)
 
         threading.Thread(target=work, daemon=True).start()

@@ -49,6 +49,7 @@ class Settings:
             are skipped so an interrupted batch can be resumed cheaply.
         wb_grid_tint: When True, tint each white-balance shift grid cell
             with the color it nudges the image toward.
+        grid_tile_px: Height of one tile in the folder grid.
         nav_glide_speed: Filmstrip scroll speed while an arrow is held,
             in pixels per second.
         drag_action: What an unmodified drag of images onto a folder
@@ -102,6 +103,7 @@ class Settings:
     batch_overwrite: bool = False
     wb_grid_tint: bool = True
     nav_glide_speed: int = 600
+    grid_tile_px: int = 240
     drag_action: str = "move"
     camera_auto_reconnect: bool = True
     bookmarks: list[str] = field(default_factory=list)

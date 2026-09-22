@@ -25,6 +25,12 @@ gi.require_version("GExiv2", "0.10")
 from gi.repository import GdkPixbuf, GExiv2, GLib
 
 from grawji.exif import format_focal
+from grawji.imaging.pixbufs import (
+    crop_to_aspect,
+    orient_exif,
+    trim_letterbox,
+)
+from grawji.mainloop import Dispatch
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 
 # How much of the embedded JPEG to read for the EXIF thumbnail.
@@ -32,6 +38,24 @@ _EXIF_PREFIX_BYTES = 256 * 1024
 
 # Cached thumbnails unused for this long are deleted at startup.
 _CACHE_MAX_AGE_S = 30 * 24 * 3600
+
+
+def remembered_facts(cache_dir: Path) -> dict[str, Facts]:
+    """What this cache knows about the frames it has seen."""
+    facts: dict[str, Facts] = {}
+    try:
+        with (cache_dir / _FACTS_FILE).open() as handle:
+            for line in handle:
+                key, _, rest = line.rstrip("\n").partition(" ")
+                ratio, _, meta = rest.partition(" ")
+                fields = meta.split("|")
+                if len(fields) != _FACT_FIELDS:
+                    continue
+                with contextlib.suppress(ValueError):
+                    facts[key] = Facts(float(ratio), *fields)
+    except OSError:
+        return facts
+    return facts
 
 
 def prune_cache(
@@ -44,7 +68,11 @@ def prune_cache(
         now = time.time()
     removed = 0
     try:
-        entries = list(cache_dir.glob("*.png"))
+        entries = [
+            entry
+            for suffix in _CACHE_SUFFIXES
+            for entry in cache_dir.glob(f"*{suffix}")
+        ]
     except OSError:
         return 0
     for entry in entries:
@@ -52,14 +80,44 @@ def prune_cache(
             if now - entry.stat().st_mtime > max_age_s:
                 entry.unlink()
                 removed += 1
+    _prune_facts(cache_dir)
+    with contextlib.suppress(OSError):
+        (cache_dir / "shapes.v1").unlink(missing_ok=True)
     return removed
 
 
-# The camera model rides inside the cached PNG as a tEXt chunk, so a warm
-# start needs no RAF reads at all.
-_MODEL_OPTION = "tEXt::grawji-model"
-_LENS_OPTION = "tEXt::grawji-lens"
-_FOCAL_OPTION = "tEXt::grawji-focal"
+def _prune_facts(cache_dir: Path) -> None:
+    """Keep the memory of frames from growing without bound."""
+    facts = remembered_facts(cache_dir)
+    if len(facts) <= _FACTS_CAP:
+        return
+    kept = dict(list(facts.items())[-_FACTS_CAP:])
+    lines = "".join(_fact_line(key, fact) for key, fact in kept.items())
+    with contextlib.suppress(OSError):
+        (cache_dir / _FACTS_FILE).write_text(lines)
+
+
+def _fact_line(key: str, fact: Facts) -> str:
+    """One line of the memory file."""
+    meta = "|".join(
+        field.replace("|", " ").replace("\n", " ")
+        for field in (fact.model, fact.lens, fact.focal)
+    )
+    return f"{key} {fact.aspect:.4f} {meta}\n"
+
+
+# Filter metadata rides along in the cached JPEG's own Exif tags.
+_MODEL_TAG = "Exif.Image.Model"
+_LENS_TAG = "Exif.Photo.LensModel"
+_FOCAL_TAG = "Exif.Image.ImageDescription"
+_FACTS_FILE = "facts.v1"
+# Model, lens and focal length, in that order, on every line.
+_FACT_FIELDS = 3
+# How many frames the memory holds before the oldest age out.
+_FACTS_CAP = 50_000
+_CACHE_QUALITY = "88"
+# What a cache entry can be called, past spellings included.
+_CACHE_SUFFIXES = (".jpg", ".png")
 
 
 class ThumbMeta(NamedTuple):
@@ -70,105 +128,99 @@ class ThumbMeta(NamedTuple):
     focal: str
 
 
-Dispatch = Callable[[Callable[[], None]], Any]
-OnThumb = Callable[[str, Any, Any, Any, ThumbMeta, int], None]
-OnFinished = Callable[[int], None]
+class Facts(NamedTuple):
+    """Everything a folder listing needs about one frame."""
 
-# EXIF orientation.
-_R = GdkPixbuf.PixbufRotation
-_ORIENTATIONS = {
-    1: (_R.NONE, False),
-    2: (_R.NONE, True),
-    3: (_R.UPSIDEDOWN, False),
-    4: (_R.UPSIDEDOWN, True),
-    5: (_R.CLOCKWISE, True),
-    6: (_R.CLOCKWISE, False),
-    7: (_R.COUNTERCLOCKWISE, True),
-    8: (_R.COUNTERCLOCKWISE, False),
-}
+    aspect: float
+    model: str
+    lens: str
+    focal: str
+
+    @property
+    def meta(self) -> ThumbMeta:
+        """The filter-relevant part."""
+        return ThumbMeta(self.model, self.lens, self.focal)
+
+
+OnOne = Callable[[str, Any, ThumbMeta], None]
+OnMeta = Callable[[str, ThumbMeta, "float | None"], None]
 
 
 class ThumbnailLoader:
     """Loads a scan's thumbnails in parallel and reports each result."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         *,
         height: int,
         cache_dir: Path,
         workers: int,
+        sharp: bool = False,
         dispatch: Dispatch,
-        is_stale: Callable[[int], bool],
-        on_thumb: OnThumb,
-        on_finished: OnFinished,
     ) -> None:
         """Create the loader.
 
         Args:
             height: Thumbnail height in pixels.
-            cache_dir: Directory for the PNG thumbnail cache.
+            cache_dir: Directory for the thumbnail cache.
             workers: Decoder thread-pool size.
+            sharp: Decode the RAF's full preview instead of its small
+                Exif thumbnail.
             dispatch: Schedules a callback on the main loop.
-            is_stale: Whether a scan id has been superseded (results
-                for it are dropped).
-            on_thumb: Called on the main loop per finished thumbnail.
-            on_finished: Called on the main loop with the scan id once
-                every thumbnail of that scan is done.
         """
         self._height = height
         self._cache_dir = cache_dir
         self._workers = workers
+        self._sharp = sharp
         self._dispatch = dispatch
-        self._is_stale = is_stale
-        self._on_thumb = on_thumb
-        self._on_finished = on_finished
         self._pruned = False
+        self._facts: dict[str, Facts] | None = None
+        self._facts_lock = threading.Lock()
+        self._real_dirs: dict[Path, Path] = {}
+        self._pool: ThreadPoolExecutor | None = None
+        self._meta_pool: ThreadPoolExecutor | None = None
         GExiv2.initialize()
 
-    def load(self, cards: list[tuple[str, Any, Any]], scan_id: int) -> None:
-        """Decode cards on worker threads."""
-        threading.Thread(
-            target=self._load_all,
-            args=(cards, scan_id),
-            name="grawji-thumbs",
-            daemon=True,
-        ).start()
+    def set_height(self, height: int) -> None:
+        """Decode at a new size from here on."""
+        self._height = height
 
-    def _load_all(
-        self, cards: list[tuple[str, Any, Any]], scan_id: int
-    ) -> None:
-        """Decode this scan's thumbnails in parallel and dispatch each."""
+    def request(self, path: str, on_ready: OnOne) -> None:
+        """Decode one thumbnail off the main loop."""
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=self._workers)
         if not self._pruned:
             self._pruned = True
-            prune_cache(self._cache_dir)
-        with ThreadPoolExecutor(max_workers=self._workers) as pool:
-            for path, picture, camera_label in cards:
-                pool.submit(
-                    self._decode_one, path, picture, camera_label, scan_id
-                )
-        self._dispatch(partial(self._on_finished, scan_id))
+            self._pool.submit(prune_cache, self._cache_dir)
+        self._pool.submit(self._request_one, path, on_ready)
 
-    def _decode_one(
-        self, path: str, picture: Any, camera_label: Any, scan_id: int
-    ) -> None:
-        """Produce one thumbnail and dispatch it."""
-        if self._is_stale(scan_id):
+    def sweep_meta(self, paths: list[str], on_ready: OnMeta) -> None:
+        """Read the metadata of every path off the main loop."""
+        if self._meta_pool is None:
+            self._meta_pool = ThreadPoolExecutor(max_workers=2)
+        for path in paths:
+            self._meta_pool.submit(self._sweep_one, path, on_ready)
+
+    def _sweep_one(self, path: str, on_ready: OnMeta) -> None:
+        """Read one file's metadata and hand it to the main loop."""
+        found = read_frame_meta(path)
+        if found is None:
             return
+        meta, aspect = found
+        key = self.cache_key(path)
+        if key is not None:
+            self._remember_fact(
+                key, Facts(aspect or 0.0, meta.model, meta.lens, meta.focal)
+            )
+        self._dispatch(partial(on_ready, path, meta, aspect))
+
+    def _request_one(self, path: str, on_ready: OnOne) -> None:
+        """Produce one thumbnail for a single request and dispatch it."""
         try:
             pixbuf, meta = self._thumbnail(path)
         except (ValueError, OSError, GLib.Error):
             return
-        self._dispatch(
-            partial(
-                self._on_thumb,
-                path,
-                picture,
-                camera_label,
-                pixbuf,
-                meta,
-                scan_id,
-            )
-        )
+        self._dispatch(partial(on_ready, path, pixbuf, meta))
 
     def _thumbnail(self, path: str) -> tuple[Any, ThumbMeta]:
         """Return path's pixbuf and meta, cached when possible."""
@@ -181,15 +233,54 @@ class ThumbnailLoader:
             if cached is not None:
                 with contextlib.suppress(OSError):
                     os.utime(cache)
-                return cached, ThumbMeta(
-                    cached.get_option(_MODEL_OPTION) or "",
-                    cached.get_option(_LENS_OPTION) or "",
-                    cached.get_option(_FOCAL_OPTION) or "",
-                )
+                # A warm cache decodes nothing, so this is where the
+                # shape of an already known frame gets recorded.
+                meta = self._cached_meta(cache)
+                self._remember(cache, cached, meta)
+                return cached, meta
         pixbuf, meta = self._decode_thumb(path)
         if cache is not None:
             self._store_cache(cache, pixbuf, meta)
         return pixbuf, meta
+
+    @staticmethod
+    def _cached_meta(cache: Path) -> ThumbMeta:
+        """Read the filter metadata back out of a cached thumbnail."""
+        try:
+            tags = GExiv2.Metadata()
+            tags.open_path(str(cache))
+            return ThumbMeta(
+                tags.try_get_tag_string(_MODEL_TAG) or "",
+                tags.try_get_tag_string(_LENS_TAG) or "",
+                tags.try_get_tag_string(_FOCAL_TAG) or "",
+            )
+        except GLib.Error:
+            return ThumbMeta("", "", "")
+
+    def cache_key(self, path: str) -> str | None:
+        """The key this file's thumbnail is cached under."""
+        target = Path(path)
+        try:
+            stat = target.stat()
+        except OSError:
+            return None
+        return self._digest(target, stat)
+
+    def _digest(self, target: Path, stat: os.stat_result) -> str:
+        """Hash the identity a cached thumbnail is bound to."""
+        key = (
+            f"v7|{self._real(target)}|{stat.st_mtime_ns}"
+            f"|{stat.st_size}|{self._height}|{int(self._sharp)}"
+        )
+        return hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
+
+    def _real(self, target: Path) -> Path:
+        """Resolve a file, resolving each folder only once."""
+        parent = self._real_dirs.get(target.parent)
+        if parent is None:
+            parent = target.parent.resolve()
+            self._real_dirs[target.parent] = parent
+        return parent / target.name
 
     def _cache_file(self, path: str) -> Path | None:
         """Return the cache path for path, keyed by its size and mtime."""
@@ -198,39 +289,60 @@ class ThumbnailLoader:
             stat = target.stat()
         except OSError:
             return None
-        # v6: the cached PNG carries camera model, lens and focal length.
-        key = (
-            f"v6|{target.resolve()}|{stat.st_mtime_ns}"
-            f"|{stat.st_size}|{self._height}"
+        # v7: the cache is a JPEG carrying its metadata in Exif. PNG
+        # cost four milliseconds and 45 KB per frame to write, against
+        # half a millisecond and 9 KB here.
+        return self._cache_dir / f"{self._digest(target, stat)}.jpg"
+
+    def _remember(self, cache: Path, pixbuf: Any, meta: ThumbMeta) -> None:
+        """Note what this frame turned out to be, keyed like its cache."""
+        height = pixbuf.get_height()
+        if height <= 0:
+            return
+        fact = Facts(
+            pixbuf.get_width() / height, meta.model, meta.lens, meta.focal
         )
-        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
-        return self._cache_dir / f"{digest}.png"
+        self._remember_fact(cache.stem, fact)
+
+    def _remember_fact(self, key: str, fact: Facts) -> None:
+        """Append one frame to the memory, once, from any thread."""
+        with self._facts_lock:
+            if self._facts is None:
+                self._facts = remembered_facts(self._cache_dir)
+            if key in self._facts:
+                return
+            self._facts[key] = fact
+            memory = self._cache_dir / _FACTS_FILE
+            with contextlib.suppress(OSError), memory.open("a") as handle:
+                handle.write(_fact_line(key, fact))
 
     def _store_cache(self, cache: Path, pixbuf: Any, meta: ThumbMeta) -> None:
-        """Write a decoded thumbnail to the cache, ignoring failures.
-
-        Model, lens and focal length travel inside the PNG as tEXt
-        chunks, so the warm path re-reads nothing from the RAF.
-        """
-        options = (
-            (_MODEL_OPTION, meta.model),
-            (_LENS_OPTION, meta.lens),
-            (_FOCAL_OPTION, meta.focal),
-        )
-        keys = [k for k, v in options if v]
-        values = [v for _k, v in options if v]
+        """Write a decoded thumbnail to the cache, ignoring failures."""
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
-            pixbuf.savev(str(cache), "png", keys, values)
+            pixbuf.savev(str(cache), "jpeg", ["quality"], [_CACHE_QUALITY])
+            self._remember(cache, pixbuf, meta)
+            if any((meta.model, meta.lens, meta.focal)):
+                tags = GExiv2.Metadata()
+                tags.open_path(str(cache))
+                for tag, value in (
+                    (_MODEL_TAG, meta.model),
+                    (_LENS_TAG, meta.lens),
+                    (_FOCAL_TAG, meta.focal),
+                ):
+                    if value:
+                        tags.try_set_tag_string(tag, value)
+                tags.save_file(str(cache))
         except (GLib.Error, OSError):
             pass
 
     def _decode_thumb(self, path: str) -> tuple[Any, ThumbMeta]:
         """Decode a RAF into a pixbuf plus its filter metadata."""
-        exif_thumb = self._exif_thumbnail_of(path)
+        exif_thumb = None if self._sharp else self._exif_thumbnail_of(path)
         if exif_thumb is not None:
-            data, orientation, meta = exif_thumb
-            pixbuf = orient_exif(self._decode_bytes(data), orientation)
+            data, orientation, meta, ratio = exif_thumb
+            pixbuf = self._unpadded(self._decode_bytes(data), ratio)
+            pixbuf = orient_exif(pixbuf, orientation)
         else:
             jpeg = embedded_jpeg(path)
             pixbuf = self._decode_bytes(jpeg, downscale=True)
@@ -241,13 +353,20 @@ class ThumbnailLoader:
     @staticmethod
     def _exif_thumbnail_of(
         path: str,
-    ) -> tuple[bytes, int, ThumbMeta] | None:
+    ) -> tuple[bytes, int, ThumbMeta, float | None] | None:
         """Read only enough of the RAF to extract its EXIF thumbnail."""
         try:
             prefix = embedded_jpeg_prefix(path, _EXIF_PREFIX_BYTES)
         except (ValueError, OSError):
             return None
         return _exif_thumbnail(prefix)
+
+    @staticmethod
+    def _unpadded(pixbuf: Any, ratio: float | None) -> Any:
+        """Cut the 4:3 padding off a camera thumbnail."""
+        if ratio is None:
+            return trim_letterbox(pixbuf)
+        return crop_to_aspect(pixbuf, ratio)
 
     def _decode_bytes(self, data: bytes, *, downscale: bool = False) -> Any:
         """Decode JPEG bytes, optionally downscaling to the row height."""
@@ -278,8 +397,19 @@ class ThumbnailLoader:
         loader.set_size(max(1, int(width * scale)), self._height)
 
 
-def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, ThumbMeta] | None:
-    """Return thumbnail bytes, EXIF orientation and filter metadata."""
+def _frame_ratio(meta: Any) -> float | None:
+    """The shot's width over height, as its Exif records it."""
+    width = meta.try_get_tag_long("Exif.Photo.PixelXDimension")
+    height = meta.try_get_tag_long("Exif.Photo.PixelYDimension")
+    if not width or not height:
+        return None
+    return float(width) / float(height)
+
+
+def _exif_thumbnail(
+    jpeg: bytes,
+) -> tuple[bytes, int, ThumbMeta, float | None] | None:
+    """Return the thumbnail, its orientation, metadata and frame shape."""
     try:
         meta = GExiv2.Metadata()
         meta.open_buf(jpeg)
@@ -294,7 +424,18 @@ def _exif_thumbnail(jpeg: bytes) -> tuple[bytes, int, ThumbMeta] | None:
         orientation = int(meta.try_get_orientation())
     except (GLib.Error, ValueError):
         orientation = 1
-    return bytes(thumb), orientation, _tags_of(meta)
+    return bytes(thumb), orientation, _tags_of(meta), _frame_ratio(meta)
+
+
+def read_frame_meta(path: str) -> tuple[ThumbMeta, float | None] | None:
+    """Camera, lens, focal length and shape from the file's head alone."""
+    try:
+        prefix = embedded_jpeg_prefix(path, _EXIF_PREFIX_BYTES)
+        meta = GExiv2.Metadata()
+        meta.open_buf(prefix)
+    except (ValueError, OSError, GLib.Error):
+        return None
+    return _tags_of(meta), _frame_ratio(meta)
 
 
 def _tag_of(meta: Any, tag: str) -> str:
@@ -323,12 +464,3 @@ def _meta_of(jpeg: bytes) -> ThumbMeta:
     except GLib.Error:
         return ThumbMeta("", "", "")
     return _tags_of(meta)
-
-
-def orient_exif(pixbuf: Any, orientation: int) -> Any:
-    """Rotate/flip a pixbuf per its EXIF orientation."""
-    rotation, flip = _ORIENTATIONS.get(orientation, (_R.NONE, False))
-    pixbuf = pixbuf.rotate_simple(rotation) or pixbuf
-    if flip:
-        pixbuf = pixbuf.flip(True) or pixbuf
-    return pixbuf

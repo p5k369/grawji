@@ -56,7 +56,12 @@ def test_clipping_toggle_changes_the_shown_pixbuf() -> None:
     pump()
     scheduled: list[tuple[Any, int]] = []
     view._schedule_clip = lambda base, gen: scheduled.append((base, gen))
-    view._clip_dispatch = lambda fn: (fn(), False)[1]
+
+    def run_now(fn: Any) -> int:
+        fn()
+        return 0
+
+    view._clip_dispatch = run_now
     pb = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 16, 16)
     pb.fill(0xFFFFFFFF)
     black = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 16, 8)

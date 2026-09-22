@@ -13,11 +13,13 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GdkPixbuf, GLib, Gtk
+from gi.repository import Adw, GdkPixbuf, Gtk
 from rawji.fuji_enums import FP_WB_SHIFT_MAX
 
+from grawji import mainloop
+from grawji.mainloop import Dispatch
+
 Formatter = Callable[[float], str]
-Dispatch = Callable[[Callable[[], None]], Any]
 
 
 class SliderRow(Adw.ActionRow):
@@ -362,7 +364,7 @@ class Histogram(Gtk.DrawingArea):
     _RGB_COLOURS = ((0.9, 0.32, 0.32), (0.34, 0.85, 0.4), (0.4, 0.55, 1.0))
     _LUMA_COLOUR = (0.85, 0.85, 0.85)
 
-    def __init__(self, *, dispatch: Dispatch = GLib.idle_add) -> None:
+    def __init__(self, *, dispatch: Dispatch = mainloop.call) -> None:
         """Create the histogram; dispatch schedules a redraw on the UI loop."""
         super().__init__()
         self._dispatch = dispatch

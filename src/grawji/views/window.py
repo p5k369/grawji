@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -20,7 +21,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import raf, sidecar
+from grawji import mainloop, raf, sidecar
 from grawji.camera import camera_info
 from grawji.camera.capabilities import (
     Capabilities,
@@ -44,16 +45,18 @@ from grawji.controllers.exports import (
 )
 from grawji.controllers.fileops import FileOpsController
 from grawji.imaging import imagemeta
+from grawji.imaging.pixbufs import trim_letterbox
 from grawji.imaging.render import (
     oriented_jpeg,
     thumb_jpeg,
-    trim_letterbox,
 )
+from grawji.imaging.thumbnails import ThumbnailLoader
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
 from grawji.settings import (
     FROM_IMAGE,
     FROM_IMAGE_LABEL,
+    cache_dir,
     load_settings,
     save_settings,
     settings_path,
@@ -61,10 +64,12 @@ from grawji.settings import (
 from grawji.views import dialogs
 from grawji.views.filmstrip import FilmStrip
 from grawji.views.filmstrip_nav import FilmStripNav
+from grawji.views.folder_grid import FolderGrid
+from grawji.views.folder_model import FolderModel
 from grawji.views.foldertree import FolderTree
 from grawji.views.navigator import Navigator
 from grawji.views.preferences import PreferencesDialog
-from grawji.views.preview_view import PreviewView, oriented_pixbuf
+from grawji.views.preview_view import BACKGROUNDS, PreviewView, oriented_pixbuf
 from grawji.views.recipe_grid import RecipeGridDialog
 from grawji.views.recipe_library import RecipeLibraryController
 from grawji.views.recipe_panel import RecipePanel
@@ -86,33 +91,57 @@ _CANVAS_CSS = """
 .canvas-white, .canvas-white > viewport { background-color: #ffffff; }
 .canvas-gray, .canvas-gray > viewport { background-color: #777777; }
 .canvas-black, .canvas-black > viewport { background-color: #000000; }
-button.thumb {
+.thumb {
     padding: 2px 6px;
     margin-top: 16px;
     margin-bottom: 0;
     transition: margin 120ms ease;
 }
-button.thumb.thumb-selected,
-button.thumb.thumb-marked {
+.thumb.thumb-selected,
+.thumb.thumb-marked {
     margin-top: 0;
     margin-bottom: 16px;
 }
-/* A selected card (batch-select mode) also gets an accent ring. */
-button.thumb.thumb-marked {
+.thumb.thumb-selected {
     box-shadow: inset 0 0 0 2px @accent_bg_color;
 }
-/* Soften the folder tree: slightly dimmed text and a gentler selection. */
+.thumb.thumb-marked {
+    background-color: alpha(@accent_bg_color, 0.30);
+}
+.camera-state image { opacity: 0.4; }
+.camera-state.camera-connected image {
+    color: @accent_color;
+    opacity: 1;
+}
+.camera-state.camera-connected label {
+    color: @accent_color;
+    opacity: 1;
+}
+.grid-tile { padding: 6px 6px 3px; }
+.dim-cards .grid-tile {
+    background-color: alpha(#ffffff, 0.05);
+    box-shadow: none;
+}
+gridview.folder-grid > child,
+gridview.folder-grid > child:hover,
+gridview.folder-grid > child:selected {
+    background: none;
+}
+gridview.folder-grid > child:hover .grid-tile {
+    background-color: alpha(currentColor, 0.1);
+}
+gridview.folder-grid > child:selected .grid-tile {
+    background-color: alpha(@accent_bg_color, 0.25);
+    box-shadow: inset 0 0 0 2px @accent_bg_color;
+}
 .folder-tree { color: alpha(currentColor, 0.85); font-weight: normal; }
 .folder-tree image { opacity: 0.7; }
 .folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
-/* Filmstrip nav buttons: round only the edge facing the window border. */
 .filmstrip-nav-start { border-radius: 0 0 0 8px; }
 .filmstrip-nav-end { border-radius: 0 0 8px 0; }
-/* Subtle tint on recipe rows that differ from the applied recipe. */
 row.recipe-modified {
     background-color: alpha(@accent_bg_color, 0.08);
 }
-/* Zero tick under the straighten slider. */
 .angle-zero-mark {
     background-color: alpha(currentColor, 0.55);
     border-radius: 1px;
@@ -132,7 +161,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     __gtype_name__ = "MainWindow"
 
-    window_title = Gtk.Template.Child()
     sidebar_button = Gtk.Template.Child()
     filter_button = Gtk.Template.Child()
     export_button = Gtk.Template.Child()
@@ -143,6 +171,10 @@ class MainWindow(Adw.ApplicationWindow):
     nav_overlay = Gtk.Template.Child()
     exif_group = Gtk.Template.Child()
     filmstrip_slot = Gtk.Template.Child()
+    view_stack = Gtk.Template.Child()
+    grid_slot = Gtk.Template.Child()
+    grid_size = Gtk.Template.Child()
+    grid_count = Gtk.Template.Child()
     foldertree_slot = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
     select_bar = Gtk.Template.Child()
@@ -153,7 +185,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Wire up the worker, the composite widgets and the controllers."""
         super().__init__(**kwargs)
         self._session = CameraSession()
-        self._worker = CameraWorker(self._session, dispatch=GLib.idle_add)
+        self._worker = CameraWorker(self._session, dispatch=mainloop.call)
         self._worker.start()
         self.connect("close-request", self._on_close_request)
 
@@ -213,6 +245,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_bookmarks_changed=self._on_bookmarks_changed,
             on_expansion_changed=self._on_expanded_changed,
             on_drop_paths=self._fileops.on_tree_drop,
+            on_activate=self._browse_folder,
         )
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
@@ -340,6 +373,14 @@ class MainWindow(Adw.ApplicationWindow):
             if app is not None and accels:
                 app.set_accels_for_action(f"win.{name}", list(accels))
 
+        grid = Gio.SimpleAction.new_stateful(
+            "toggle-grid", None, GLib.Variant.new_boolean(False)
+        )
+        grid.connect("change-state", self._on_toggle_grid)
+        self.add_action(grid)
+        if app is not None:
+            app.set_accels_for_action("win.toggle-grid", ["g"])
+
         histogram = Gio.SimpleAction.new_stateful(
             "toggle-histogram",
             None,
@@ -394,7 +435,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _init_preview_wiring(self) -> None:
         """Apply preview settings and hook up its crop editor."""
-        self.preview_view.set_background(self._settings.canvas_background)
+        self._set_canvas_background(self._settings.canvas_background)
         self.preview_view.set_show_histogram(self._settings.show_histogram)
         self.preview_view.connect(
             "geometry-changed", self._on_geometry_changed
@@ -445,7 +486,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _init_filmstrip(self) -> None:
         """Build the filmstrip flanked by previous/next navigation."""
+        self._folder_model = FolderModel()
+        self._folder_model.add_listener(self._on_folder_event)
         self._filmstrip = FilmStrip(
+            model=self._folder_model,
             on_select=self._on_raf_selected,
             on_loading=self._on_thumbs_loading,
             on_selection_changed=self._on_selection_changed,
@@ -460,6 +504,155 @@ class MainWindow(Adw.ApplicationWindow):
         self.filmstrip_slot.append(self._filmstrip)
         self.filmstrip_slot.append(self._nav.next_button)
         self._filmstrip.adopt_filter_button(self.filter_button)
+        self._tile_save_id = 0
+        self._init_grid()
+
+    def _init_grid(self) -> None:
+        """Build the folder grid that shares the preview's place."""
+        self._grid = FolderGrid(
+            model=self._folder_model,
+            loader=ThumbnailLoader(
+                height=self._settings.grid_tile_px,
+                cache_dir=cache_dir() / "thumbs",
+                workers=max(1, (os.cpu_count() or 2) - 1),
+                # The camera's own thumbnail is 160 by 120, so a tile
+                # this size comes from the RAF's full preview instead.
+                sharp=True,
+                dispatch=mainloop.call,
+            ),
+            tile=self._settings.grid_tile_px,
+            on_activate=self._on_grid_activated,
+            on_select=self._on_grid_selected,
+            stand_in=self._filmstrip.texture_for,
+        )
+        self.grid_slot.append(self._grid)
+        self.grid_size.set_value(self._settings.grid_tile_px)
+        self.grid_size.connect("value-changed", self._on_tile_size)
+        style = Adw.StyleManager.get_default()
+        style.connect("notify::dark", self._on_dark_changed)
+        self._on_dark_changed(style)
+        self.view_stack.connect(
+            "notify::visible-child-name", self._on_view_changed
+        )
+        # Browse is the first tab, but grawji opens on one image.
+        self.view_stack.set_visible_child_name("preview")
+        self._style_grid_canvas(self._settings.canvas_background)
+
+    def _on_dark_changed(
+        self, style: Adw.StyleManager, *_args: object
+    ) -> None:
+        """Soften the grid cards when the theme goes dark."""
+        if style.get_dark():
+            self._grid.add_css_class("dim-cards")
+        else:
+            self._grid.remove_css_class("dim-cards")
+
+    def _on_tile_size(self, scale: Gtk.Scale) -> None:
+        """Resize the grid's tiles and remember the choice."""
+        size = int(scale.get_value())
+        self._grid.set_tile(size)
+        self._update_grid_count()
+        self._settings.grid_tile_px = size
+        if self._tile_save_id:
+            GLib.source_remove(self._tile_save_id)
+        self._tile_save_id = GLib.timeout_add(500, self._save_tile_size)
+
+    def _save_tile_size(self) -> bool:
+        """Write the tile size once the slider stops moving."""
+        self._tile_save_id = 0
+        self._save_settings()
+        return GLib.SOURCE_REMOVE
+
+    def _on_toggle_grid(self, action: Any, value: Any) -> None:
+        """Flip between developing one frame and browsing the folder."""
+        action.set_state(value)
+        self.view_stack.set_visible_child_name(
+            "grid" if value.get_boolean() else "preview"
+        )
+
+    def _on_view_changed(self, *_args: object) -> None:
+        """React to the page the tabs, the key or the code chose."""
+        grid = self._grid_is_open()
+        action = self.lookup_action("toggle-grid")
+        if action is not None:
+            action.set_state(GLib.Variant.new_boolean(grid))
+        self._nav.cancel_hold()
+        if grid:
+            self._fill_grid()
+        else:
+            self._develop_current()
+
+    def _set_canvas_background(self, css_class: str) -> None:
+        """Give the preview and the grid the same canvas color."""
+        self.preview_view.set_background(css_class)
+        self._style_grid_canvas(css_class)
+
+    def _style_grid_canvas(self, css_class: str) -> None:
+        """Paint the grid's canvas like the preview's."""
+        if getattr(self, "_grid", None) is None:
+            return
+        for name in BACKGROUNDS:
+            if name:
+                self._grid.remove_css_class(name)
+        if css_class:
+            self._grid.add_css_class(css_class)
+
+    def _update_grid_count(self) -> None:
+        """Say how many frames the grid shows, and of how many."""
+        shown, held = self._grid.shown, self._grid.held
+        if not held:
+            self.grid_count.set_label("")
+        elif shown == held:
+            self.grid_count.set_label(f"{held} frames")
+        else:
+            self.grid_count.set_label(f"{shown} of {held} frames")
+
+    def _fill_grid(self) -> bool:
+        """Line the grid up with the strip. False with no folder."""
+        if self._current_folder is None:
+            return False
+        current = self._filmstrip.current_path
+        if current is not None:
+            self._grid.select_path(current)
+        self._update_grid_count()
+        return True
+
+    def _browse_folder(self, path: str) -> None:
+        """Open a folder in Browse, which is what a double click asks."""
+        self._scan_folder(path)
+        self._set_grid_open(open_it=True)
+
+    def _on_folder_event(self, reason: str, _path: str | None) -> None:
+        """Keep the frame count fresh while the grid shows."""
+        if reason in ("folder", "filter") and self._grid_is_open():
+            self._update_grid_count()
+
+    def _set_grid_open(self, *, open_it: bool) -> None:
+        """Show one of the two views."""
+        self.view_stack.set_visible_child_name(
+            "grid" if open_it else "preview"
+        )
+
+    def _grid_is_open(self) -> bool:
+        """Whether the grid is the visible page right now."""
+        return bool(self.view_stack.get_visible_child_name() == "grid")
+
+    def _on_grid_selected(self, path: str) -> None:
+        """Mark the grid's pick in the strip, without developing it."""
+        if self._filmstrip.current_path != path:
+            self._filmstrip.select_path(path, notify=False)
+
+    def _on_grid_activated(self, path: str) -> None:
+        """Open a frame picked in the grid and go back to the preview."""
+        self._filmstrip.select_path(path, notify=False)
+        self._set_grid_open(open_it=False)
+
+    def _develop_current(self) -> None:
+        """Load whatever Browse left selected, unless it is loaded."""
+        path = self._filmstrip.current_path
+        if path is None or str(self._raf_path) == path:
+            return
+        self._on_raf_selected(path)
 
     def _on_thumbs_loading(self, loading: bool) -> None:
         """Show the activity spinner while the filmstrip decodes thumbs."""
@@ -472,6 +665,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._current_folder = path
         self._filmstrip.scan(path)
+        if self._grid_is_open():
+            self._fill_grid()
         self._nav.update()
         self._settings.last_folder = path
         self._save_settings()
@@ -545,11 +740,11 @@ class MainWindow(Adw.ApplicationWindow):
             pixbuf = oriented_pixbuf(jpeg)
             rows = imagemeta.exif_rows(jpeg)
         except (ValueError, OSError, GLib.Error):
-            GLib.idle_add(
+            mainloop.call(
                 self._apply_selection, generation, None, None, [], native
             )
             return
-        GLib.idle_add(
+        mainloop.call(
             self._apply_selection, generation, jpeg, pixbuf, rows, native
         )
 
@@ -949,9 +1144,9 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             pixbuf = oriented_pixbuf(jpeg)
         except GLib.Error as exc:
-            GLib.idle_add(self._apply_preview, generation, seq, None, str(exc))
+            mainloop.call(self._apply_preview, generation, seq, None, str(exc))
             return
-        GLib.idle_add(self._apply_preview, generation, seq, pixbuf, "")
+        mainloop.call(self._apply_preview, generation, seq, pixbuf, "")
 
     def _apply_preview(
         self,
@@ -1056,6 +1251,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _cycle_background(self) -> None:
         """Cycle the preview background and remember the choice."""
         self._settings.canvas_background = self.preview_view.cycle_background()
+        self._style_grid_canvas(self._settings.canvas_background)
         self._save_settings()
 
     def _toggle_peek(self) -> None:
@@ -1219,9 +1415,7 @@ class MainWindow(Adw.ApplicationWindow):
         model = camera_info.detect_camera()
         appeared = bool(model) and not self._camera_seen
         self._camera_seen = bool(model)
-        self.window_title.set_subtitle(
-            f"{model} connected" if model else "No camera"
-        )
+        self.preview_view.set_camera(model)
         if (
             appeared
             and self._settings.camera_auto_reconnect

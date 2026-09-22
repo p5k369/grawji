@@ -16,7 +16,7 @@ from dataclasses import replace
 
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
-from grawji import crop, level
+from grawji import crop, level, mainloop
 from grawji.imaging.render import bake_pixbuf, gray_rows
 
 if TYPE_CHECKING:
@@ -157,6 +157,7 @@ class CropEditor:
         self._sync_swap(active=self.geometry.aspect_swapped)
         self.conform()
         self._sync_angle(self.geometry.angle)
+        self._view.crop_bar.set_visible(True)
         self._view.crop_bar.set_reveal_child(True)
         self._view.crop_overlay.set_visible(True)
         self._redisplay(histogram=False)
@@ -509,7 +510,7 @@ class CropEditor:
         candidates = level.suggest_candidates(
             gray_rows(baked, _LEVEL_ANALYSIS_PX)
         )
-        GLib.idle_add(self._finish_auto_level, state, candidates)
+        mainloop.call(self._finish_auto_level, state, candidates)
 
     def _finish_auto_level(
         self, state: crop.CropRotate, candidates: list[level.Candidate]

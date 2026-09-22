@@ -11,7 +11,7 @@ gi.require_version("GExiv2", "0.10")
 
 from gi.repository import GdkPixbuf, GExiv2
 
-from grawji.imaging.render import trim_letterbox as _trim_letterbox
+from grawji.imaging.pixbufs import trim_letterbox as _trim_letterbox
 from grawji.recipe import Recipe
 from grawji.views.recipe_grid import (
     RecipeGridDialog,
