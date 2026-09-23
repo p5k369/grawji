@@ -73,13 +73,19 @@ class FolderModel:
         entries = self._with_known_facts(catalog.scan(folder))
         paths = [entry.path for entry in entries]
         same = paths == self.paths
+        trimmed = not same and set(paths) <= set(self.paths)
         self.entries = {entry.path: entry for entry in entries}
         self.paths = paths
-        if same:
-            for position in range(self.store.get_n_items()):
+        if same or trimmed:
+            kept = set(paths)
+            for position in reversed(range(self.store.get_n_items())):
                 item = self.store.get_item(position)
-                if item is not None:
+                if item is None:
+                    continue
+                if item.entry.path in kept:
                     item.entry = self.entries.get(item.entry.path, item.entry)
+                else:
+                    self.store.remove(position)
         else:
             self.store.splice(
                 0,
@@ -89,7 +95,9 @@ class FolderModel:
         unknown = [entry.path for entry in entries if not entry.has_meta]
         if unknown:
             self.loader.sweep_meta(unknown, self._on_swept)
-        if not same:
+        if trimmed:
+            self._notify("trimmed")
+        elif not same:
             self._notify("folder")
         return entries
 

@@ -511,6 +511,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Build the folder grid that shares the preview's place."""
         self._grid = FolderGrid(
             model=self._folder_model,
+            on_file_action=self._fileops.on_file_action,
             loader=ThumbnailLoader(
                 height=self._settings.grid_tile_px,
                 cache_dir=cache_dir() / "thumbs",
@@ -624,7 +625,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_folder_event(self, reason: str, _path: str | None) -> None:
         """Keep the frame count fresh while the grid shows."""
-        if reason in ("folder", "filter") and self._grid_is_open():
+        if reason in ("folder", "filter", "trimmed") and self._grid_is_open():
             self._update_grid_count()
 
     def _set_grid_open(self, *, open_it: bool) -> None:

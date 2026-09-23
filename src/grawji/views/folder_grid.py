@@ -9,10 +9,11 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from grawji import mainloop
 from grawji.imaging.thumbnails import ThumbnailLoader
+from grawji.views import file_menu
 from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
@@ -33,7 +34,7 @@ _CENTER_FRAMES = 30
 class FolderGrid(Gtk.ScrolledWindow):
     """A scrolling grid of the folder's frames."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         model: FolderModel,
@@ -41,6 +42,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         tile: int = 240,
         on_activate: Callable[[str], None] | None = None,
         on_select: Callable[[str], None] | None = None,
+        on_file_action: Callable[[str, list[str]], None] | None = None,
         stand_in: Callable[[str], Any] | None = None,
     ) -> None:
         """Build the grid over the folder shared with the strip."""
@@ -50,6 +52,10 @@ class FolderGrid(Gtk.ScrolledWindow):
         self._folder.add_listener(self._on_model_event)
         self._on_activate = on_activate
         self._on_select = on_select
+        self._on_file_action = on_file_action
+        self._menu_path: str | None = None
+        self._tile_path: dict[Gtk.Widget, str] = {}
+        file_menu.install_actions(self, self._on_menu_action)
         # True while the grid is being told where to stand, so
         # syncing the selection cannot bounce back.
         self._syncing = False
@@ -144,6 +150,8 @@ class FolderGrid(Gtk.ScrolledWindow):
         elif reason == "filter":
             self._model_filter.changed(Gtk.FilterChange.DIFFERENT)
             self._thumbs.prefetch(self._visible_paths())
+            self._thumbs.schedule(fresh=True)
+        elif reason == "trimmed":
             self._thumbs.schedule(fresh=True)
 
     def _visible_paths(self) -> list[str]:
@@ -277,6 +285,9 @@ class FolderGrid(Gtk.ScrolledWindow):
         box.set_margin_end(_GAP_PX // 2)
         box.set_margin_top(_GAP_PX // 2)
         box.set_margin_bottom(_GAP_PX // 2)
+        menu_click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        menu_click.connect("pressed", self._on_tile_menu, box)
+        box.add_controller(menu_click)
         picture = Gtk.Picture()
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.CONTAIN)
@@ -302,13 +313,36 @@ class FolderGrid(Gtk.ScrolledWindow):
         picture = cell.get_child()
         entry = entry_item.entry
         caption.set_text(entry.name)
+        self._tile_path[box] = entry.path
         self._thumbs.want(box, picture, entry.path)
 
     def _on_unbind(self, _factory: Any, item: Gtk.ListItem) -> None:
         """Forget what a recycled tile was waiting for."""
         box = item.get_child()
         if box is not None:
+            self._tile_path.pop(box, None)
             self._thumbs.forget(box)
+
+    def _on_tile_menu(
+        self,
+        gesture: Gtk.GestureClick,
+        _n: int,
+        x: float,
+        y: float,
+        box: Gtk.Widget,
+    ) -> None:
+        """Open the file-operations menu for the right-clicked tile."""
+        path = self._tile_path.get(box)
+        if path is None or self._on_file_action is None:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._menu_path = path
+        file_menu.popup_menu(box, x, y, 1)
+
+    def _on_menu_action(self, kind: str) -> None:
+        """Forward a context-menu choice for the clicked tile."""
+        if self._on_file_action is not None and self._menu_path is not None:
+            self._on_file_action(kind, [self._menu_path])
 
     def _on_activated(self, _view: Gtk.GridView, position: int) -> None:
         """Open the frame a tile was activated on."""
