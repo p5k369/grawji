@@ -33,11 +33,16 @@ def grid(gtk: Any, tmp_path: Path) -> Any:
     for name in ("a.RAF", "b.RAF", "c.RAF"):
         (tmp_path / name).write_bytes(b"not a real raf")
     opened: list[str] = []
+    actions: list[tuple[str, list[str]]] = []
     model = FolderModel(dispatch=lambda call: call())
     built = FolderGrid(
-        model=model, loader=loader(tmp_path), on_activate=opened.append
+        model=model,
+        loader=loader(tmp_path),
+        on_activate=opened.append,
+        on_file_action=lambda kind, paths: actions.append((kind, paths)),
     )
     built.opened = opened
+    built.file_actions = actions
     built.folder = tmp_path
     built.model = model
     model.scan(str(tmp_path))
@@ -521,3 +526,25 @@ def test_what_one_view_learns_every_view_knows(
     assert strip.entry_for(path).model == "X-E5"
     assert window._grid._folder.entry_for(path).model == "X-E5"
     assert strip._store is window._grid._store
+
+
+def test_a_trashed_frame_trims_the_store_in_place(grid: Any) -> None:
+    """Removals keep the surviving items, so scroll and selection live."""
+    model = grid.model
+    before = [model.store.get_item(i) for i in range(3)]
+    events: list[str] = []
+    model.add_listener(lambda reason, _path: events.append(reason))
+    (grid.folder / "b.RAF").unlink()
+    model.scan(str(grid.folder))
+    assert events == ["trimmed"]
+    assert model.store.get_n_items() == 2
+    survivors = [model.store.get_item(i) for i in range(2)]
+    assert survivors[0] is before[0]
+    assert survivors[1] is before[2]
+
+
+def test_menu_choices_forward_the_clicked_frame(grid: Any) -> None:
+    """A context-menu pick reaches the window with the tile's path."""
+    grid._menu_path = "b.RAF"
+    grid._on_menu_action("trash")
+    assert grid.file_actions == [("trash", ["b.RAF"])]

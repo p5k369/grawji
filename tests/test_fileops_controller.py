@@ -193,6 +193,44 @@ def test_delete_trashes_the_open_image_and_advances(immediate, monkeypatch):
     assert strip.selected_after_trash == ["c.RAF"]
 
 
+def test_menu_trash_of_the_open_image_advances(immediate, monkeypatch):
+    """The context menu's single trash moves the view on."""
+    trashed = []
+    monkeypatch.setattr(module.fileops, "trash_raf", trashed.append)
+    strip = FakeStrip(paths=["a.RAF", "b.RAF", "c.RAF"])
+    controller, _strip, _state = make_controller(
+        strip=strip, current=Path("b.RAF")
+    )
+    controller.on_file_action("trash", ["b.RAF"])
+    assert trashed == ["b.RAF"]
+    assert strip.selected_after_trash == ["c.RAF"]
+
+
+def test_menu_trash_elsewhere_leaves_the_view_alone(immediate, monkeypatch):
+    """Trashing an image that is not open does not steal the view."""
+    monkeypatch.setattr(module.fileops, "trash_raf", lambda _p: None)
+    strip = FakeStrip(paths=["a.RAF", "b.RAF", "c.RAF"])
+    controller, _strip, _state = make_controller(
+        strip=strip, current=Path("a.RAF")
+    )
+    controller.on_file_action("trash", ["c.RAF"])
+    assert strip.selected_after_trash == []
+
+
+def test_batch_trash_advances_to_a_survivor(immediate, monkeypatch):
+    """A batch taking the open image lands on the next survivor."""
+    monkeypatch.setattr(module.fileops, "trash_raf", lambda _p: None)
+    strip = FakeStrip(
+        paths=["a.RAF", "b.RAF", "c.RAF", "d.RAF"],
+        selected=["b.RAF", "c.RAF"],
+    )
+    controller, _strip, _state = make_controller(
+        strip=strip, current=Path("b.RAF")
+    )
+    controller.trash_paths(["b.RAF", "c.RAF"], confirm=False)
+    assert strip.selected_after_trash == ["d.RAF"]
+
+
 def test_failed_operations_are_tallied_in_the_toast(immediate, monkeypatch):
     """Failures count into the toast instead of raising."""
 

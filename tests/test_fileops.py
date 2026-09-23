@@ -10,6 +10,7 @@ pytest.importorskip("gi")
 
 from gi.repository import GLib
 
+from grawji import fileops
 from grawji.crop import CropRotate
 from grawji.fileops import copy_raf, move_raf, trash_raf
 from grawji.sidecar import save_crop, sidecar_path
@@ -76,3 +77,33 @@ def test_trash_takes_the_sidecar(tmp_path: Path) -> None:
         pytest.skip(f"no trash available here: {exc}")
     assert not raf.exists()
     assert not sidecar_path(raf).exists()
+
+
+def test_following_prefers_the_next_image() -> None:
+    """The survivor after the open image wins."""
+    order = ["a", "b", "c"]
+    assert fileops.following(order, ["b"], "b") == "c"
+
+
+def test_following_falls_back_to_the_previous() -> None:
+    """At the end of the strip the view walks backwards."""
+    order = ["a", "b", "c"]
+    assert fileops.following(order, ["c"], "c") == "b"
+
+
+def test_following_skips_trashed_neighbors() -> None:
+    """A batch trash lands on the nearest survivor."""
+    order = ["a", "b", "c", "d"]
+    assert fileops.following(order, ["b", "c"], "b") == "d"
+    assert fileops.following(order, ["c", "d"], "c") == "b"
+
+
+def test_following_is_none_when_the_open_image_survives() -> None:
+    """Trashing other images never steals the view."""
+    assert fileops.following(["a", "b"], ["b"], "a") is None
+    assert fileops.following(["a", "b"], ["b"], None) is None
+
+
+def test_following_is_none_when_nothing_survives() -> None:
+    """An emptied folder has nothing to advance to."""
+    assert fileops.following(["a", "b"], ["a", "b"], "a") is None

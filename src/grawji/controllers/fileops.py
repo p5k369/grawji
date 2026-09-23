@@ -123,7 +123,7 @@ class FileOpsController:
         if not paths:
             return
         if not confirm:
-            self._run("trash", paths, None)
+            self._trash_now(paths)
             return
         dialog = Adw.AlertDialog(
             heading=f"Move {len(paths)} images to Trash?",
@@ -137,29 +137,28 @@ class FileOpsController:
         dialog.connect(
             "response",
             lambda _d, response: (
-                self._run("trash", paths, None)
-                if response == "trash"
-                else None
+                self._trash_now(paths) if response == "trash" else None
             ),
         )
         dialog.present(self._parent)
+
+    def _trash_now(self, paths: list[str]) -> None:
+        """Trash paths, moving the view off the open image if it goes."""
+        strip = self._filmstrip()
+        current = self._current_raf()
+        follower = fileops.following(
+            strip.paths, paths, None if current is None else str(current)
+        )
+        self._run("trash", paths, None)
+        if follower is not None:
+            strip.select_path(follower)
 
     def trash_current(self) -> None:
         """Trash the open image and advance to its neighbor."""
         current = self._current_raf()
         if current is None:
             return
-        path = str(current)
-        strip = self._filmstrip()
-        strip_paths = strip.paths
-        following = None
-        if path in strip_paths:
-            index = strip_paths.index(path)
-            remaining = strip_paths[index + 1 :] + strip_paths[:index][::-1]
-            following = remaining[0] if remaining else None
-        self._run("trash", [path], None)
-        if following is not None:
-            strip.select_path(following)
+        self._trash_now([str(current)])
 
     def _pick_folder(self, title: str, kind: str, paths: list[str]) -> None:
         """Folder dialog for a copy/move, remembering the destination."""

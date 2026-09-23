@@ -27,6 +27,7 @@ from grawji import catalog, mainloop
 from grawji.imaging.thumbnails import ThumbMeta
 from grawji.mainloop import Dispatch
 from grawji.sidecar import edit_flags
+from grawji.views import file_menu
 from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
@@ -405,12 +406,7 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _init_file_actions(self) -> None:
         """Install the context-menu action group for file operations."""
-        group = Gio.SimpleActionGroup()
-        for kind in ("open-with", "export", "copy", "move", "trash"):
-            action = Gio.SimpleAction.new(kind, None)
-            action.connect("activate", partial(self._on_menu_action, kind))
-            group.add_action(action)
-        self.insert_action_group("fileops", group)
+        file_menu.install_actions(self, self._on_menu_action)
 
     def _on_menu_action(self, kind: str, *_args: object) -> None:
         """Forward a context-menu choice with its captured paths."""
@@ -444,29 +440,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._menu_paths = self._card_paths(path)
         self._menu_click_path = path
-        count = len(self._menu_paths)
-        suffix = f" ({count})" if count > 1 else ""
-        menu = Gio.Menu()
-        menu.append("Open With…", "fileops.open-with")
-        menu.append(f"Export{suffix}…", "fileops.export")
-        menu.append(f"Copy to…{suffix}", "fileops.copy")
-        menu.append(f"Move to…{suffix}", "fileops.move")
-        menu.append(f"Move to Trash{suffix}", "fileops.trash")
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(button)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect(
-            "closed", lambda p: mainloop.call(self._drop_popover, p)
-        )
-        popover.popup()
-
-    @staticmethod
-    def _drop_popover(popover: Gtk.PopoverMenu) -> bool:
-        """Unparent a dismissed context menu so it can be collected."""
-        popover.unparent()
-        return GLib.SOURCE_REMOVE
+        file_menu.popup_menu(button, x, y, len(self._menu_paths))
 
     def _on_tile_drag_prepare(
         self, source: Gtk.DragSource, _x: float, _y: float, button: Gtk.Button

@@ -25,6 +25,21 @@ def _unique_destination(dest_dir: Path, name: str) -> Path:
     return candidate
 
 
+def following(
+    order: list[str], trashed: list[str], current: str | None
+) -> str | None:
+    """The image to show once trashing takes the open one along."""
+    if current is None or current not in trashed or current not in order:
+        return None
+    gone = set(trashed)
+    index = order.index(current)
+    remaining = order[index + 1 :] + order[:index][::-1]
+    for path in remaining:
+        if path not in gone:
+            return path
+    return None
+
+
 def copy_raf(src: Path | str, dest_dir: Path | str) -> Path:
     """Copy a RAF and its sidecar into dest_dir and returns the new path.
 
