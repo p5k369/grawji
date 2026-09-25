@@ -85,7 +85,7 @@ jobs:
       - name: Install it on a clean runner and start it headless
         run: |
           sudo apt-get update
-          sudo apt-get install -y ./dist/grawji_*_all.deb xvfb
+          sudo apt-get install -y ./dist/grawji_*.deb xvfb
           xvfb-run -a timeout 15 grawji && code=0 || code=$?
           # The timer has to be what stops it, anything else is a crash
           test "$code" -eq 124 || {

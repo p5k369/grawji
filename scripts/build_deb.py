@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import email.utils
 import gzip
+import platform
 import re
 import shutil
 import subprocess
@@ -20,6 +21,18 @@ APP_ID = "io.github.p5k369.grawji"
 MAINTAINER_EMAIL = "patrick@p5k.org"
 PROJECT_AUTHOR = "Patrick Zwerschke"
 HOMEPAGE = "https://github.com/p5k369/grawji"
+
+
+_DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
+
+
+def _debian_arch() -> str:
+    """The Debian architecture of this build host."""
+    machine = platform.machine()
+    arch = _DEB_ARCH.get(machine)
+    if arch is None:
+        raise SystemExit(f"unsupported build architecture {machine!r}")
+    return arch
 
 
 def _rfc_date() -> str:
@@ -128,6 +141,40 @@ def _install_rawji(source: Path, site: Path) -> None:
     )
 
 
+def _install_lsdetect(site: Path) -> None:
+    """Vendor lsdetect, a compiled wheel that is not in apt."""
+    with tempfile.TemporaryDirectory() as scratch:
+        target = Path(scratch)
+        subprocess.run(  # noqa: S603
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--target",
+                str(target),
+                "--no-deps",
+                "lsdetect",
+            ],
+            check=True,
+        )
+        vendored = False
+        for item in target.iterdir():
+            if item.name.endswith(".dist-info") or item.name == "bin":
+                continue
+            if item.is_dir():
+                shutil.copytree(
+                    item,
+                    site / item.name,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
+            else:
+                shutil.copy2(item, site / item.name)
+            vendored = True
+        if not vendored:
+            raise SystemExit("pip installed no lsdetect files to vendor")
+
+
 def _write_docs(tree: Path, version: str) -> None:
     """The changelog and copyright every package is expected to carry."""
     docs = tree / "usr" / "share" / "doc" / "grawji"
@@ -166,6 +213,7 @@ def stage(tree: Path, rawji: str | None) -> None:
     shutil.copytree(ROOT / "src" / "grawji", site / "grawji", ignore=ignore)
     with tempfile.TemporaryDirectory() as scratch:
         _install_rawji(_rawji_source(rawji, Path(scratch)), site)
+    _install_lsdetect(site)
 
     binary = tree / "usr" / "bin"
     binary.mkdir(parents=True)
@@ -195,7 +243,7 @@ def stage(tree: Path, rawji: str | None) -> None:
         f"""\
 Package: grawji
 Version: {meta["version"]}
-Architecture: all
+Architecture: {_debian_arch()}
 Maintainer: {meta["authors"][0]["name"]} <{MAINTAINER_EMAIL}>
 Installed-Size: {size // 1024}
 Depends: {", ".join(depends())}
@@ -226,7 +274,7 @@ def main() -> int:
 
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    name = f"grawji_{project()['version']}_all.deb"
+    name = f"grawji_{project()['version']}_{_debian_arch()}.deb"
     with tempfile.TemporaryDirectory() as scratch:
         tree = Path(scratch) / "pkg"
         tree.mkdir()
