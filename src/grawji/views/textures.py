@@ -8,7 +8,7 @@ import gi
 
 gi.require_version("Gdk", "4.0")
 
-from gi.repository import Gdk, GLib
+from gi.repository import Gdk
 
 
 def texture_for_pixbuf(pixbuf: Any) -> Gdk.Texture:
@@ -22,6 +22,6 @@ def texture_for_pixbuf(pixbuf: Any) -> Gdk.Texture:
         pixbuf.get_width(),
         pixbuf.get_height(),
         fmt,
-        GLib.Bytes.new(pixbuf.get_pixels()),
+        pixbuf.read_pixel_bytes(),
         pixbuf.get_rowstride(),
     )

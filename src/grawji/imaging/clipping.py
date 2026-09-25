@@ -11,7 +11,7 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import GdkPixbuf, GLib
 
-from grawji.imaging.render import pixel_rows
+from grawji.imaging.pixbufs import pixel_rows
 
 # A channel at or above this is a blown highlight.
 HIGHLIGHT_MIN = 250

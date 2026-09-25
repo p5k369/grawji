@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 from typing import TYPE_CHECKING, Any
 
 import cairo
 import gi
+import numpy as np
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
@@ -16,8 +18,9 @@ from dataclasses import replace
 
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
-from grawji import crop, level, mainloop
-from grawji.imaging.render import bake_pixbuf, gray_rows
+from grawji import crop, keystone, level, mainloop
+from grawji.imaging.pixbufs import pixel_rows
+from grawji.imaging.render import bake_pixbuf
 
 if TYPE_CHECKING:
     from grawji.views.preview_view import PreviewView
@@ -40,10 +43,27 @@ _GRAB_PX = 12.0
 # A shorter right-button drag than this does not define a horizon.
 _MIN_HORIZON_PX = 4.0
 
-# Longer edge of the small bake analyzed by auto level, and of the
-# grayscale the edge analysis actually runs on.
+# Longer edge of the small bake auto level detects lines on.
 _LEVEL_BAKE_PX = 800
-_LEVEL_ANALYSIS_PX = 640
+
+# Longer edge the keystone fit detects line segments on.
+_KEYSTONE_ANALYSIS_PX = 1200
+# Coarse warp edge while dragging the rotation slider, and how long
+# the slider must rest before the re-render.
+_KEYSTONE_DRAG_EDGE = 1024
+_WARP_SETTLE_MS = 160
+
+_LOG = logging.getLogger("grawji")
+
+
+def _gray_of(pixbuf: Any) -> Any:
+    """A pixbuf's pixels as a 2-D float64 gray array."""
+    width, height = pixbuf.get_width(), pixbuf.get_height()
+    channels = pixbuf.get_n_channels()
+    rgb = pixel_rows(pixbuf)[:, : width * channels].reshape(
+        height, width, channels
+    )[:, :, :3]
+    return rgb @ np.full(3, 1.0 / 3.0)
 
 
 class CropEditor:
@@ -55,6 +75,8 @@ class CropEditor:
         self.editing = False
         self._pre_edit = crop.CropRotate()
         self._edit_closing = False
+        self._committing = False
+        self._warp_settle_id = 0
         self._syncing_angle = False
         self._syncing_swap = False
         self._syncing_aspect = False
@@ -92,6 +114,7 @@ class CropEditor:
         view.angle_scale.connect("change-value", self._on_angle_scale_change)
         self._angle_adj.connect("value-changed", self._on_angle_changed)
         view.auto_level_button.connect("clicked", self._on_auto_level)
+        self._build_keystone_menu(view)
         view.crop_aspect.connect("notify::selected", self._on_aspect_changed)
         view.crop_swap.connect("toggled", self._on_swap_toggled)
         view.crop_guides.connect("notify::selected", self._on_guides_selected)
@@ -156,7 +179,7 @@ class CropEditor:
         self._select_aspect(self.geometry.aspect)
         self._sync_swap(active=self.geometry.aspect_swapped)
         self.conform()
-        self._sync_angle(self.geometry.angle)
+        self._sync_angle(self._display_angle())
         self._view.crop_bar.set_visible(True)
         self._view.crop_bar.set_reveal_child(True)
         self._view.crop_overlay.set_visible(True)
@@ -171,9 +194,82 @@ class CropEditor:
         rect = crop.shrink_to_fit(
             dims[0], dims[1], self.geometry.angle, self.geometry.rect
         )
+        quad = self._warp_quad()
+        if quad is not None:
+            rect = self._fit_into_quad(rect, self._warp_safe(), quad)
         if rect != self.geometry.rect:
             self.geometry = replace(self.geometry, rect=rect)
             self._view.crop_overlay.queue_draw()
+
+    def _warp_quad(self) -> Any | None:
+        """The valid image outline under the active perspective warp."""
+        geometry = self.geometry
+        if not geometry.has_warp:
+            return None
+        dims = self._warp_dims()
+        if dims is None:
+            return None
+        quad = keystone.valid_quad(
+            keystone.Keystone(
+                geometry.keystone_rotation,
+                geometry.lensshift_v,
+                geometry.lensshift_h,
+                geometry.shear,
+            ),
+            dims[0],
+            dims[1],
+        )
+        return keystone.rotate_quad(quad, geometry.orientation)
+
+    def _warp_dims(self) -> tuple[int, int] | None:
+        """The image size the warp runs on."""
+        pixbuf = self._view._oriented_pixbuf
+        if pixbuf is None:
+            return None
+        return pixbuf.get_width(), pixbuf.get_height()
+
+    def _warp_safe(self) -> crop.Rect:
+        """A rect guaranteed inside the quad."""
+        geometry = self.geometry
+        dims = self._warp_dims()
+        if dims is None or not geometry.has_warp:
+            return crop.FULL_RECT
+        rect = keystone.auto_crop(
+            keystone.Keystone(
+                geometry.keystone_rotation,
+                geometry.lensshift_v,
+                geometry.lensshift_h,
+                geometry.shear,
+            ),
+            dims[0],
+            dims[1],
+        )
+        return crop.rotate_rect_90(rect, geometry.orientation)
+
+    @staticmethod
+    def _fit_into_quad(
+        wanted: crop.Rect, anchor: crop.Rect, quad: Any
+    ) -> crop.Rect:
+        """The furthest rect from anchor toward wanted staying in quad."""
+        if keystone.rect_in_quad(wanted, quad):
+            return wanted
+
+        def blend(t: float) -> crop.Rect:
+            return (
+                anchor[0] + (wanted[0] - anchor[0]) * t,
+                anchor[1] + (wanted[1] - anchor[1]) * t,
+                anchor[2] + (wanted[2] - anchor[2]) * t,
+                anchor[3] + (wanted[3] - anchor[3]) * t,
+            )
+
+        low, high = 0.0, 1.0
+        for _ in range(24):
+            mid = (low + high) / 2.0
+            if keystone.rect_in_quad(blend(mid), quad):
+                low = mid
+            else:
+                high = mid
+        return blend(low)
 
     def apply(self) -> None:
         """Commit the crop edit."""
@@ -185,11 +281,21 @@ class CropEditor:
 
     def _finish_edit(self, *, apply: bool) -> None:
         """Leave the crop editor, keeping or reverting its changes."""
-        if not self.editing:
+        if not self.editing or self._committing:
             return
-        self.editing = False
         if not apply:
             self.geometry = self._pre_edit
+        elif not self._view.warp_ready():
+            self._committing = True
+            self._view.warm_committed_warp(self._teardown_edit)
+            return
+        self._teardown_edit()
+
+    def _teardown_edit(self) -> None:
+        """Drop the editor and show the committed geometry."""
+        self._committing = False
+        self._warp_settle_id = 0
+        self.editing = False
         self._horizon = None
         self._reset_auto_level()
         self._view.crop_bar.set_reveal_child(False)
@@ -198,7 +304,7 @@ class CropEditor:
         self._invalidate_derived()
         self._drop_edit_display()
         self._redisplay()
-        if apply and self.geometry != self._pre_edit:
+        if self.geometry != self._pre_edit:
             self._view.emit("geometry-changed")
 
     def reset(self) -> None:
@@ -211,11 +317,22 @@ class CropEditor:
             rect=crop.FULL_RECT,
             aspect="Original",
             aspect_swapped=False,
+            keystone_rotation=0.0,
+            lensshift_v=0.0,
+            lensshift_h=0.0,
+            shear=0.0,
         )
         self._select_aspect("Original")
         self._sync_swap(active=False)
         self._sync_angle(0.0)
         self._redisplay(histogram=False)
+
+    def _display_angle(self) -> float:
+        """The rotation the slider should show."""
+        geometry = self.geometry
+        if geometry.has_warp:
+            return geometry.keystone_rotation
+        return geometry.angle
 
     def _sync_angle(self, value: float) -> None:
         """Move the angle controls without re-applying the angle."""
@@ -246,6 +363,9 @@ class CropEditor:
         dims = self._oriented_dims()
         if dims is None:
             return
+        if self.geometry.has_warp:
+            self._set_keystone_rotation(angle)
+            return
         w, h = dims
         old = self.geometry
         obw, obh = crop.rotated_size(w, h, old.angle)
@@ -260,6 +380,46 @@ class CropEditor:
         rect = crop.shrink_to_fit(w, h, angle, (nx, ny, nw, nh))
         self.geometry = replace(old, angle=angle, rect=rect)
         self._redisplay(histogram=False)
+
+    def _set_keystone_rotation(self, angle: float) -> None:
+        """Retune the warp's own rotation for a keystone image."""
+        angle = max(-crop.MAX_ANGLE, min(crop.MAX_ANGLE, angle))
+        self.geometry = replace(self.geometry, keystone_rotation=angle)
+        quad = self._warp_quad()
+        if quad is not None:
+            rect = self._fit_into_quad(
+                self.geometry.rect, self._centre_anchor(), quad
+            )
+            if rect != self.geometry.rect:
+                self.geometry = replace(self.geometry, rect=rect)
+        self._view._warp_preview_edge = _KEYSTONE_DRAG_EDGE
+        self._redisplay(histogram=False)
+        if self._warp_settle_id:
+            GLib.source_remove(self._warp_settle_id)
+        self._warp_settle_id = GLib.timeout_add(
+            _WARP_SETTLE_MS, self._settle_warp_preview
+        )
+
+    def _centre_anchor(self, rect: crop.Rect | None = None) -> crop.Rect:
+        """A zero-size rect at a crop's center."""
+        x, y, w, h = self.geometry.rect if rect is None else rect
+        return (x + w / 2.0, y + h / 2.0, 0.0, 0.0)
+
+    def _fit_rect_into_warp(self, rect: crop.Rect) -> crop.Rect:
+        """Shrink a reshaped rect toward its center into the warp quad."""
+        quad = self._warp_quad()
+        if quad is None:
+            return rect
+        return self._fit_into_quad(rect, self._centre_anchor(rect), quad)
+
+    def _settle_warp_preview(self) -> bool:
+        """Re-render the edit preview sharp after the slider rests."""
+        self._warp_settle_id = 0
+        if not self.editing:
+            return GLib.SOURCE_REMOVE
+        self._view._warp_preview_edge = None
+        self._redisplay(histogram=False)
+        return GLib.SOURCE_REMOVE
 
     @property
     def guides_name(self) -> str:
@@ -333,6 +493,7 @@ class CropEditor:
             return
         w, h = dims
         rect = crop.swap_rect(w, h, self.geometry.angle, self.geometry.rect)
+        rect = self._fit_rect_into_warp(rect)
         self.geometry = replace(self.geometry, rect=rect)
         self._view.crop_overlay.queue_draw()
         self._update_size_label()
@@ -365,6 +526,7 @@ class CropEditor:
         nx = min(max(x + rw / 2 - nw / 2, 0.0), 1.0 - nw)
         ny = min(max(y + rh / 2 - nh / 2, 0.0), 1.0 - nh)
         rect = crop.shrink_to_fit(w, h, current.angle, (nx, ny, nw, nh))
+        rect = self._fit_rect_into_warp(rect)
         self.geometry = replace(current, rect=rect)
         self._view.crop_overlay.queue_draw()
         self._update_size_label()
@@ -437,6 +599,13 @@ class CropEditor:
             dy=dy / dh,
             ratio=nratio,
         )
+        quad = self._warp_quad()
+        if quad is not None:
+            if self._drag_zone == "move":
+                # the 'famous' jitter fix
+                rect = keystone.slide_into_quad(rect, quad)
+            else:
+                rect = self._fit_into_quad(rect, self._drag_rect, quad)
         self.geometry = replace(self.geometry, rect=rect)
         self._view.crop_overlay.queue_draw()
         self._update_size_label()
@@ -495,6 +664,106 @@ class CropEditor:
             daemon=True,
         ).start()
 
+    def _build_keystone_menu(self, view: PreviewView) -> None:
+        """Give the Perspective button its vertical/horizontal/both menu."""
+        popover = Gtk.Popover()
+        popover.add_css_class("menu")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+        modes: tuple[tuple[str, keystone.Mode], ...] = (
+            ("Auto (both)", "both"),
+            ("Vertical lines", "vertical"),
+            ("Horizontal lines", "horizontal"),
+        )
+        for label, mode in modes:
+            item = Gtk.Button(label=label)
+            item.add_css_class("flat")
+            item.set_halign(Gtk.Align.FILL)
+            item.get_child().set_halign(Gtk.Align.START)
+            item.connect("clicked", self._on_keystone_mode, mode, popover)
+            box.append(item)
+        popover.set_child(box)
+        view.auto_keystone_button.set_popover(popover)
+
+    def _on_keystone_mode(
+        self, _button: Any, mode: keystone.Mode, popover: Gtk.Popover
+    ) -> None:
+        """Run the perspective fit in the chosen mode."""
+        popover.popdown()
+        if not self.editing or self._view._oriented_pixbuf is None:
+            return
+        self._view.auto_keystone_button.set_sensitive(False)
+        threading.Thread(
+            target=self._auto_keystone_work,
+            args=(self._view._oriented_pixbuf, self.geometry, mode),
+            name="grawji-keystone",
+            daemon=True,
+        ).start()
+
+    def _auto_keystone_work(
+        self, source: Any, state: crop.CropRotate, mode: keystone.Mode
+    ) -> None:
+        """Detect lines and fit the keystone."""
+        width = source.get_width()
+        height = source.get_height()
+        scale = _KEYSTONE_ANALYSIS_PX / max(width, height)
+        if scale < 1.0:
+            source = source.scale_simple(
+                max(1, round(width * scale)),
+                max(1, round(height * scale)),
+                GdkPixbuf.InterpType.BILINEAR,
+            )
+        try:
+            report = keystone.analyze(_gray_of(source), mode=mode)
+        except Exception:
+            _LOG.exception("perspective fit failed")
+            report = None
+        mainloop.call(self._finish_auto_keystone, state, report)
+
+    def _finish_auto_keystone(
+        self,
+        state: crop.CropRotate,
+        report: keystone.FitReport | None,
+    ) -> bool:
+        """Apply a fitted correction to the edit in progress."""
+        self._view.auto_keystone_button.set_sensitive(True)
+        if not self.editing or self.geometry != state:
+            return GLib.SOURCE_REMOVE
+        if report is None:
+            self.set_status("No reliable perspective fit; try Level instead.")
+            return GLib.SOURCE_REMOVE
+        fitted = report.keystone
+        dims = self._warp_dims()
+        rect = crop.FULL_RECT
+        if dims is not None:
+            rect = crop.rotate_rect_90(
+                keystone.auto_crop(fitted, *dims), self.geometry.orientation
+            )
+        self._auto_lines = []
+        self.geometry = replace(
+            self.geometry,
+            keystone_rotation=fitted.rotation,
+            lensshift_v=fitted.lensshift_v,
+            lensshift_h=fitted.lensshift_h,
+            shear=fitted.shear,
+            angle=0.0,
+            rect=rect,
+            aspect="Free",
+        )
+        self._select_aspect("Free")
+        self._sync_angle(fitted.rotation)
+        self._redisplay(histogram=False)
+        self.set_status(
+            f"Perspective: {report.lines} lines,"
+            f" rotation {fitted.rotation:+.1f}°,"
+            f" {report.deviation_before:.1f}° ->"
+            f" {report.deviation_after:.1f}°"
+        )
+        return GLib.SOURCE_REMOVE
+
     def _auto_level_work(self, source: Any, state: crop.CropRotate) -> None:
         """Compute the level suggestions for state."""
         width = source.get_width()
@@ -506,10 +775,12 @@ class CropEditor:
                 max(1, round(height * scale)),
                 GdkPixbuf.InterpType.BILINEAR,
             )
-        baked = bake_pixbuf(source, state)
-        candidates = level.suggest_candidates(
-            gray_rows(baked, _LEVEL_ANALYSIS_PX)
-        )
+        try:
+            baked = bake_pixbuf(source, state)
+            candidates = level.suggest_candidates(_gray_of(baked))
+        except Exception:
+            _LOG.exception("auto level failed")
+            candidates = []
         mainloop.call(self._finish_auto_level, state, candidates)
 
     def _finish_auto_level(

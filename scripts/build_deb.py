@@ -32,6 +32,7 @@ DEBIAN_NAMES = {
     "numpy": "python3-numpy",
     "pyusb": "python3-usb",
     "rawji": None,
+    "lsdetect": None,
 }
 
 EXTRA_DEPENDS = [

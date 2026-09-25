@@ -1,4 +1,4 @@
-"""Custom paintables for the preview: scaled, split-compare, rotated."""
+"""Custom paintables for the preview."""
 
 from __future__ import annotations
 
@@ -110,6 +110,16 @@ class RotatedPaintable(GObject.GObject, Gdk.Paintable):
             return
         self._angle = angle
         self.invalidate_size()
+        self.invalidate_contents()
+
+    def set_texture(self, texture: Any, width: int, height: int) -> None:
+        """Swap the drawn texture in place."""
+        self._texture = texture
+        resized = width != self._width or height != self._height
+        self._width = max(1, width)
+        self._height = max(1, height)
+        if resized:
+            self.invalidate_size()
         self.invalidate_contents()
 
     def _bbox(self) -> tuple[float, float]:

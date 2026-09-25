@@ -17,6 +17,7 @@ from gi.repository import Adw, GdkPixbuf, Gtk
 from rawji.fuji_enums import FP_WB_SHIFT_MAX
 
 from grawji import mainloop
+from grawji.imaging.pixbufs import pixel_bytes
 from grawji.mainloop import Dispatch
 
 Formatter = Callable[[float], str]
@@ -394,7 +395,7 @@ class Histogram(Gtk.DrawingArea):
         threading.Thread(
             target=self._bin,
             args=(
-                bytes(small.get_pixels()),
+                pixel_bytes(small),
                 small.get_n_channels(),
                 small.get_rowstride(),
                 small.get_width(),

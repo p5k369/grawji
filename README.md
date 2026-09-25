@@ -124,7 +124,26 @@ The profile format was reverse-engineered by
 for the camera's d185 conversion profile. grawji's parameter encodings (e.g.
 noise reduction, processor capabilities) were verified against that work.
 
+## Third-party code inside grawji
+
+grawji's automatic perspective correction is **not grawji's work**. It is a
+line-by-line Python port.
+
+| What | Where in grawji | Ported from | License |
+|---|---|---|---|
+| Automatic perspective correction | `src/grawji/keystone.py` | [darktable](https://github.com/darktable-org/darktable), `src/iop/ashift.c`, originally written by Ulrich Pegelow | GPL-3.0-or-later |
+| Nelder-Mead optimizer | `src/grawji/keystone.py`| [Michael F. Hutt](https://github.com/huttmf/nelder-mead), by way of darktable's `src/iop/ashift_nmsimplex.c` | MIT |
+
+The method, the line weighting, the vanishing-point search and the crop
+fitting are all darktable's. grawji only translates them into Python and
+feeds them line segments from [lsdetect](https://github.com/p5k369/lsdetect).
+If that feature is useful to you, the people to thank are the darktable developers.
+
+The Nelder-Mead optimizer is third-party code within darktable as well. It
+is by Michael F. Hutt, copyright (c) 1997-2011, under the MIT license. The
+site his notice points to no longer resolves, his own copy lives at
+[huttmf/nelder-mead](https://github.com/huttmf/nelder-mead).
+
 ## License
 
-GPL-3.0-or-later. grawji imports rawji (copyleft), so grawji itself must be
 GPL-3.0-or-later.

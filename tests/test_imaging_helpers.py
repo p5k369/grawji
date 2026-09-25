@@ -17,7 +17,6 @@ from grawji.imaging.imagemeta import camera_model, exif_orientation, exif_rows
 from grawji.imaging.render import (
     bake_pixbuf,
     flatten_alpha,
-    gray_rows,
     parse_aspect,
     thumb_jpeg,
 )
@@ -49,20 +48,6 @@ def test_texture_matches_pixbuf_dimensions() -> None:
     """The GPU texture mirrors the pixbuf's size."""
     texture = texture_for_pixbuf(_flat_pixbuf(6, 4, 10))
     assert (texture.get_width(), texture.get_height()) == (6, 4)
-
-
-def test_gray_rows_shape_and_downscale() -> None:
-    """Rows come back at the downscaled size with summed channels."""
-    rows = gray_rows(_flat_pixbuf(40, 20, 100), target=10)
-    assert len(rows) == 5
-    assert all(len(row) == 10 for row in rows)
-    assert rows[0][0] == 300  # r+g+b of the flat gray
-
-
-def test_gray_rows_never_upscales() -> None:
-    """A pixbuf smaller than the target keeps its size."""
-    rows = gray_rows(_flat_pixbuf(4, 3, 10), target=100)
-    assert (len(rows), len(rows[0])) == (3, 4)
 
 
 def test_parse_aspect() -> None:

@@ -26,12 +26,14 @@ from gi.repository import (
 
 from grawji import crop, mainloop
 from grawji.imaging.clipping import clip_overlay
+from grawji.imaging.perspective import is_cached, warp_cached
 from grawji.imaging.render import (
     add_border,
     bake_pixbuf,
     orient_pixbuf,
     parse_aspect,
 )
+from grawji.keystone import Keystone
 from grawji.views.crop_editor import CropEditor
 from grawji.views.paintables import (
     RotatedPaintable,
@@ -127,6 +129,7 @@ class PreviewView(Gtk.Box):
     angle_scale = Gtk.Template.Child()
     angle_spin = Gtk.Template.Child()
     auto_level_button = Gtk.Template.Child()
+    auto_keystone_button = Gtk.Template.Child()
     crop_reset = Gtk.Template.Child()
     crop_cancel = Gtk.Template.Child()
     crop_apply = Gtk.Template.Child()
@@ -201,6 +204,17 @@ class PreviewView(Gtk.Box):
         self._display_key: tuple[Any, crop.CropRotate] | None = None
         self._edit_base: Any | None = None
         self._edit_base_src: Any | None = None
+        self._edit_shifts: tuple[float, float, float, float, int | None] = (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+        )
+        self._warp_pending = False
+        self._warp_preview_edge: int | None = None
+        self._edit_coarse: Any | None = None
+        self._edit_coarse_edge = 0
         self._edit_texture: Any = None
         self._edit_texture_size = (0, 0)
         self._edit_orientation = -1
@@ -409,6 +423,17 @@ class PreviewView(Gtk.Box):
         if not self._crop_editor.editing:
             key = (self._oriented_pixbuf, self._crop)
             if self._display_key != key:
+                if self._crop.has_warp and not is_cached(
+                    self._oriented_pixbuf,
+                    Keystone(
+                        self._crop.keystone_rotation,
+                        self._crop.lensshift_v,
+                        self._crop.lensshift_h,
+                        self._crop.shear,
+                    ),
+                ):
+                    self._warm_warp(histogram=histogram)
+                    return
                 self._display_base = bake_pixbuf(
                     self._oriented_pixbuf, self._crop
                 )
@@ -422,6 +447,63 @@ class PreviewView(Gtk.Box):
         self._refresh_display()
         self._update_size_label()
         self.crop_overlay.queue_draw()
+
+    def warp_ready(self) -> bool:
+        """Whether the committed geometry's warp is already cached."""
+        if not self._crop.has_warp or self._oriented_pixbuf is None:
+            return True
+        return is_cached(
+            self._oriented_pixbuf,
+            Keystone(
+                self._crop.keystone_rotation,
+                self._crop.lensshift_v,
+                self._crop.lensshift_h,
+                self._crop.shear,
+            ),
+        )
+
+    def warm_committed_warp(self, on_ready: Any) -> None:
+        """Warp the committed image off-thread, then call on_ready."""
+        source = self._oriented_pixbuf
+        if source is None:
+            on_ready()
+            return
+        correction = Keystone(
+            self._crop.keystone_rotation,
+            self._crop.lensshift_v,
+            self._crop.lensshift_h,
+            self._crop.shear,
+        )
+
+        def work() -> None:
+            warp_cached(source, correction)
+            mainloop.call(on_ready)
+
+        threading.Thread(target=work, name="grawji-warp", daemon=True).start()
+
+    def _warm_warp(self, *, histogram: bool) -> None:
+        """Fill the warp cache off the main thread, then redisplay."""
+        if self._warp_pending:
+            return
+        self._warp_pending = True
+        source = self._oriented_pixbuf
+        correction = Keystone(
+            self._crop.keystone_rotation,
+            self._crop.lensshift_v,
+            self._crop.lensshift_h,
+            self._crop.shear,
+        )
+
+        def done() -> bool:
+            self._warp_pending = False
+            self._redisplay(histogram=histogram)
+            return GLib.SOURCE_REMOVE
+
+        def work() -> None:
+            warp_cached(source, correction)
+            mainloop.call(done)
+
+        threading.Thread(target=work, name="grawji-warp", daemon=True).start()
 
     def _with_zebras(self, base: Any) -> Any:
         """Return base with the clipping overlay composited."""
@@ -519,18 +601,47 @@ class PreviewView(Gtk.Box):
             self._edit_base = _capped_copy(self._oriented_pixbuf)
             self._edit_base_src = self._oriented_pixbuf
             self._edit_texture = None
+        warp_key = (
+            self._crop.keystone_rotation,
+            self._crop.lensshift_v,
+            self._crop.lensshift_h,
+            self._crop.shear,
+            self._warp_preview_edge,
+        )
         if (
             self._edit_texture is None
             or self._edit_orientation != self._crop.orientation
+            or self._edit_shifts != warp_key
         ):
-            pixbuf = orient_pixbuf(self._edit_base, self._crop.orientation)
+            pixbuf = self._edit_base
+            if self._crop.has_warp:
+                if self._warp_preview_edge is not None:
+                    pixbuf = self._coarse_base(pixbuf, self._warp_preview_edge)
+                pixbuf = warp_cached(
+                    pixbuf,
+                    Keystone(
+                        self._crop.keystone_rotation,
+                        self._crop.lensshift_v,
+                        self._crop.lensshift_h,
+                        self._crop.shear,
+                    ),
+                )
+            pixbuf = orient_pixbuf(pixbuf, self._crop.orientation)
+            self._edit_shifts = warp_key
             self._edit_texture = texture_for_pixbuf(pixbuf)
             self._edit_texture_size = (
                 pixbuf.get_width(),
                 pixbuf.get_height(),
             )
             self._edit_orientation = self._crop.orientation
-            self._edit_paintable = None
+            if self._edit_paintable is None:
+                self._edit_paintable = RotatedPaintable(
+                    self._edit_texture, *self._edit_texture_size
+                )
+            else:
+                self._edit_paintable.set_texture(
+                    self._edit_texture, *self._edit_texture_size
+                )
         if self._edit_paintable is None:
             self._edit_paintable = RotatedPaintable(
                 self._edit_texture, *self._edit_texture_size
@@ -538,9 +649,29 @@ class PreviewView(Gtk.Box):
         self._edit_paintable.set_angle(self._crop.angle)
         return self._edit_paintable
 
+    def _coarse_base(self, pixbuf: Any, edge: int) -> Any:
+        """A cached downscaled copy of the oriented edit base."""
+        if self._edit_coarse is not None and self._edit_coarse_edge == edge:
+            return self._edit_coarse
+        longest = max(pixbuf.get_width(), pixbuf.get_height())
+        if longest <= edge:
+            coarse = pixbuf
+        else:
+            factor = edge / longest
+            coarse = pixbuf.scale_simple(
+                max(1, round(pixbuf.get_width() * factor)),
+                max(1, round(pixbuf.get_height() * factor)),
+                GdkPixbuf.InterpType.BILINEAR,
+            )
+        self._edit_coarse = coarse
+        self._edit_coarse_edge = edge
+        return coarse
+
     def _drop_edit_display(self) -> None:
         """Free the crop editor's texture and caches."""
         self._edit_base = None
+        self._edit_coarse = None
+        self._edit_coarse_edge = 0
         self._edit_base_src = None
         self._edit_texture = None
         self._edit_orientation = -1

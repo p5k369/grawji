@@ -1,10 +1,7 @@
 """Crop and fine-rotate geometry.
 
 The camera engine has no crop or rotate, so grawji applies geometry to
-the jpeg the camera returns. A CropRotate describes that step in a
-resolution-independent way: the crop rect is normalized to the bounding
-box of the fine-rotated image, so the same value applies to the small
-preview render and the full-resolution export.
+the jpeg the camera returns.
 
 The pipeline order is: exif orientation, then the coarse 90-degree
 orientation, then the fine angle, then the crop.
@@ -20,6 +17,9 @@ Rect = tuple[float, float, float, float]
 FULL_RECT: Rect = (0.0, 0.0, 1.0, 1.0)
 MAX_ANGLE = 45.0
 MIN_SIZE = 0.05
+MAX_SHIFT = 1.0
+MAX_KEYSTONE_ROTATION = 45.0
+MAX_SHEAR = 0.5
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,10 @@ class CropRotate:
     rect: Rect = FULL_RECT
     aspect: str = "Original"
     aspect_swapped: bool = False
+    keystone_rotation: float = 0.0
+    lensshift_v: float = 0.0
+    lensshift_h: float = 0.0
+    shear: float = 0.0
 
     @property
     def is_identity(self) -> bool:
@@ -39,17 +43,35 @@ class CropRotate:
             self.orientation == 0
             and self.angle == 0.0
             and self.rect == FULL_RECT
+            and not self.has_warp
+        )
+
+    @property
+    def has_warp(self) -> bool:
+        """Whether a keystone correction is set."""
+        eps = 1.0e-4
+        return (
+            abs(self.keystone_rotation) > eps
+            or abs(self.lensshift_v) > eps
+            or abs(self.lensshift_h) > eps
+            or abs(self.shear) > eps
         )
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain dict suitable for the sidecar storage."""
-        return {
+        stored: dict[str, object] = {
             "orientation": self.orientation,
             "angle": self.angle,
             "rect": list(self.rect),
             "aspect": self.aspect,
             "aspect_swapped": self.aspect_swapped,
         }
+        if self.has_warp:
+            stored["keystone_rotation"] = self.keystone_rotation
+            stored["lensshift_v"] = self.lensshift_v
+            stored["lensshift_h"] = self.lensshift_h
+            stored["shear"] = self.shear
+        return stored
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> CropRotate:
@@ -71,11 +93,24 @@ class CropRotate:
             rect=_sane_rect(rect),
             aspect=aspect,
             aspect_swapped=bool(data.get("aspect_swapped", False)),
+            keystone_rotation=_sane_float(
+                data.get("keystone_rotation"), MAX_KEYSTONE_ROTATION
+            ),
+            lensshift_v=_sane_float(data.get("lensshift_v"), MAX_SHIFT),
+            lensshift_h=_sane_float(data.get("lensshift_h"), MAX_SHIFT),
+            shear=_sane_float(data.get("shear"), MAX_SHEAR),
         )
 
 
 _RECT_LEN = 4
 _TINY = 1e-12
+
+
+def _sane_float(value: object, limit: float) -> float:
+    """A stored keystone parameter."""
+    if not isinstance(value, (int, float)):
+        return 0.0
+    return max(-limit, min(limit, float(value)))
 
 
 def _sane_rect(value: object) -> Rect:

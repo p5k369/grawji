@@ -20,6 +20,13 @@ _GEOMETRIES = [
     CropRotate(orientation=180, rect=(0.0, 0.0, 0.5, 0.5)),
     CropRotate(angle=5.65, rect=(0.2, 0.1, 0.5, 0.7)),
     CropRotate(angle=-12.0),
+    CropRotate(
+        keystone_rotation=5.5,
+        lensshift_v=-0.05,
+        lensshift_h=0.2,
+        shear=0.03,
+        rect=(0.12, 0.1, 0.7, 0.68),
+    ),
 ]
 
 
@@ -79,6 +86,23 @@ def test_bake_keeps_the_pixels_for_exact_geometry(crop):
     baked = render.bake_pixbuf(pixbuf, crop)
     samples = render16.bake(as_samples(pixbuf), crop)
     assert np.array_equal(samples, as_samples(baked))
+
+
+def test_bake_applies_the_keystone_like_the_pixbuf_path():
+    """The 16-bit path warps the perspective just like the 8-bit path."""
+    crop = CropRotate(
+        keystone_rotation=5.5,
+        lensshift_v=-0.05,
+        lensshift_h=0.2,
+        shear=0.03,
+        rect=(0.12, 0.1, 0.7, 0.68),
+    )
+    pixbuf = sample_pixbuf()
+    baked = as_samples(render.bake_pixbuf(pixbuf, crop))
+    samples = render16.bake(as_samples(pixbuf), crop)
+    assert samples.shape == baked.shape
+    delta = np.abs(samples.astype(np.int32) - baked.astype(np.int32))
+    assert int(delta.max()) <= 1
 
 
 @pytest.mark.parametrize("max_edge", [0, 1000, 120, 37])

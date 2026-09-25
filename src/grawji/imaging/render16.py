@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from grawji.crop import FULL_RECT, CropRotate, rotated_size
 from grawji.imaging.heif_codec import DecodedImage
+from grawji.keystone import Keystone, frame_transform, homography
 
 _ROTATIONS = (90, 180, 270)
 _TOP_LEFT = 1
@@ -61,7 +62,17 @@ def exif_orient(samples: Samples, orientation: int) -> Samples:
 
 
 def bake(samples: Samples, crop: CropRotate) -> Samples:
-    """Apply orientation, straightening and the crop rect."""
+    """Apply the keystone warp, orientation, straightening and the crop."""
+    if crop.has_warp:
+        samples = _warp(
+            samples,
+            Keystone(
+                crop.keystone_rotation,
+                crop.lensshift_v,
+                crop.lensshift_h,
+                crop.shear,
+            ),
+        )
     samples = orient(samples, crop.orientation)
     if crop.angle == 0.0 and crop.rect == FULL_RECT:
         return samples
@@ -74,6 +85,40 @@ def bake(samples: Samples, crop: CropRotate) -> Samples:
         cut_h = min(height - y, max(1, round(crop.rect[3] * height)))
         return np.ascontiguousarray(samples[y : y + cut_h, x : x + cut_w])
     return _rotate_crop(samples, crop)
+
+
+def _warp(samples: Samples, keystone: Keystone) -> Samples:
+    """Perspective-warp samples into their frame."""
+    height, width = samples.shape[:2]
+    inverse = np.linalg.inv(homography(keystone, width, height))
+    scale, off_x, off_y = frame_transform(keystone, width, height)
+    out = np.empty((height, width, _CHANNELS), dtype=np.uint16)
+    cols = np.arange(width, dtype=np.float64) / scale + off_x
+    for start in range(0, height, _BAND_ROWS):
+        stop = min(start + _BAND_ROWS, height)
+        rows = np.arange(start, stop, dtype=np.float64) / scale + off_y
+        plane_x = cols[None, :]
+        plane_y = rows[:, None]
+        denom = (
+            inverse[2, 0] * plane_x + inverse[2, 1] * plane_y + inverse[2, 2]
+        )
+        src_x = (
+            inverse[0, 0] * plane_x + inverse[0, 1] * plane_y + inverse[0, 2]
+        ) / denom
+        src_y = (
+            inverse[1, 0] * plane_x + inverse[1, 1] * plane_y + inverse[1, 2]
+        ) / denom
+        sampled = _sample_bilinear(
+            samples, src_x.astype(np.float32), src_y.astype(np.float32)
+        )
+        valid = (
+            (src_x >= 0.0)
+            & (src_x <= width - 1)
+            & (src_y >= 0.0)
+            & (src_y <= height - 1)
+        )
+        out[start:stop] = sampled * valid[..., None]
+    return out
 
 
 def _rotate_crop(samples: Samples, crop: CropRotate) -> Samples:
