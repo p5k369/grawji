@@ -385,26 +385,30 @@ class Histogram(Gtk.DrawingArea):
         self.queue_draw()
 
     def update(self, pixbuf: Any) -> None:
-        """Recompute the histogram for pixbuf (or clear it if None)."""
+        """Recompute the histogram for pixbuf."""
         self._generation += 1
         if pixbuf is None:
             self._bins = None
             self.queue_draw()
             return
-        small = self._downscale(pixbuf)
         threading.Thread(
-            target=self._bin,
-            args=(
-                pixel_bytes(small),
-                small.get_n_channels(),
-                small.get_rowstride(),
-                small.get_width(),
-                small.get_height(),
-                self._generation,
-            ),
+            target=self._bin_pixbuf,
+            args=(pixbuf, self._generation),
             name="grawji-histogram",
             daemon=True,
         ).start()
+
+    def _bin_pixbuf(self, pixbuf: Any, generation: int) -> None:
+        """Downscale off-thread, then count the levels."""
+        small = self._downscale(pixbuf)
+        self._bin(
+            pixel_bytes(small),
+            small.get_n_channels(),
+            small.get_rowstride(),
+            small.get_width(),
+            small.get_height(),
+            generation,
+        )
 
     @classmethod
     def _downscale(cls, pixbuf: Any) -> Any:

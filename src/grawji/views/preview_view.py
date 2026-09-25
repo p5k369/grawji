@@ -161,6 +161,7 @@ class PreviewView(Gtk.Box):
         self._dragging_divider = False
         self._shown_size: tuple[int, int] | None = None
         self._show_clipping = False
+        self._show_histogram = False
         self._clip_base: Any = None
         self._clip_overlay: Any = None
         self._clip_generation = 0
@@ -322,7 +323,10 @@ class PreviewView(Gtk.Box):
 
     def set_show_histogram(self, show: bool) -> None:
         """Show or hide the histogram overlay."""
+        self._show_histogram = show
         self.histogram_slot.set_visible(show)
+        if show and self._display_base is not None:
+            self._histogram.update(self._display_base)
 
     def set_embedded_jpeg(self, jpeg: bytes | None) -> None:
         """Provide the image's in-camera JPEG."""
@@ -438,7 +442,7 @@ class PreviewView(Gtk.Box):
                     self._oriented_pixbuf, self._crop
                 )
                 self._display_key = key
-                if histogram:
+                if histogram and self._show_histogram:
                     # The histogram describes the image, not the border.
                     self._histogram.update(self._display_base)
             self._pixbuf = self._bordered(
