@@ -5,13 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "grawji"
 version = "0.5.1"
-description = "GTK4 frontend for rawji - interactive Fuji RAF conversion via the camera engine."
+description = "Fujifilm raw converter: develop RAFs through the camera's own engine"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 authors = [{ name = "Patrick Zwerschke" }]
 dependencies = [
   "PyGObject",
+  "lsdetect",
   "numpy",
   "pyusb",
   # rawji is not on PyPI and does not bump versions

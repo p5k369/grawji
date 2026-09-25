@@ -2,6 +2,7 @@
 
 import math
 
+import numpy as np
 import pytest
 
 from grawji import level
@@ -13,7 +14,8 @@ HEIGHT = 300
 
 def suggest_deltas(rows: list[list[int]]) -> list[float]:
     """The ranked leveling angles of the suggested candidates."""
-    return [c.delta for c in level.suggest_candidates(rows)]
+    gray = np.array(rows, dtype=np.float64)
+    return [c.delta for c in level.suggest_candidates(gray)]
 
 
 def suggest_delta(rows: list[list[int]]) -> float | None:
@@ -134,7 +136,9 @@ def test_a_dominant_tilt_still_wins():
 
 def test_candidates_carry_segments_along_the_edge():
     """The winning candidate's marking follows the detected line."""
-    candidates = level.suggest_candidates(edge_rows(3.0))
+    candidates = level.suggest_candidates(
+        np.array(edge_rows(3.0), dtype=np.float64)
+    )
     assert len(candidates) == 1
     best = candidates[0]
     assert best.segments
@@ -147,7 +151,9 @@ def test_candidates_carry_segments_along_the_edge():
 
 def test_marked_lines_level_out_after_applying():
     """Applying the suggestion makes the marked segments level."""
-    candidates = level.suggest_candidates(edge_rows(3.0))
+    candidates = level.suggest_candidates(
+        np.array(edge_rows(3.0), dtype=np.float64)
+    )
     best = candidates[0]
     new_angle = 0.0 + best.delta
     x0, y0, x1, y1 = best.segments[0]

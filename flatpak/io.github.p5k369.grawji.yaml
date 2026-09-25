@@ -76,7 +76,16 @@ modules:
         url: https://download.gnome.org/sources/gexiv2/0.14/gexiv2-0.14.3.tar.xz
         sha256: 21e64d2c56e9b333d44fef3f2a4b25653d922c419acd972fa96fab695217e2c8
 
-  - name: rawji
+  - name: python3-lsdetect
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-deps --prefix=${FLATPAK_DEST} lsdetect-*.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/7c/54/3ee1038569bbc31d535fcc54725361f45dbf115695f1366bafd86c15cded/lsdetect-0.1.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: c72cb48b80a96e88400b57488b5e31ef00733f8a926e4753dfa38c7d65befada
+
+  - name: python3-rawji
     buildsystem: simple
     build-commands:
       - pip3 install --no-deps --no-build-isolation

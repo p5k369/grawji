@@ -1,5 +1,5 @@
 {
-  description = "GTK4 frontend for rawji";
+  description = "Fujifilm raw converter: develop RAFs through the camera's own engine";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -44,6 +44,23 @@
             pythonImportsCheck = [ "rawji" ];
           };
 
+          lsdetect = python.pkgs.buildPythonPackage {
+            pname = "lsdetect";
+            version = "0.1.0";
+            format = "wheel";
+            src = python.pkgs.fetchPypi {
+              pname = "lsdetect";
+              version = "0.1.0";
+              format = "wheel";
+              dist = "cp311";
+              python = "cp311";
+              abi = "abi3";
+              platform = "manylinux_2_17_x86_64.manylinux2014_x86_64";
+              hash = "sha256-xyy0i4CpbohAC1dIi14x7wBzP4qSbkdT36OMfWW++to=";
+            };
+            pythonImportsCheck = [ "lsdetect" ];
+          };
+
           # GI typelibs and native libs needed at runtime.
           gtkStack = [
             pkgs.adwaita-icon-theme
@@ -74,6 +91,7 @@
             buildInputs = gtkStack;
 
             dependencies = [
+              lsdetect
               python.pkgs.numpy
               python.pkgs.pygobject3
               python.pkgs.pyusb
@@ -106,7 +124,7 @@
             ];
 
             meta = {
-              description = "GTK4 frontend for rawji - interactive Fuji RAF conversion via the camera engine";
+              description = "Fujifilm raw converter: develop RAFs through the camera's own engine";
               homepage = "https://github.com/p5k369/grawji";
               license = pkgs.lib.licenses.gpl3Plus;
               mainProgram = "grawji";

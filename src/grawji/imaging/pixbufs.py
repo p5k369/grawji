@@ -8,7 +8,25 @@ import gi
 
 gi.require_version("GdkPixbuf", "2.0")
 
+import numpy as np
 from gi.repository import GdkPixbuf
+from numpy.typing import NDArray
+
+
+def pixel_bytes(pixbuf: Any) -> bytes:
+    """A pixbuf's raw pixels."""
+    return pixbuf.read_pixel_bytes().get_data()
+
+
+def pixel_rows(pixbuf: Any) -> NDArray[np.uint8]:
+    """A pixbuf's bytes as a height by rowstride array."""
+    height, stride = pixbuf.get_height(), pixbuf.get_rowstride()
+    pixels = np.frombuffer(pixel_bytes(pixbuf), dtype=np.uint8)
+    missing = height * stride - pixels.size
+    if missing > 0:
+        pixels = np.concatenate((pixels, np.zeros(missing, dtype=np.uint8)))
+    return pixels[: height * stride].reshape(height, stride)
+
 
 # EXIF orientation.
 _R = GdkPixbuf.PixbufRotation
@@ -28,7 +46,7 @@ def trim_letterbox(pixbuf: Any, threshold: int = 24) -> Any:
     """Cut near-black letterbox bars off every edge of a pixbuf."""
     width = pixbuf.get_width()
     height = pixbuf.get_height()
-    data = pixbuf.get_pixels()
+    data = pixel_bytes(pixbuf)
     stride = pixbuf.get_rowstride()
     channels = pixbuf.get_n_channels()
 

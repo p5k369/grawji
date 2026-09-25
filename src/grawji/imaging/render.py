@@ -7,52 +7,21 @@ from typing import Any
 
 import cairo
 import gi
-import numpy as np
-from numpy.typing import NDArray
 
 gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, GdkPixbuf, GLib
 
 from grawji.crop import FULL_RECT, CropRotate, rotated_size
+from grawji.imaging.perspective import warp_cached
 from grawji.imaging.pixbufs import orient_exif
+from grawji.keystone import Keystone
 
 _ROTATIONS = {
     90: GdkPixbuf.PixbufRotation.CLOCKWISE,
     180: GdkPixbuf.PixbufRotation.UPSIDEDOWN,
     270: GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE,
 }
-
-# Working size for edge analysis
-_GRAY_TARGET = 400
-
-
-def gray_rows(pixbuf: Any, target: int = _GRAY_TARGET) -> list[list[int]]:
-    """Downscale a pixbuf and return grayscale rows."""
-    width = pixbuf.get_width()
-    height = pixbuf.get_height()
-    scale = target / max(width, height)
-    if scale < 1.0:
-        width = max(1, round(width * scale))
-        height = max(1, round(height * scale))
-        pixbuf = pixbuf.scale_simple(
-            width, height, GdkPixbuf.InterpType.BILINEAR
-        )
-    channels = pixbuf.get_n_channels()
-    rows = pixel_rows(pixbuf)
-    rgb = rows[:, : width * channels].reshape(height, width, channels)
-    gray = rgb[:, :, :3].sum(axis=2, dtype=np.int32)
-    return [row.tolist() for row in gray]
-
-
-def pixel_rows(pixbuf: Any) -> NDArray[np.uint8]:
-    """A pixbuf's bytes as a height by rowstride array."""
-    height, stride = pixbuf.get_height(), pixbuf.get_rowstride()
-    pixels = np.frombuffer(pixbuf.get_pixels(), dtype=np.uint8)
-    missing = height * stride - pixels.size
-    if missing > 0:
-        pixels = np.concatenate((pixels, np.zeros(missing, dtype=np.uint8)))
-    return pixels[: height * stride].reshape(height, stride)
 
 
 def parse_aspect(label: str) -> float | None:
@@ -159,6 +128,16 @@ def bake_pixbuf(pixbuf: Any, crop: CropRotate, *, rect: bool = True) -> Any:
         rect: When False the crop rect is skipped and the whole rotated
             frame is returned.
     """
+    if crop.has_warp:
+        pixbuf = warp_cached(
+            pixbuf,
+            Keystone(
+                crop.keystone_rotation,
+                crop.lensshift_v,
+                crop.lensshift_h,
+                crop.shear,
+            ),
+        )
     pixbuf = orient_pixbuf(pixbuf, crop.orientation)
     use_rect = crop.rect if rect else FULL_RECT
     if crop.angle == 0.0 and use_rect == FULL_RECT:

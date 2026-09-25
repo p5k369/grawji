@@ -111,6 +111,20 @@ def present_about(parent: Gtk.Widget) -> None:
         [
             "rawji by pinpox https://github.com/pinpox/rawji",
             "petabyt https://github.com/petabyt",
+            "darktable https://github.com/darktable-org/darktable",
+            "Michael F. Hutt https://github.com/huttmf/nelder-mead",
         ],
+    )
+    about.add_legal_section(
+        "Automatic perspective correction",
+        "© 2016-2026 darktable developers",
+        Gtk.License.GPL_3_0,
+        None,
+    )
+    about.add_legal_section(
+        "Nelder-Mead simplex",
+        "© 1997-2011 Michael F. Hutt",
+        Gtk.License.MIT_X11,
+        None,
     )
     about.present(parent)
