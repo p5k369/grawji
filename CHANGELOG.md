@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0](https://github.com/p5k369/grawji/compare/v0.5.1...v0.6.0) (2026-09-25)
+
+
+### Features
+
+* **browse:** add a grid view of the folder ([#145](https://github.com/p5k369/grawji/issues/145)) ([7d51653](https://github.com/p5k369/grawji/commit/7d51653477402de2c66f374f89764b11885d38ea))
+* **crop:** automatic perspective correction ([#149](https://github.com/p5k369/grawji/issues/149)) ([237d65e](https://github.com/p5k369/grawji/commit/237d65e9c103c5649532a84a9c80321ed79f7c9c))
+* **export:** add 16-bit JPEG XL output ([#136](https://github.com/p5k369/grawji/issues/136)) ([f4fe4a3](https://github.com/p5k369/grawji/commit/f4fe4a39586d97a9d8ed10224abe3de39d4aa37b))
+* **export:** add 8-bit JPEG XL output ([#142](https://github.com/p5k369/grawji/issues/142)) ([4a725e0](https://github.com/p5k369/grawji/commit/4a725e0cff711abf7d7e3ff251a8f3f73a130718))
+* **export:** add HEIF output rendered by the camera ([#132](https://github.com/p5k369/grawji/issues/132)) ([9dd7a47](https://github.com/p5k369/grawji/commit/9dd7a47f8c30ff03ebe221a51fde839c61714d3b))
+* **export:** add TIFF 8-bit and 16-bit export support ([#135](https://github.com/p5k369/grawji/issues/135)) ([7ae7b9a](https://github.com/p5k369/grawji/commit/7ae7b9a206c41fb3deac69136fe314091f6fba97))
+* **export:** optional JPEG XL output and passthrough for untouched single exports added ([#128](https://github.com/p5k369/grawji/issues/128)) ([18c8ec8](https://github.com/p5k369/grawji/commit/18c8ec8cf230e9b0cca14890723071d3b98f138f))
+
+
+### Bug Fixes
+
+* **export:** turn a rotated TIFF upright before editing it ([#139](https://github.com/p5k369/grawji/issues/139)) ([ca4bd4a](https://github.com/p5k369/grawji/commit/ca4bd4a02d1e82f1a225d37e073276df52b6b69c))
+* **files:** advance off a trashed image and keep the strip position ([#147](https://github.com/p5k369/grawji/issues/147)) ([5e68089](https://github.com/p5k369/grawji/commit/5e68089b76a3286ef45f7271d9a678622f1386e2))
+* **flatpak:** ship cjxl so JPEG XL exports work in the sandbox ([#130](https://github.com/p5k369/grawji/issues/130)) ([205925a](https://github.com/p5k369/grawji/commit/205925ad6b3247322c6d354e0d792909a49c8734))
+* **level:** prefer the smaller correction when ranking suggestions ([#140](https://github.com/p5k369/grawji/issues/140)) ([91293c1](https://github.com/p5k369/grawji/commit/91293c1c2b6a97fa0ef18359ef4aec9559987158))
+
+
+### Performance
+
+* **preview:** vectorise the clipping overlay and the gray rows ([#133](https://github.com/p5k369/grawji/issues/133)) ([a53d493](https://github.com/p5k369/grawji/commit/a53d493f878fe4600cf813a5dcb6ae10ff17117e))
+* skip the histogram when hidden, downscale it off-thread ([#150](https://github.com/p5k369/grawji/issues/150)) ([b0483d6](https://github.com/p5k369/grawji/commit/b0483d6593ad849263318e3daacb1efaeb390c0b))
+
 ## [0.5.1](https://github.com/p5k369/grawji/compare/v0.5.0...v0.5.1) (2026-09-14)
 
 
