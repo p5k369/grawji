@@ -49,6 +49,23 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.0" date="2026-09-25">
+      <description>
+        <p>This release brings new export formats, a folder grid view, and smoother previews.</p>
+        <ul>
+          <li>Browse your photos in a new grid view of the folder</li>
+          <li>Correct perspective automatically while cropping</li>
+          <li>Export to JPEG XL in 8-bit and 16-bit, with optional passthrough for untouched single exports</li>
+          <li>Export to HEIF rendered by the camera</li>
+          <li>Export to TIFF in 8-bit and 16-bit</li>
+          <li>Rotated TIFFs are turned upright before editing</li>
+          <li>JPEG XL export now works in the Flatpak sandbox</li>
+          <li>Leveling suggestions now favor the smaller correction</li>
+          <li>After trashing an image, the next one is selected and the filmstrip keeps its position</li>
+          <li>Faster previews: smoother clipping overlay and gray rows, and the histogram is skipped when hidden and scaled in the background</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-09-14">
       <description>
         <p>This small update fixes a display issue and smooths out camera reconnection.</p>
