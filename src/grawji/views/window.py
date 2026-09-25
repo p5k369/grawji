@@ -168,6 +168,7 @@ class MainWindow(Adw.ApplicationWindow):
     preview_view: PreviewView = Gtk.Template.Child()
     recipe_panel: RecipePanel = Gtk.Template.Child()
     original_picture = Gtk.Template.Child()
+    left_stack = Gtk.Template.Child()
     nav_overlay = Gtk.Template.Child()
     exif_group = Gtk.Template.Child()
     filmstrip_slot = Gtk.Template.Child()
@@ -218,12 +219,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._connect_recipe_panel()
         self.export_button.connect("clicked", self._on_export_clicked)
 
-        self._navigator = Navigator(
-            area=self.nav_overlay,
-            scroll=self.preview_view.scroll,
-            picture=self.original_picture,
-            get_rotation=lambda: self.preview_view.rotation,
-        )
+        self._init_navigator()
 
         self._fileops = FileOpsController(
             parent=self,
@@ -764,11 +760,54 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.set_native_size(native)
         if pixbuf is not None:
             self.preview_view.show_pixbuf(pixbuf)
-            self.original_picture.set_paintable(texture_for_pixbuf(pixbuf))
         else:
             self.preview_view.clear_source()
+        self._set_navigator_pixbuf(pixbuf)
         self._populate_exif_rows(rows)
         return GLib.SOURCE_REMOVE
+
+    def _init_navigator(self) -> None:
+        """Wire the Info-tab original thumbnail and its lazy texture."""
+        self._navigator = Navigator(
+            area=self.nav_overlay,
+            scroll=self.preview_view.scroll,
+            picture=self.original_picture,
+            get_rotation=lambda: self.preview_view.rotation,
+        )
+        self._navigator_pixbuf: Any | None = None
+        self._navigator_dirty = False
+        self.left_stack.connect(
+            "notify::visible-child", self._on_left_page_changed
+        )
+
+    def _info_visible(self) -> bool:
+        """Whether the sidebar's Info tab (the navigator) is showing."""
+        return self.left_stack.get_visible_child_name() == "info"
+
+    def _set_navigator_pixbuf(self, pixbuf: Any) -> None:
+        """Feed the Info-tab original, building its texture only if shown."""
+        self._navigator_pixbuf = pixbuf
+        if pixbuf is None:
+            self.original_picture.set_paintable(None)
+            self._navigator_dirty = False
+        elif self._info_visible():
+            self.original_picture.set_paintable(texture_for_pixbuf(pixbuf))
+            self._navigator_dirty = False
+        else:
+            self._navigator_dirty = True
+
+    def _on_left_page_changed(self, *_args: object) -> None:
+        """Build the deferred navigator texture when Info becomes visible."""
+        if (
+            self._navigator_dirty
+            and self._navigator_pixbuf is not None
+            and self._info_visible()
+        ):
+            self.original_picture.set_paintable(
+                texture_for_pixbuf(self._navigator_pixbuf)
+            )
+            self._navigator_dirty = False
+            self._navigator.queue_draw()
 
     def _on_opened(self, generation: int, _result: object) -> None:
         """Show the first preview, applying the sticky recipe selection."""
