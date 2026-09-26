@@ -144,6 +144,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         """Follow the shared folder."""
         if reason == "folder":
             self._thumbs.clear()
+            self._thumbs.warm(self._folder.paths)
             self._thumbs.prefetch(self._folder.paths)
             self._model_filter.changed(Gtk.FilterChange.DIFFERENT)
             self._thumbs.schedule(fresh=True)
