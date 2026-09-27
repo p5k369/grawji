@@ -23,6 +23,16 @@ finish-args:
   # that grawji stores next to each RAF, and for exports written outside the file-chooser portal.
   - --filesystem=host
 
+cleanup:
+  - /include
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /share/gir-1.0
+  - /share/man
+  - /bin/exiv2
+  - '*.a'
+  - '*.la'
+
 modules:
   - name: libusb
     sources:
