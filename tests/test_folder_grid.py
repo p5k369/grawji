@@ -84,6 +84,36 @@ def test_a_late_thumbnail_for_a_recycled_tile_is_dropped(grid: Any) -> None:
     grid._thumbs._on_thumb(str(grid.folder / "a.RAF"), _pixbuf(), None)
 
 
+def test_a_warmed_thumb_paints_a_new_tile_instantly(grid: Any) -> None:
+    """A warmed Exif thumb serves a binding tile without a worker."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    thumbs = grid._thumbs
+    path = str(grid.folder / "a.RAF")
+    thumbs._on_quick(path, _pixbuf())
+    assert path in thumbs._quick
+    tile, picture = Gtk.Box(), Gtk.Picture()
+    thumbs.want(tile, picture, path)
+    # Painted from the warm store, but still waiting for the sharp pass.
+    assert picture.get_paintable() is thumbs._quick[path]
+    assert tile in thumbs._waiting
+
+
+def test_warm_prunes_thumbs_of_frames_that_left(grid: Any) -> None:
+    """Changing folders drops the old folder's warmed thumbs."""
+    thumbs = grid._thumbs
+    thumbs._quick = {"/old/x.RAF": object()}
+    asked: list[list[str]] = []
+    thumbs._loader.sweep_quick = lambda paths, _ready: asked.append(paths)
+    kept = str(grid.folder / "a.RAF")
+    thumbs.warm([kept])
+    assert thumbs._quick == {}
+    assert asked == [[kept]]
+
+
 def _pixbuf() -> Any:
     """A one pixel pixbuf, enough to build a texture from."""
     import gi

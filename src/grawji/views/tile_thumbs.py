@@ -53,6 +53,9 @@ class TileThumbs:
         self._waiting: dict[Gtk.Widget, tuple[Gtk.Picture, str]] = {}
         self._pending: dict[Gtk.Widget, tuple[Gtk.Picture, str]] = {}
         self._textures: dict[str, Any] = {}
+        # Warmed Exif thumbnails for the whole folder, so a fast scroll
+        # can always paint instantly while the real decode catches up.
+        self._quick: dict[str, Any] = {}
         self._queue: list[str] = []
         self._cursor = 0
         self._ahead: set[str] = set()
@@ -91,7 +94,9 @@ class TileThumbs:
             self._paint(picture, known)
             self._waiting.pop(tile, None)
             return
-        rough = self._stand_in(path) if self._stand_in else None
+        rough = self._quick.get(path)
+        if rough is None and self._stand_in is not None:
+            rough = self._stand_in(path)
         picture.set_paintable(rough)
         self._waiting[tile] = (picture, path)
         self.schedule()
@@ -165,6 +170,33 @@ class TileThumbs:
             self._prefetch_id = GLib.timeout_add(
                 _PREFETCH_DELAY_MS, self._prefetch_batch
             )
+
+    def warm(self, paths: list[str]) -> None:
+        """Pre-decode every frame's Exif thumb, so scrolling never blanks."""
+        wanted = set(paths)
+        self._quick = {
+            path: texture
+            for path, texture in self._quick.items()
+            if path in wanted
+        }
+        missing = [
+            path
+            for path in paths
+            if path not in self._quick and path not in self._textures
+        ]
+        if missing:
+            self._loader.sweep_quick(missing, self._on_quick)
+
+    def _on_quick(self, path: str, pixbuf: Any) -> None:
+        """Keep a warmed Exif thumb and paint any tile still empty."""
+        if path in self._textures:
+            return
+        texture = texture_for_pixbuf(pixbuf)
+        self._quick[path] = texture
+        for tracked in (self._waiting, self._pending):
+            for picture, wanted in tracked.values():
+                if wanted == path and picture.get_paintable() is None:
+                    picture.set_paintable(texture)
 
     def _prefetch_batch(self) -> bool:
         """Ask for a few more frames, unless the viewport is waiting."""
@@ -265,19 +297,25 @@ class TileThumbs:
             return _MARGIN_PX, _LEAD_PX
         return _MARGIN_PX, _MARGIN_PX
 
-    def _on_thumb(self, path: str, pixbuf: Any, meta: ThumbMeta) -> None:
+    def _on_thumb(
+        self, path: str, pixbuf: Any, meta: ThumbMeta, final: bool = True
+    ) -> None:
         """Paint a decoded thumbnail on every tile still waiting for it."""
-        self._ahead.discard(path)
         texture = texture_for_pixbuf(pixbuf)
         self._textures[path] = texture
         self._evict()
         for tile, (picture, wanted) in list(self._pending.items()):
             if wanted == path:
                 self._paint(picture, texture)
-                del self._pending[tile]
+                if final:
+                    del self._pending[tile]
         for tile, (picture, wanted) in list(self._waiting.items()):
             if wanted == path:
                 self._paint(picture, texture)
-                del self._waiting[tile]
+                if final:
+                    del self._waiting[tile]
+        if not final:
+            return
+        self._ahead.discard(path)
         if self._on_meta is not None:
             self._on_meta(path, meta, pixbuf.get_width(), pixbuf.get_height())

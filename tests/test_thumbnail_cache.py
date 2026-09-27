@@ -113,6 +113,111 @@ def test_the_cache_remembers_what_a_frame_is(tmp_path: Path) -> None:
     assert len(remembered_facts(tmp_path)) == 1
 
 
+def test_a_sharp_loader_paints_the_exif_thumb_first(tmp_path: Path) -> None:
+    """A sharp request emits the quick thumb, then the full decode."""
+    from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
+
+    loader = ThumbnailLoader(
+        height=240,
+        cache_dir=tmp_path,
+        workers=1,
+        sharp=True,
+        dispatch=lambda call: call(),
+    )
+    meta = ThumbMeta("X-E5", "", "")
+    loader._quick_thumb = lambda _path: ("QUICK", meta)
+    loader._thumbnail = lambda _path: ("SHARP", meta)
+    got: list[tuple[Any, Any, Any, bool]] = []
+    loader._request_one("/frames/a.RAF", lambda *a: got.append(a))
+    assert [(pixbuf, final) for _p, pixbuf, _m, final in got] == [
+        ("QUICK", False),
+        ("SHARP", True),
+    ]
+
+
+def test_a_failed_exif_thumb_still_yields_the_sharp(tmp_path: Path) -> None:
+    """A missing Exif thumbnail must not stop the full decode."""
+    from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
+
+    loader = ThumbnailLoader(
+        height=240,
+        cache_dir=tmp_path,
+        workers=1,
+        sharp=True,
+        dispatch=lambda call: call(),
+    )
+    loader._quick_thumb = lambda _path: None
+    loader._thumbnail = lambda _path: ("SHARP", ThumbMeta("", "", ""))
+    got: list[tuple[Any, Any, Any, bool]] = []
+    loader._request_one("/frames/a.RAF", lambda *a: got.append(a))
+    assert [(pixbuf, final) for _p, pixbuf, _m, final in got] == [
+        ("SHARP", True)
+    ]
+
+
+def test_a_plain_loader_paints_once(tmp_path: Path) -> None:
+    """A non-sharp loader has no quick pass, just the one decode."""
+    from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
+
+    loader = ThumbnailLoader(
+        height=110,
+        cache_dir=tmp_path,
+        workers=1,
+        dispatch=lambda call: call(),
+    )
+    loader._thumbnail = lambda _path: ("THUMB", ThumbMeta("", "", ""))
+    got: list[tuple[Any, Any, Any, bool]] = []
+    loader._request_one("/frames/a.RAF", lambda *a: got.append(a))
+    assert [(pixbuf, final) for _p, pixbuf, _m, final in got] == [
+        ("THUMB", True)
+    ]
+
+
+def test_the_quick_sweep_warms_every_frame(tmp_path: Path) -> None:
+    """A folder sweep hands out one Exif thumb per path."""
+    from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
+
+    loader = ThumbnailLoader(
+        height=240,
+        cache_dir=tmp_path,
+        workers=1,
+        sharp=True,
+        dispatch=lambda call: call(),
+    )
+    meta = ThumbMeta("", "", "")
+    loader._quick_thumb = lambda path: (f"QUICK:{path}", meta)
+    got: list[tuple[str, Any]] = []
+    loader.sweep_quick(
+        ["/frames/a.RAF", "/frames/b.RAF"], lambda *a: got.append(a)
+    )
+    assert loader._quick_pool is not None
+    loader._quick_pool.shutdown(wait=True)
+    assert got == [
+        ("/frames/a.RAF", "QUICK:/frames/a.RAF"),
+        ("/frames/b.RAF", "QUICK:/frames/b.RAF"),
+    ]
+
+
+def test_a_newer_quick_sweep_supersedes_the_old(tmp_path: Path) -> None:
+    """Jobs queued for a folder already left return unread."""
+    from grawji.imaging.thumbnails import ThumbMeta, ThumbnailLoader
+
+    loader = ThumbnailLoader(
+        height=240,
+        cache_dir=tmp_path,
+        workers=1,
+        sharp=True,
+        dispatch=lambda call: call(),
+    )
+    meta = ThumbMeta("", "", "")
+    loader._quick_thumb = lambda path: (f"QUICK:{path}", meta)
+    got: list[str] = []
+    loader._quick_wanted = {"/frames/new.RAF"}
+    loader._sweep_quick_one("/frames/old.RAF", lambda p, _pb: got.append(p))
+    loader._sweep_quick_one("/frames/new.RAF", lambda p, _pb: got.append(p))
+    assert got == ["/frames/new.RAF"]
+
+
 def test_the_metadata_sweep_reads_only_the_head(tmp_path: Path) -> None:
     """A folder's filters must not wait for full-file reads."""
     from grawji.imaging import thumbnails

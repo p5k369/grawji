@@ -1,4 +1,4 @@
-"""Filmstrip thumbnail pipeline: EXIF thumbs, disk cache, decoding.
+"""Filmstrip thumbnail pipeline.
 
 Decodes RAF thumbnails in parallel on worker threads and dispatches
 each finished pixbuf back to the strip on the main loop.
@@ -142,8 +142,9 @@ class Facts(NamedTuple):
         return ThumbMeta(self.model, self.lens, self.focal)
 
 
-OnOne = Callable[[str, Any, ThumbMeta], None]
+OnOne = Callable[[str, Any, ThumbMeta, bool], None]
 OnMeta = Callable[[str, ThumbMeta, "float | None"], None]
+OnQuick = Callable[[str, Any], None]
 
 
 class ThumbnailLoader:
@@ -179,6 +180,8 @@ class ThumbnailLoader:
         self._real_dirs: dict[Path, Path] = {}
         self._pool: ThreadPoolExecutor | None = None
         self._meta_pool: ThreadPoolExecutor | None = None
+        self._quick_pool: ThreadPoolExecutor | None = None
+        self._quick_wanted: set[str] = set()
         GExiv2.initialize()
 
     def set_height(self, height: int) -> None:
@@ -201,6 +204,25 @@ class ThumbnailLoader:
         for path in paths:
             self._meta_pool.submit(self._sweep_one, path, on_ready)
 
+    def sweep_quick(self, paths: list[str], on_ready: OnQuick) -> None:
+        """Decode every path's Exif thumbnail on a side pool."""
+        self._quick_wanted = set(paths)
+        if self._quick_pool is None:
+            self._quick_pool = ThreadPoolExecutor(max_workers=2)
+        for path in paths:
+            self._quick_pool.submit(self._sweep_quick_one, path, on_ready)
+
+    def _sweep_quick_one(self, path: str, on_ready: OnQuick) -> None:
+        """Decode one Exif thumbnail and hand it to the main loop."""
+        if path not in self._quick_wanted:
+            return
+        try:
+            quick = self._quick_thumb(path)
+        except (ValueError, OSError, GLib.Error):
+            return
+        if quick is not None:
+            self._dispatch(partial(on_ready, path, quick[0]))
+
     def _sweep_one(self, path: str, on_ready: OnMeta) -> None:
         """Read one file's metadata and hand it to the main loop."""
         found = read_frame_meta(path)
@@ -216,11 +238,32 @@ class ThumbnailLoader:
 
     def _request_one(self, path: str, on_ready: OnOne) -> None:
         """Produce one thumbnail for a single request and dispatch it."""
+        if self._sharp:
+            try:
+                quick = self._quick_thumb(path)
+            except (ValueError, OSError, GLib.Error):
+                quick = None
+            if quick is not None:
+                self._dispatch(
+                    partial(on_ready, path, quick[0], quick[1], False)
+                )
         try:
             pixbuf, meta = self._thumbnail(path)
         except (ValueError, OSError, GLib.Error):
             return
-        self._dispatch(partial(on_ready, path, pixbuf, meta))
+        self._dispatch(partial(on_ready, path, pixbuf, meta, True))
+
+    def _quick_thumb(self, path: str) -> tuple[Any, ThumbMeta] | None:
+        """Decode just the RAF's Exif thumbnail, for the instant first pass."""
+        exif_thumb = self._exif_thumbnail_of(path)
+        if exif_thumb is None:
+            return None
+        data, orientation, meta, ratio = exif_thumb
+        pixbuf = self._unpadded(self._decode_bytes(data), ratio)
+        pixbuf = orient_exif(pixbuf, orientation)
+        if pixbuf.get_height() > self._height:
+            pixbuf = self._to_height(pixbuf)
+        return pixbuf, meta
 
     def _thumbnail(self, path: str) -> tuple[Any, ThumbMeta]:
         """Return path's pixbuf and meta, cached when possible."""
