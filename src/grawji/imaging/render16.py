@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from typing import cast
 
+import lsdetect
 import numpy as np
 from numpy.typing import NDArray
 
@@ -92,33 +94,12 @@ def _warp(samples: Samples, keystone: Keystone) -> Samples:
     height, width = samples.shape[:2]
     inverse = np.linalg.inv(homography(keystone, width, height))
     scale, off_x, off_y = frame_transform(keystone, width, height)
-    out = np.empty((height, width, _CHANNELS), dtype=np.uint16)
-    cols = np.arange(width, dtype=np.float64) / scale + off_x
-    for start in range(0, height, _BAND_ROWS):
-        stop = min(start + _BAND_ROWS, height)
-        rows = np.arange(start, stop, dtype=np.float64) / scale + off_y
-        plane_x = cols[None, :]
-        plane_y = rows[:, None]
-        denom = (
-            inverse[2, 0] * plane_x + inverse[2, 1] * plane_y + inverse[2, 2]
-        )
-        src_x = (
-            inverse[0, 0] * plane_x + inverse[0, 1] * plane_y + inverse[0, 2]
-        ) / denom
-        src_y = (
-            inverse[1, 0] * plane_x + inverse[1, 1] * plane_y + inverse[1, 2]
-        ) / denom
-        sampled = _sample_bilinear(
-            samples, src_x.astype(np.float32), src_y.astype(np.float32)
-        )
-        valid = (
-            (src_x >= 0.0)
-            & (src_x <= width - 1)
-            & (src_y >= 0.0)
-            & (src_y <= height - 1)
-        )
-        out[start:stop] = sampled * valid[..., None]
-    return out
+    matrix = cast(
+        "tuple[float, float, float, float, float, float, float, float, float]",
+        tuple(float(value) for value in inverse.ravel()),
+    )
+    contiguous: Samples = np.ascontiguousarray(samples)
+    return lsdetect.warp_rgb(contiguous, matrix, scale, off_x, off_y)
 
 
 def _rotate_crop(samples: Samples, crop: CropRotate) -> Samples:
