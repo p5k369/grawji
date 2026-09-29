@@ -108,3 +108,30 @@ def orient_exif(pixbuf: Any, orientation: int) -> Any:
     if flip:
         pixbuf = pixbuf.flip(True) or pixbuf
     return pixbuf
+
+
+# Rows processed per band, so a large frame is not widened to float at
+# once.
+_RESIZE_BAND = 256
+
+
+def area_resize(samples: NDArray[Any], out_w: int, out_h: int) -> NDArray[Any]:
+    """Downscale by averaging each output pixel's source area."""
+    height, width, channels = samples.shape
+    x_edges = np.linspace(0, width, out_w + 1).round().astype(np.int32)
+    y_edges = np.linspace(0, height, out_h + 1).round().astype(np.int32)
+    x_counts = np.diff(x_edges)[None, :, None]
+    out = np.empty((out_h, out_w, channels), dtype=samples.dtype)
+    for start in range(0, out_h, _RESIZE_BAND):
+        stop = min(start + _RESIZE_BAND, out_h)
+        band = samples[y_edges[start] : y_edges[stop]]
+        rows = np.add.reduceat(
+            band.astype(np.float32),
+            y_edges[start:stop] - y_edges[start],
+            axis=0,
+        )
+        rows /= np.diff(y_edges[start : stop + 1])[:, None, None]
+        cols = np.add.reduceat(rows, x_edges[:-1], axis=1)
+        cols /= x_counts
+        out[start:stop] = np.rint(cols).astype(samples.dtype)
+    return out

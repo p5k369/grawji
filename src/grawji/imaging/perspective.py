@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import math
+from typing import Any, Literal
 
 import gi
 
@@ -12,6 +13,7 @@ import lsdetect
 import numpy as np
 from gi.repository import GdkPixbuf, GLib
 
+from grawji.crop import rotated_size
 from grawji.imaging.pixbufs import pixel_rows
 from grawji.keystone import Keystone, frame_transform, homography
 
@@ -45,7 +47,11 @@ def is_cached(pixbuf: Any, correction: Keystone) -> bool:
     )
 
 
-def warp_pixbuf(pixbuf: Any, correction: Keystone) -> Any:
+def warp_pixbuf(
+    pixbuf: Any,
+    correction: Keystone,
+    resample: Literal["bilinear", "lanczos3"] = "bilinear",
+) -> Any:
     """The pixbuf with the correction applied."""
     width, height = pixbuf.get_width(), pixbuf.get_height()
     channels = pixbuf.get_n_channels()
@@ -72,6 +78,7 @@ def warp_pixbuf(pixbuf: Any, correction: Keystone) -> Any:
         float(scale),
         float(off_x),
         float(off_y),
+        filter=resample,
     )
     return GdkPixbuf.Pixbuf.new_from_bytes(
         GLib.Bytes.new(out.tobytes()),
@@ -81,4 +88,42 @@ def warp_pixbuf(pixbuf: Any, correction: Keystone) -> Any:
         width,
         height,
         width * 3,
+    )
+
+
+def rotate_pixbuf(pixbuf: Any, angle: float, rect: tuple[float, ...]) -> Any:
+    """Straighten a pixbuf by angle and cut rect out."""
+    width, height = pixbuf.get_width(), pixbuf.get_height()
+    channels = pixbuf.get_n_channels()
+    source = pixel_rows(pixbuf)[:, : width * channels].reshape(
+        height, width, channels
+    )[:, :, :3]
+    frame_w, frame_h = rotated_size(width, height, angle)
+    left, top, rect_w, rect_h = rect
+    out_w = max(1, round(rect_w * frame_w))
+    out_h = max(1, round(rect_h * frame_h))
+    radians = math.radians(angle)
+    cos, sin = math.cos(radians), math.sin(radians)
+    k1 = 0.5 + left * frame_w - frame_w / 2
+    k2 = 0.5 + top * frame_h - frame_h / 2
+    cx = cos * k1 + sin * k2 + width / 2 - 0.5
+    cy = -sin * k1 + cos * k2 + height / 2 - 0.5
+    matrix = (cos, sin, cx, -sin, cos, cy, 0.0, 0.0, 1.0)
+    out = lsdetect.warp_rgb(
+        np.ascontiguousarray(source),
+        matrix,
+        1.0,
+        0.0,
+        0.0,
+        filter="lanczos3",
+        out_size=(out_w, out_h),
+    )
+    return GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(out.tobytes()),
+        GdkPixbuf.Colorspace.RGB,
+        False,
+        8,
+        out_w,
+        out_h,
+        out_w * 3,
     )

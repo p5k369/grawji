@@ -12,7 +12,7 @@ license = "GPL-3.0-or-later"
 authors = [{ name = "Patrick Zwerschke" }]
 dependencies = [
   "PyGObject",
-  "lsdetect>=0.2",
+  "lsdetect>=0.3",
   "numpy",
   "pyusb",
   # rawji is not on PyPI and does not bump versions

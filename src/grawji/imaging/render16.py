@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 from grawji.crop import FULL_RECT, CropRotate, rotated_size
 from grawji.imaging.heif_codec import DecodedImage
+from grawji.imaging.pixbufs import area_resize
 from grawji.keystone import Keystone, frame_transform, homography
 
 _ROTATIONS = (90, 180, 270)
@@ -30,7 +31,6 @@ _CHANNELS = 3
 # Half a pixel
 _HALF = 0.5
 # Output rows resampled at a time, to bound the working set.
-_BAND_ROWS = 256
 Samples = NDArray[np.uint16]
 
 
@@ -99,7 +99,9 @@ def _warp(samples: Samples, keystone: Keystone) -> Samples:
         tuple(float(value) for value in inverse.ravel()),
     )
     contiguous: Samples = np.ascontiguousarray(samples)
-    return lsdetect.warp_rgb(contiguous, matrix, scale, off_x, off_y)
+    return lsdetect.warp_rgb(
+        contiguous, matrix, scale, off_x, off_y, filter="lanczos3"
+    )
 
 
 def _rotate_crop(samples: Samples, crop: CropRotate) -> Samples:
@@ -111,47 +113,24 @@ def _rotate_crop(samples: Samples, crop: CropRotate) -> Samples:
     out_h = max(1, round(rect_h * frame_h))
     radians = math.radians(crop.angle)
     cos, sin = math.cos(radians), math.sin(radians)
-    xs = np.arange(out_w, dtype=np.float32) + _HALF + left * frame_w
-    xs -= frame_w / 2
-    out = np.empty((out_h, out_w, _CHANNELS), dtype=np.uint16)
-    for start in range(0, out_h, _BAND_ROWS):
-        stop = min(start + _BAND_ROWS, out_h)
-        ys = np.arange(start, stop, dtype=np.float32) + _HALF + top * frame_h
-        ys -= frame_h / 2
-        grid_x, grid_y = xs[None, :], ys[:, None]
-        src_x = cos * grid_x + sin * grid_y + width / 2 - _HALF
-        src_y = -sin * grid_x + cos * grid_y + height / 2 - _HALF
-        out[start:stop] = _sample_bilinear(samples, src_x, src_y)
-    return out
-
-
-def _sample_bilinear(
-    samples: Samples, src_x: NDArray[np.float32], src_y: NDArray[np.float32]
-) -> Samples:
-    """Bilinear lookup of float coordinates, edges clamped."""
-    height, width = samples.shape[:2]
-    x0 = np.floor(src_x).astype(np.int32)
-    y0 = np.floor(src_y).astype(np.int32)
-    fx = (src_x - x0).astype(np.float32)[..., None]
-    fy = (src_y - y0).astype(np.float32)[..., None]
-    x0c = np.clip(x0, 0, width - 1)
-    x1c = np.clip(x0 + 1, 0, width - 1)
-    y0c = np.clip(y0, 0, height - 1)
-    y1c = np.clip(y0 + 1, 0, height - 1)
-    top = samples[y0c, x0c].astype(np.float32)
-    top += (samples[y0c, x1c].astype(np.float32) - top) * fx
-    bottom = samples[y1c, x0c].astype(np.float32)
-    bottom += (samples[y1c, x1c].astype(np.float32) - bottom) * fx
-    top += (bottom - top) * fy
-    # Outside the source the frame is black
-    inside = (
-        (src_x >= -_HALF)
-        & (src_x <= width - _HALF)
-        & (src_y >= -_HALF)
-        & (src_y <= height - _HALF)
+    k1 = _HALF + left * frame_w - frame_w / 2
+    k2 = _HALF + top * frame_h - frame_h / 2
+    cx = cos * k1 + sin * k2 + width / 2 - _HALF
+    cy = -sin * k1 + cos * k2 + height / 2 - _HALF
+    matrix = cast(
+        "tuple[float, float, float, float, float, float, float, float, float]",
+        (cos, sin, cx, -sin, cos, cy, 0.0, 0.0, 1.0),
     )
-    top *= inside[..., None]
-    return np.rint(top).astype(np.uint16)
+    contiguous: Samples = np.ascontiguousarray(samples)
+    return lsdetect.warp_rgb(
+        contiguous,
+        matrix,
+        1.0,
+        0.0,
+        0.0,
+        filter="lanczos3",
+        out_size=(out_w, out_h),
+    )
 
 
 def scale_to_edge(samples: Samples, max_edge: int) -> Samples:
@@ -163,23 +142,7 @@ def scale_to_edge(samples: Samples, max_edge: int) -> Samples:
     scale = max_edge / longer
     out_w = max(1, round(width * scale))
     out_h = max(1, round(height * scale))
-    x_edges = np.linspace(0, width, out_w + 1).round().astype(np.int32)
-    y_edges = np.linspace(0, height, out_h + 1).round().astype(np.int32)
-    x_counts = np.diff(x_edges)[None, :, None]
-    out = np.empty((out_h, out_w, _CHANNELS), dtype=np.uint16)
-    for start in range(0, out_h, _BAND_ROWS):
-        stop = min(start + _BAND_ROWS, out_h)
-        band = samples[y_edges[start] : y_edges[stop]]
-        rows = np.add.reduceat(
-            band.astype(np.float32),
-            y_edges[start:stop] - y_edges[start],
-            axis=0,
-        )
-        rows /= np.diff(y_edges[start : stop + 1])[:, None, None]
-        cols = np.add.reduceat(rows, x_edges[:-1], axis=1)
-        cols /= x_counts
-        out[start:stop] = np.rint(cols).astype(np.uint16)
-    return out
+    return area_resize(samples, out_w, out_h)
 
 
 def add_border(
