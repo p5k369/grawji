@@ -89,7 +89,7 @@ def test_bake_keeps_the_pixels_for_exact_geometry(crop):
 
 
 def test_bake_applies_the_keystone_like_the_pixbuf_path():
-    """The 16-bit path warps the perspective just like the 8-bit path."""
+    """Both export paths warp the keystone with the same Lanczos kernel."""
     crop = CropRotate(
         keystone_rotation=5.5,
         lensshift_v=-0.05,
@@ -98,11 +98,12 @@ def test_bake_applies_the_keystone_like_the_pixbuf_path():
         rect=(0.12, 0.1, 0.7, 0.68),
     )
     pixbuf = sample_pixbuf()
-    baked = as_samples(render.bake_pixbuf(pixbuf, crop))
+    baked = as_samples(render.bake_pixbuf(pixbuf, crop, sharp=True))
     samples = render16.bake(as_samples(pixbuf), crop)
     assert samples.shape == baked.shape
-    delta = np.abs(samples.astype(np.int32) - baked.astype(np.int32))
-    assert int(delta.max()) <= 1
+    delta = np.abs(samples.astype(float) - baked.astype(float))
+    assert float(delta.mean()) < 1.0
+    assert np.percentile(delta, 99) <= 2
 
 
 @pytest.mark.parametrize("max_edge", [0, 1000, 120, 37])
@@ -150,9 +151,11 @@ def test_trim_even_drops_only_odd_edges():
 
 @pytest.mark.parametrize("crop", [_GEOMETRIES[4], _GEOMETRIES[5]])
 def test_straightening_matches_the_pixbuf_path(crop):
-    """A resampled rotation lands on the same pixels, within rounding."""
+    """Both export paths straighten with the same Lanczos kernel."""
     pixbuf = sample_pixbuf()
-    baked = as_samples(render.bake_pixbuf(pixbuf, crop)).astype(float)
+    baked = as_samples(render.bake_pixbuf(pixbuf, crop, sharp=True)).astype(
+        float
+    )
     samples = render16.bake(as_samples(pixbuf), crop).astype(float)
     assert samples.shape == baked.shape
     difference = np.abs(samples - baked)

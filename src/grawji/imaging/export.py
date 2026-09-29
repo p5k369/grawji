@@ -40,7 +40,7 @@ SetBusy = Callable[..., None]
 
 def baked_pixbuf(jpeg: bytes, *, crop: CropRotate) -> Any:
     """Decode camera bytes and bake a geometry into them."""
-    return bake_pixbuf(oriented_pixbuf(jpeg), crop)
+    return bake_pixbuf(oriented_pixbuf(jpeg), crop, sharp=True)
 
 
 def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
@@ -48,7 +48,9 @@ def sidecar_decode(raf_path: str) -> Callable[[bytes], Any] | None:
     geometry = sidecar.load_crop(raf_path)
     if geometry.is_identity:
         return None
-    return lambda jpeg: bake_pixbuf(oriented_pixbuf(jpeg), geometry)
+    return lambda jpeg: bake_pixbuf(
+        oriented_pixbuf(jpeg), geometry, sharp=True
+    )
 
 
 def framing_active(settings: Settings) -> bool:

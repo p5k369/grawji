@@ -10,11 +10,16 @@ import gi
 
 gi.require_version("Gdk", "4.0")
 
+import numpy as np
 from gi.repository import Gdk, GdkPixbuf, GLib
 
 from grawji.crop import FULL_RECT, CropRotate, rotated_size
-from grawji.imaging.perspective import warp_cached
-from grawji.imaging.pixbufs import orient_exif
+from grawji.imaging.perspective import (
+    rotate_pixbuf,
+    warp_cached,
+    warp_pixbuf,
+)
+from grawji.imaging.pixbufs import area_resize, orient_exif, pixel_rows
 from grawji.keystone import Keystone
 
 _ROTATIONS = {
@@ -106,10 +111,21 @@ def scale_to_edge(pixbuf: Any, max_edge: int) -> Any:
     if longer <= max_edge:
         return pixbuf
     scale = max_edge / longer
-    return pixbuf.scale_simple(
-        max(1, round(width * scale)),
-        max(1, round(height * scale)),
-        GdkPixbuf.InterpType.HYPER,
+    out_w = max(1, round(width * scale))
+    out_h = max(1, round(height * scale))
+    channels = pixbuf.get_n_channels()
+    source = pixel_rows(pixbuf)[:, : width * channels].reshape(
+        height, width, channels
+    )
+    contiguous = np.ascontiguousarray(area_resize(source, out_w, out_h))
+    return GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(contiguous.tobytes()),
+        GdkPixbuf.Colorspace.RGB,
+        pixbuf.get_has_alpha(),
+        8,
+        out_w,
+        out_h,
+        out_w * channels,
     )
 
 
@@ -119,7 +135,9 @@ def orient_pixbuf(pixbuf: Any, orientation: int) -> Any:
     return pixbuf.rotate_simple(rotation) if rotation else pixbuf
 
 
-def bake_pixbuf(pixbuf: Any, crop: CropRotate, *, rect: bool = True) -> Any:
+def bake_pixbuf(
+    pixbuf: Any, crop: CropRotate, *, rect: bool = True, sharp: bool = False
+) -> Any:
     """Return pixbuf with the geometry applied to its pixels.
 
     Args:
@@ -127,17 +145,20 @@ def bake_pixbuf(pixbuf: Any, crop: CropRotate, *, rect: bool = True) -> Any:
         crop: The geometry to apply.
         rect: When False the crop rect is skipped and the whole rotated
             frame is returned.
+        sharp: Resample the keystone with the sharp export kernel
+            instead of the fast cached preview one.
     """
     if crop.has_warp:
-        pixbuf = warp_cached(
-            pixbuf,
-            Keystone(
-                crop.keystone_rotation,
-                crop.lensshift_v,
-                crop.lensshift_h,
-                crop.shear,
-            ),
+        correction = Keystone(
+            crop.keystone_rotation,
+            crop.lensshift_v,
+            crop.lensshift_h,
+            crop.shear,
         )
+        if sharp:
+            pixbuf = warp_pixbuf(pixbuf, correction, resample="lanczos3")
+        else:
+            pixbuf = warp_cached(pixbuf, correction)
     pixbuf = orient_pixbuf(pixbuf, crop.orientation)
     use_rect = crop.rect if rect else FULL_RECT
     if crop.angle == 0.0 and use_rect == FULL_RECT:
@@ -152,6 +173,8 @@ def bake_pixbuf(pixbuf: Any, crop: CropRotate, *, rect: bool = True) -> Any:
         cw = min(w - x, max(1, round(use_rect[2] * w)))
         ch = min(h - y, max(1, round(use_rect[3] * h)))
         return pixbuf.new_subpixbuf(x, y, cw, ch)
+    if sharp:
+        return rotate_pixbuf(pixbuf, crop.angle, use_rect)
     bw, bh = rotated_size(w, h, crop.angle)
     x, y, rw, rh = use_rect
     cw = max(1, round(rw * bw))
