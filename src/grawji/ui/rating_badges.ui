@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiRatingBadges" parent="GtkBox">
+    <property name="spacing">1</property>
+    <property name="valign">center</property>
+    <child>
+      <object class="GtkImage" id="star_1">
+        <property name="icon-name">starred-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Rating</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="star_2">
+        <property name="icon-name">starred-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Rating</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="star_3">
+        <property name="icon-name">starred-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Rating</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="star_4">
+        <property name="icon-name">starred-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Rating</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="star_5">
+        <property name="icon-name">starred-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Rating</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="reject_icon">
+        <property name="icon-name">grawji-reject-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Rejected</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+  </template>
+</interface>

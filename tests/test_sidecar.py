@@ -8,12 +8,16 @@ from pathlib import Path
 import pytest
 
 from grawji.crop import CropRotate
+from grawji.marks import Label, Marks
 from grawji.sidecar import (
     load_crop,
     load_exposure,
+    load_marks,
     save_crop,
     save_exposure,
+    save_marks,
     sidecar_path,
+    summary,
 )
 
 
@@ -99,3 +103,36 @@ def test_sidecar_missing_or_corrupt(tmp_path: Path) -> None:
     assert load_crop(raf) == CropRotate()
     sidecar_path(raf).write_text(json.dumps({"crop": 5}), encoding="utf-8")
     assert load_crop(raf) == CropRotate()
+
+
+def test_sidecar_marks_live_beside_the_edits(tmp_path: Path) -> None:
+    """Marks are one more key; clearing them keeps the edits."""
+    raf = tmp_path / "DSCF0010.RAF"
+    raf.write_bytes(b"raf")
+    marks = Marks(rating=3, labels=frozenset({Label.GREEN}), export=True)
+    save_marks(raf, marks)
+    save_crop(raf, CropRotate(orientation=90))
+    assert load_marks(raf) == marks
+    stored = json.loads(sidecar_path(raf).read_text(encoding="utf-8"))
+    assert stored["marks"] == {
+        "rating": 3,
+        "labels": ["green"],
+        "export": True,
+    }
+    save_marks(raf, Marks())
+    assert load_marks(raf) == Marks()
+    assert load_crop(raf).orientation == 90
+    save_crop(raf, CropRotate())
+    assert not sidecar_path(raf).exists()
+
+
+def test_sidecar_summary_reads_everything_once(tmp_path: Path) -> None:
+    """The browsing views get edits and marks from one read."""
+    raf = tmp_path / "DSCF0011.RAF"
+    raf.write_bytes(b"raf")
+    assert summary(raf).marks.is_empty
+    save_exposure(raf, 1.0)
+    save_marks(raf, Marks(rating=-1))
+    found = summary(raf)
+    assert (found.has_crop, found.has_ev) == (False, True)
+    assert found.marks.rejected

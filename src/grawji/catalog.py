@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
-from grawji.sidecar import edit_flags
+from grawji.marks import Label, Marks
+from grawji.pairs import jpegs_by_stem
+from grawji.sidecar import summary
 
 # The RAF spellings a camera or a card reader may leave behind.
 _PATTERNS = ("*.RAF", "*.raf")
@@ -29,6 +31,8 @@ class Entry:
     name: str
     has_crop: bool = False
     has_ev: bool = False
+    marks: Marks = field(default_factory=Marks)
+    jpeg: str | None = None
     model: str = ""
     lens: str = ""
     focal: str = ""
@@ -68,6 +72,7 @@ class Order(StrEnum):
     CAMERA = "camera"
     LENS = "lens"
     FOCAL = "focal"
+    RATING = "rating"
 
 
 def _key(entry: Entry, order: Order) -> tuple[object, ...]:
@@ -82,6 +87,8 @@ def _key(entry: Entry, order: Order) -> tuple[object, ...]:
         # Unknown focal lengths sort last instead of raising.
         value = entry.focal_value
         return (value is None, value or 0.0, entry.name)
+    if order is Order.RATING:
+        return (entry.marks.rating, entry.name)
     return (entry.name,)
 
 
@@ -95,6 +102,14 @@ def sort_entries(
     return sorted(entries, key=lambda e: _key(e, order), reverse=reverse)
 
 
+class Rejects(StrEnum):
+    """How a view treats the images marked as rejects."""
+
+    SHOW = "show"
+    HIDE = "hide"
+    ONLY = "only"
+
+
 @dataclass(frozen=True, slots=True)
 class Filter:
     """What the folder is narrowed down to."""
@@ -103,6 +118,10 @@ class Filter:
     lens: str | None = None
     focal: tuple[float, float] | None = None
     edited_only: bool = False
+    min_rating: int = 0
+    labels: frozenset[Label] = frozenset()
+    export_only: bool = False
+    rejects: Rejects = Rejects.SHOW
 
     @property
     def is_active(self) -> bool:
@@ -112,7 +131,23 @@ class Filter:
             or self.lens is not None
             or self.focal is not None
             or self.edited_only
+            or self.min_rating > 0
+            or bool(self.labels)
+            or self.export_only
+            or self.rejects is not Rejects.SHOW
         )
+
+    def _marks_match(self, marks: Marks) -> bool:
+        """Whether an entry's marks pass the mark rules."""
+        if self.rejects is Rejects.HIDE and marks.rejected:
+            return False
+        if self.rejects is Rejects.ONLY and not marks.rejected:
+            return False
+        if marks.stars < self.min_rating:
+            return False
+        if self.labels and not self.labels & marks.labels:
+            return False
+        return not (self.export_only and not marks.export)
 
     def matches(self, entry: Entry) -> bool:
         """Whether the entry passes.
@@ -123,8 +158,12 @@ class Filter:
         """
         if self.edited_only and not entry.edited:
             return False
-        if not entry.has_meta:
-            return True
+        if not self._marks_match(entry.marks):
+            return False
+        return not entry.has_meta or self._meta_matches(entry)
+
+    def _meta_matches(self, entry: Entry) -> bool:
+        """Whether an entry's metadata passes the camera and lens rules."""
         if self.camera is not None and entry.model != self.camera:
             return False
         if self.lens is not None and entry.lens != self.lens:
@@ -138,20 +177,27 @@ class Filter:
 
 
 def scan(folder: Path | str) -> list[Entry]:
-    """Every RAF of the folder, by file name, with its edit flags."""
+    """Every RAF of the folder, by file name, with its sidecar and JPEG."""
     base = Path(folder)
     paths = sorted(
         {path for pattern in _PATTERNS for path in base.glob(pattern)}
     )
+    try:
+        jpegs = jpegs_by_stem(path.name for path in base.iterdir())
+    except OSError:
+        jpegs = {}
     entries = []
     for path in paths:
-        has_crop, has_ev = edit_flags(path)
+        found = summary(path)
+        jpeg = jpegs.get(path.stem)
         entries.append(
             Entry(
                 path=str(path),
                 name=path.name,
-                has_crop=has_crop,
-                has_ev=has_ev,
+                has_crop=found.has_crop,
+                has_ev=found.has_ev,
+                marks=found.marks,
+                jpeg=str(base / jpeg) if jpeg else None,
             )
         )
     return entries
@@ -170,6 +216,11 @@ def with_aspect(entry: Entry, aspect: float) -> Entry:
 def with_edits(entry: Entry, has_crop: bool, has_ev: bool) -> Entry:
     """The entry again, with the sidecar read afresh."""
     return replace(entry, has_crop=has_crop, has_ev=has_ev)
+
+
+def with_marks(entry: Entry, marks: Marks) -> Entry:
+    """The entry again, with new marks."""
+    return replace(entry, marks=marks)
 
 
 def apply(

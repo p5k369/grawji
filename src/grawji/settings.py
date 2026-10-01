@@ -63,6 +63,7 @@ class Settings:
             "dark" forces that scheme.
         show_histogram: Whether the histogram overlay is shown on the
             preview.
+        show_marks_bar: Whether the marks bar floats over the preview.
         last_export_dir: Folder of the most recent export.
         the export dialogs open here. Empty means none.
         last_backup_dir: Folder of the most recent camera-settings
@@ -109,6 +110,7 @@ class Settings:
     bookmarks: list[str] = field(default_factory=list)
     color_scheme: str = "default"
     show_histogram: bool = False
+    show_marks_bar: bool = True
     last_export_dir: str = ""
     last_fileop_dir: str = ""
     last_backup_dir: str = ""
