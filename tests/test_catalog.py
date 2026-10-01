@@ -8,11 +8,14 @@ from pathlib import Path
 import pytest
 
 from grawji import catalog
-from grawji.catalog import Entry, Filter, Order
+from grawji.catalog import Entry, Filter, Order, Rejects
+from grawji.marks import Label, Marks
 
 
-def make_raf(folder: Path, name: str, *, crop=False, exposure=None) -> Path:
-    """An empty RAF, with a sidecar when an edit is wanted."""
+def make_raf(
+    folder: Path, name: str, *, crop=False, exposure=None, marks=None
+) -> Path:
+    """An empty RAF, with a sidecar when an edit or mark is wanted."""
     path = folder / name
     path.write_bytes(b"not a real raf")
     data: dict[str, object] = {}
@@ -20,6 +23,8 @@ def make_raf(folder: Path, name: str, *, crop=False, exposure=None) -> Path:
         data["crop"] = {"rect": [0.1, 0.1, 0.8, 0.8]}
     if exposure is not None:
         data["exposure"] = exposure
+    if marks is not None:
+        data["marks"] = marks
     if data:
         sidecar = path.with_name(path.name + ".grawji.json")
         sidecar.write_text(json.dumps(data))
@@ -167,3 +172,73 @@ def test_an_edit_updates_the_entry():
     edited = catalog.with_edits(plain, True, False)
     assert not plain.edited
     assert edited.edited and edited.has_crop and not edited.has_ev
+
+
+def test_scan_reads_the_marks(tmp_path):
+    """The marks come from the same single sidecar read."""
+    make_raf(tmp_path, "plain.RAF")
+    make_raf(tmp_path, "rated.RAF", marks={"rating": 4, "labels": ["red"]})
+    marks = {e.name: e.marks for e in catalog.scan(tmp_path)}
+    assert marks["plain.RAF"] == Marks()
+    assert marks["rated.RAF"] == Marks(rating=4, labels=frozenset({Label.RED}))
+
+
+def test_scan_pairs_the_camera_jpeg(tmp_path):
+    """A RAW+JPEG shot shows as one entry that knows its JPEG."""
+    make_raf(tmp_path, "pair.RAF")
+    make_raf(tmp_path, "single.RAF")
+    (tmp_path / "pair.JPG").write_bytes(b"jpg")
+    (tmp_path / "orphan.JPG").write_bytes(b"jpg")
+    entries = {e.name: e for e in catalog.scan(tmp_path)}
+    assert set(entries) == {"pair.RAF", "single.RAF"}
+    assert entries["pair.RAF"].jpeg == str(tmp_path / "pair.JPG")
+    assert entries["single.RAF"].jpeg is None
+
+
+def test_the_mark_rules_narrow_the_folder():
+    """Stars, labels, the export mark and rejects all filter."""
+    rated = entry(
+        "a.RAF",
+        marks=Marks(rating=3, labels=frozenset({Label.RED}), export=True),
+    )
+    plain = entry("b.RAF")
+    rejected = entry("c.RAF", marks=Marks(rating=-1))
+    assert Filter(min_rating=3).is_active
+    assert Filter(min_rating=3).matches(rated)
+    assert not Filter(min_rating=4).matches(rated)
+    assert not Filter(min_rating=1).matches(rejected)
+    assert Filter(labels=frozenset({Label.RED, Label.BLUE})).matches(rated)
+    assert not Filter(labels=frozenset({Label.BLUE})).matches(rated)
+    assert Filter(export_only=True).matches(rated)
+    assert not Filter(export_only=True).matches(plain)
+    hide = Filter(rejects=Rejects.HIDE)
+    only = Filter(rejects=Rejects.ONLY)
+    assert hide.matches(plain) and not hide.matches(rejected)
+    assert only.matches(rejected) and not only.matches(plain)
+
+
+def test_the_mark_rules_apply_before_metadata_arrives():
+    """Marks come from the scan, so they filter immediately."""
+    pending = entry("a.RAF")
+    assert not pending.has_meta
+    assert not Filter(min_rating=1).matches(pending)
+
+
+def test_rating_order_puts_rejects_first_and_stars_last():
+    """Rated order is ascending like every other order."""
+    entries = [
+        entry("a.RAF", marks=Marks(rating=5)),
+        entry("b.RAF", marks=Marks(rating=-1)),
+        entry("c.RAF"),
+        entry("d.RAF", marks=Marks(rating=2)),
+    ]
+    order = catalog.sort_entries(entries, Order.RATING)
+    assert [e.name for e in order] == ["b.RAF", "c.RAF", "d.RAF", "a.RAF"]
+
+
+def test_new_marks_update_the_entry():
+    """Marking must reach the model, or the filter goes stale."""
+    plain = entry("a.RAF")
+    marked = catalog.with_marks(plain, Marks(export=True))
+    assert marked.marks.export
+    assert not plain.marks.export

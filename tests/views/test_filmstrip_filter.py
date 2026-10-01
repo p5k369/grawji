@@ -234,12 +234,12 @@ def test_a_saved_crop_lights_the_badge_on_the_card(
     strip = window._filmstrip
     target = strip.paths[0]
     card = next(b for b, path in strip._card_path.items() if path == target)
-    assert not strip._cards[card]["crop"].get_visible()
+    assert not strip._cards[card]["details"].crop_icon.get_visible()
     sidecar_path(target).write_text(
         json.dumps({"crop": {"angle": 1.0, "rect": [0, 0, 1, 1]}})
     )
     strip.refresh_badges(target)
-    assert strip._cards[card]["crop"].get_visible()
+    assert strip._cards[card]["details"].crop_icon.get_visible()
 
 
 def test_a_stale_glide_cannot_fight_the_next_scroll(

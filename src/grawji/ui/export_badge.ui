@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiExportBadge" parent="GtkBox">
+    <property name="valign">center</property>
+    <child>
+      <object class="GtkImage" id="export_icon">
+        <property name="icon-name">grawji-export-mark-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Marked for export</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+  </template>
+</interface>

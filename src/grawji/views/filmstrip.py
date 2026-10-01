@@ -26,8 +26,14 @@ from gi.repository import (
 from grawji import catalog, mainloop
 from grawji.imaging.thumbnails import ThumbMeta
 from grawji.mainloop import Dispatch
-from grawji.sidecar import edit_flags
+from grawji.pairs import is_jpeg_name
 from grawji.views import file_menu
+from grawji.views.card_badges import (
+    DetailBadges,
+    ExportBadge,
+    RatingBadges,
+    style_rejected,
+)
 from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
@@ -75,12 +81,12 @@ def _badged_paintable(
     return snapshot.to_paintable()
 
 
-def _is_raf(gfile: Any) -> bool:
-    """Whether a monitor-event Gio.File refers to a RAF file."""
+def _is_watched(gfile: Any) -> bool:
+    """Whether a monitor event concerns a RAF or a paired JPEG."""
     if gfile is None:
         return False
     name = gfile.get_basename() or ""
-    return name.lower().endswith(".raf")
+    return name.lower().endswith(".raf") or is_jpeg_name(name)
 
 
 class FilmStrip(Gtk.ScrolledWindow):
@@ -94,6 +100,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         on_filter_changed: Callable[[], None] | None = None,
         on_selection_changed: Callable[[int], None] | None = None,
         on_file_action: Callable[[str, list[str]], None] | None = None,
+        on_mark_action: Callable[[str, object, list[str]], None] | None = None,
         drag_action: Callable[[], str] | None = None,
         dispatch: Dispatch = mainloop.call,
         thumb_height: int = 110,
@@ -111,6 +118,8 @@ class FilmStrip(Gtk.ScrolledWindow):
                 thumbnails while in batch-select mode.
             on_file_action: Called with ("export"/"copy"/"move"/"trash",
                 paths) from a card's context menu.
+            on_mark_action: Called with a mark choice from a card's
+                context menu and its paths.
             drag_action: Returns the configured default drag action
                 ("move" or "copy") for an unmodified drag.
             dispatch: Schedules a callback on the GTK main loop.
@@ -123,6 +132,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._on_filter_changed = on_filter_changed
         self._on_selection_changed = on_selection_changed
         self._on_file_action = on_file_action
+        self._on_mark_action = on_mark_action
         self._drag_action = drag_action
         self._menu_paths: list[str] = []
         self._menu_click_path: str | None = None
@@ -405,8 +415,16 @@ class FilmStrip(Gtk.ScrolledWindow):
         self.set_filter(model=None, lens=None, focal=None)
 
     def _init_file_actions(self) -> None:
-        """Install the context-menu action group for file operations."""
+        """Install the context-menu action groups."""
         file_menu.install_actions(self, self._on_menu_action)
+        self._mark_actions = file_menu.install_mark_actions(
+            self, self._on_menu_mark
+        )
+
+    def _on_menu_mark(self, kind: str, value: object) -> None:
+        """Forward a context-menu mark choice with its captured paths."""
+        if self._on_mark_action is not None and self._menu_paths:
+            self._on_mark_action(kind, value, self._menu_paths)
 
     def _on_menu_action(self, kind: str, *_args: object) -> None:
         """Forward a context-menu choice with its captured paths."""
@@ -440,7 +458,19 @@ class FilmStrip(Gtk.ScrolledWindow):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._menu_paths = self._card_paths(path)
         self._menu_click_path = path
-        file_menu.popup_menu(button, x, y, len(self._menu_paths))
+        entry = self._model.entry_for(path)
+        file_menu.popup_menu(
+            button,
+            x,
+            y,
+            len(self._menu_paths),
+            marks=(
+                entry.marks
+                if entry is not None and self._on_mark_action is not None
+                else None
+            ),
+            mark_actions=self._mark_actions,
+        )
 
     def _on_tile_drag_prepare(
         self, source: Gtk.DragSource, _x: float, _y: float, button: Gtk.Button
@@ -534,23 +564,28 @@ class FilmStrip(Gtk.ScrolledWindow):
             # Keep the label's natural width small so the card's width is
             # driven by the thumbnail, not by a long filename.
             label.set_max_width_chars(8)
+            label.set_hexpand(True)
             label.add_css_class("caption")
             label.add_css_class("dim-label")
             return label
 
         camera_label = caption("")
         name_label = caption("")
-        badges = self._build_badges()
-        thumb = Gtk.Overlay(child=picture)
-        thumb.add_overlay(badges["box"])
+        rating = RatingBadges()
+        export = ExportBadge()
+        details = DetailBadges()
+        top = Gtk.CenterBox(
+            start_widget=rating, center_widget=camera_label, end_widget=export
+        )
+        bottom = Gtk.CenterBox(center_widget=name_label, end_widget=details)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         card.set_margin_top(2)
         card.set_margin_bottom(2)
         card.set_margin_start(3)
         card.set_margin_end(3)
-        card.append(camera_label)
-        card.append(thumb)
-        card.append(name_label)
+        card.append(top)
+        card.append(picture)
+        card.append(bottom)
 
         button = Gtk.Box()
         button.append(card)
@@ -575,7 +610,9 @@ class FilmStrip(Gtk.ScrolledWindow):
             "picture": picture,
             "camera": camera_label,
             "name": name_label,
-            **badges,
+            "rating": rating,
+            "export": export,
+            "details": details,
         }
         item.set_child(button)
 
@@ -590,8 +627,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._card_path[button] = entry.path
         parts["name"].set_text(Path(entry.path).stem)
         parts["camera"].set_text(entry.model)
-        parts["crop"].set_visible(entry.has_crop)
-        parts["ev"].set_visible(entry.has_ev)
+        self._show_entry_badges(button, entry)
         button.set_tooltip_text(Path(entry.path).name)
         self._style_card(button, entry.path)
         self._tiles.want(button, parts["picture"], entry.path)
@@ -637,6 +673,21 @@ class FilmStrip(Gtk.ScrolledWindow):
             for button, shown in self._card_path.items():
                 if shown == path and entry is not None:
                     self._cards[button]["camera"].set_text(entry.model)
+        if reason == "marks" and path is not None:
+            entry = self._model.entry_for(path)
+            for button, shown in self._card_path.items():
+                if shown == path and entry is not None:
+                    self._show_entry_badges(button, entry)
+
+    def _show_entry_badges(
+        self, button: Gtk.Widget, entry: catalog.Entry
+    ) -> None:
+        """Draw a card's marks and edit badges from its entry."""
+        parts = self._cards[button]
+        parts["rating"].show_entry(entry)
+        parts["export"].show_entry(entry)
+        parts["details"].show_entry(entry)
+        style_rejected(button, entry)
 
     def _item_for(self, path: str) -> EntryItem | None:
         """The list item holding one frame, if the folder still has it."""
@@ -688,46 +739,16 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._cards.clear()
         self._card_path.clear()
 
-    def _build_badges(self) -> dict[str, Any]:
-        """The per-card edit badges, bottom right."""
-
-        def badge(icon: str, tooltip: str) -> Gtk.Image:
-            image = Gtk.Image.new_from_icon_name(icon)
-            image.set_pixel_size(10)
-            image.set_opacity(0.75)
-            image.set_tooltip_text(tooltip)
-            return image
-
-        badges = {
-            "crop": badge("grawji-crop-symbolic", "Crop/rotate applied"),
-            "ev": badge("grawji-ev-symbolic", "Exposure adjusted"),
-        }
-        box = Gtk.Box(spacing=3)
-        box.set_halign(Gtk.Align.END)
-        box.set_valign(Gtk.Align.END)
-        box.set_margin_end(4)
-        box.set_margin_bottom(4)
-        box.append(badges["ev"])
-        box.append(badges["crop"])
-        badges["box"] = box
-        return badges
-
     def refresh_badges(self, path: str) -> None:
-        """Re-read path's sidecar and update its edit badges."""
-        entry = self._entries.get(path)
-        if entry is None:
-            return
-        has_crop, has_ev = edit_flags(path)
-        self._entries[path] = catalog.with_edits(entry, has_crop, has_ev)
-        for position in range(self._store.get_n_items()):
-            item = self._store.get_item(position)
-            if item is not None and item.entry.path == path:
-                item.entry = self._entries[path]
-                break
-        for button, shown in self._card_path.items():
-            if shown == path:
-                self._cards[button]["crop"].set_visible(has_crop)
-                self._cards[button]["ev"].set_visible(has_ev)
+        """Re-read path's sidecar and update its badges everywhere."""
+        self._model.reread_sidecar(path)
+
+    def mark_targets(self) -> list[str]:
+        """What a mark shortcut applies to: the selection or the open one."""
+        if self._selected:
+            return self.selected_paths
+        current = self.current_path
+        return [current] if current is not None else []
 
     def _restore_current(self, scan_id: int, path: str) -> bool:
         """Re-select path after a same-folder re-scan (on idle)."""
@@ -1140,7 +1161,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self, _monitor: Any, file: Any, other: Any, _event: Any
     ) -> None:
         """Debounce a re-scan when RAF files appear, vanish or move."""
-        if not (_is_raf(file) or _is_raf(other)):
+        if not (_is_watched(file) or _is_watched(other)):
             return
         if self._reload_pending_id:
             GLib.source_remove(self._reload_pending_id)

@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiMarksBar" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="valign">center</property>
+    <property name="spacing">0</property>
+    <child>
+      <object class="GtkButton" id="reject_button">
+        <property name="tooltip-text">Reject (x)</property>
+        <property name="action-name">win.toggle-reject</property>
+        <property name="valign">center</property>
+        <property name="icon-name">grawji-reject-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="star_1">
+        <property name="tooltip-text">1 star (Alt+1)</property>
+        <property name="action-name">win.rate</property>
+        <property name="action-target">1</property>
+        <property name="valign">center</property>
+        <property name="icon-name">non-starred-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="star_2">
+        <property name="tooltip-text">2 stars (Alt+2)</property>
+        <property name="action-name">win.rate</property>
+        <property name="action-target">2</property>
+        <property name="valign">center</property>
+        <property name="icon-name">non-starred-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="star_3">
+        <property name="tooltip-text">3 stars (Alt+3)</property>
+        <property name="action-name">win.rate</property>
+        <property name="action-target">3</property>
+        <property name="valign">center</property>
+        <property name="icon-name">non-starred-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="star_4">
+        <property name="tooltip-text">4 stars (Alt+4)</property>
+        <property name="action-name">win.rate</property>
+        <property name="action-target">4</property>
+        <property name="valign">center</property>
+        <property name="icon-name">non-starred-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="star_5">
+        <property name="tooltip-text">5 stars (Alt+5)</property>
+        <property name="action-name">win.rate</property>
+        <property name="action-target">5</property>
+        <property name="valign">center</property>
+        <property name="icon-name">non-starred-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="color_red">
+        <property name="tooltip-text">Red label (F1)</property>
+        <property name="action-name">win.toggle-label</property>
+        <property name="action-target">'red'</property>
+        <property name="valign">center</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="mark-dot"/>
+              <class name="mark-red"/>
+            </style>
+          </object>
+        </property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="color_yellow">
+        <property name="tooltip-text">Yellow label (F2)</property>
+        <property name="action-name">win.toggle-label</property>
+        <property name="action-target">'yellow'</property>
+        <property name="valign">center</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="mark-dot"/>
+              <class name="mark-yellow"/>
+            </style>
+          </object>
+        </property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="color_green">
+        <property name="tooltip-text">Green label (F3)</property>
+        <property name="action-name">win.toggle-label</property>
+        <property name="action-target">'green'</property>
+        <property name="valign">center</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="mark-dot"/>
+              <class name="mark-green"/>
+            </style>
+          </object>
+        </property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="color_blue">
+        <property name="tooltip-text">Blue label (F4)</property>
+        <property name="action-name">win.toggle-label</property>
+        <property name="action-target">'blue'</property>
+        <property name="valign">center</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="mark-dot"/>
+              <class name="mark-blue"/>
+            </style>
+          </object>
+        </property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="color_purple">
+        <property name="tooltip-text">Purple label (F5)</property>
+        <property name="action-name">win.toggle-label</property>
+        <property name="action-target">'purple'</property>
+        <property name="valign">center</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="mark-dot"/>
+              <class name="mark-purple"/>
+            </style>
+          </object>
+        </property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="export_button">
+        <property name="tooltip-text">Mark for export (e)</property>
+        <property name="action-name">win.toggle-export</property>
+        <property name="valign">center</property>
+        <property name="icon-name">grawji-export-mark-symbolic</property>
+        <style>
+          <class name="flat"/>
+          <class name="mark-button"/>
+        </style>
+      </object>
+    </child>
+  </template>
+</interface>

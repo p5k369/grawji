@@ -107,3 +107,64 @@ def test_following_is_none_when_the_open_image_survives() -> None:
 def test_following_is_none_when_nothing_survives() -> None:
     """An emptied folder has nothing to advance to."""
     assert fileops.following(["a", "b"], ["a", "b"], "a") is None
+
+
+def _pair(folder: Path, stem: str) -> tuple[Path, Path]:
+    raf = _raf_with_sidecar(folder, f"{stem}.RAF")
+    jpeg = folder / f"{stem}.JPG"
+    jpeg.write_bytes(b"jpeg-bytes")
+    return raf, jpeg
+
+
+def test_copy_takes_the_camera_jpeg(tmp_path: Path) -> None:
+    """A RAW+JPEG pair copies as one, under one shared name."""
+    src_dir = tmp_path / "a"
+    dest_dir = tmp_path / "b"
+    src_dir.mkdir()
+    dest_dir.mkdir()
+    raf, jpeg = _pair(src_dir, "DSCF0005")
+    target = copy_raf(raf, dest_dir)
+    assert (dest_dir / "DSCF0005.JPG").read_bytes() == b"jpeg-bytes"
+    assert sidecar_path(target).exists()
+    assert jpeg.exists()
+
+
+def test_a_numbered_copy_keeps_the_pair_together(tmp_path: Path) -> None:
+    """A JPEG already in the way pushes RAF and JPEG to one number."""
+    src_dir = tmp_path / "a"
+    dest_dir = tmp_path / "b"
+    src_dir.mkdir()
+    dest_dir.mkdir()
+    raf, _jpeg = _pair(src_dir, "DSCF0006")
+    # Only the JPEG name is taken, the RAF name is free.
+    (dest_dir / "DSCF0006.JPG").write_bytes(b"other")
+    target = copy_raf(raf, dest_dir)
+    assert target.name == "DSCF0006 (2).RAF"
+    assert (dest_dir / "DSCF0006 (2).JPG").read_bytes() == b"jpeg-bytes"
+    assert (dest_dir / "DSCF0006.JPG").read_bytes() == b"other"
+    assert not (dest_dir / "DSCF0006.RAF").exists()
+
+
+def test_move_takes_the_camera_jpeg(tmp_path: Path) -> None:
+    """Moving a pair leaves nothing of it behind."""
+    src_dir = tmp_path / "a"
+    dest_dir = tmp_path / "b"
+    src_dir.mkdir()
+    dest_dir.mkdir()
+    raf, jpeg = _pair(src_dir, "DSCF0007")
+    target = move_raf(raf, dest_dir)
+    assert not jpeg.exists()
+    assert target.with_suffix(".JPG").exists()
+    assert sidecar_path(target).exists()
+
+
+def test_trash_takes_the_camera_jpeg(tmp_path: Path) -> None:
+    """Trashing a pair trashes the JPEG too."""
+    raf, jpeg = _pair(tmp_path, "DSCF0008")
+    try:
+        trash_raf(raf)
+    except GLib.Error as exc:  # pragma: no cover
+        pytest.skip(f"no trash available here: {exc}")
+    assert not raf.exists()
+    assert not jpeg.exists()
+    assert not sidecar_path(raf).exists()

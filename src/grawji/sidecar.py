@@ -1,7 +1,8 @@
 """Per-image sidecar storage.
 
 One sidecar per RAF holds everything grawji knows about that image
-beyond the recipe: the crop/rotate geometry and the per-image EV.
+beyond the recipe: the crop/rotate geometry, the per-image EV and the
+marks.
 The format contract: a top-level "version" plus one key per purpose.
 Readers ignore unknown keys, writers preserve them, and "version"
 only ever bumps on a break that ignoring keys cannot absorb.
@@ -11,9 +12,11 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from grawji.crop import CropRotate
+from grawji.marks import Marks
 
 SIDECAR_SUFFIX = ".grawji.json"
 
@@ -73,14 +76,27 @@ def save_crop(raf_path: Path | str, crop: CropRotate) -> None:
     _update(raf_path, "crop", None if crop.is_identity else crop.to_dict())
 
 
-def edit_flags(raf_path: Path | str) -> tuple[bool, bool]:
-    """Whether the sidecar holds an edit.
+@dataclass(frozen=True, slots=True)
+class Summary:
+    """What a browsing view needs to know from one sidecar."""
+
+    has_crop: bool = False
+    has_ev: bool = False
+    marks: Marks = field(default_factory=Marks)
+
+
+def summary(raf_path: Path | str) -> Summary:
+    """The edit flags and marks, from a single read of the sidecar.
 
     The two edits are independent: identity crops and cleared EVs are
     stored as absent keys, so key presence means a real edit.
     """
     data = _read(raf_path)
-    return "crop" in data, "exposure" in data
+    return Summary(
+        has_crop="crop" in data,
+        has_ev="exposure" in data,
+        marks=Marks.from_dict(data.get("marks")),
+    )
 
 
 def load_exposure(raf_path: Path | str) -> float | None:
@@ -94,3 +110,13 @@ def load_exposure(raf_path: Path | str) -> float | None:
 def save_exposure(raf_path: Path | str, exposure: float | None) -> None:
     """Store the RAF's per-image EV (None removes it)."""
     _update(raf_path, "exposure", exposure)
+
+
+def load_marks(raf_path: Path | str) -> Marks:
+    """The RAF's stored marks, or no marks when never set."""
+    return Marks.from_dict(_read(raf_path).get("marks"))
+
+
+def save_marks(raf_path: Path | str, marks: Marks) -> None:
+    """Store the RAF's marks, dropping the key when nothing is marked."""
+    _update(raf_path, "marks", None if marks.is_empty else marks.to_dict())

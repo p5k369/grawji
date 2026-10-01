@@ -28,6 +28,10 @@
         <attribute name="label">Show Histogram</attribute>
         <attribute name="action">win.toggle-histogram</attribute>
       </item>
+      <item>
+        <attribute name="label">Show Marks Bar</attribute>
+        <attribute name="action">win.toggle-marks-bar</attribute>
+      </item>
     </section>
     <section>
       <item>

@@ -39,6 +39,18 @@
             <property name="margin-bottom">10</property>
           </object>
         </child>
+        <child type="overlay">
+          <object class="GtkBox" id="marks_slot">
+            <property name="halign">end</property>
+            <property name="valign">end</property>
+            <property name="margin-end">10</property>
+            <property name="margin-bottom">10</property>
+            <style>
+              <class name="osd"/>
+              <class name="marks-osd"/>
+            </style>
+          </object>
+        </child>
       </object>
     </child>
     <child>

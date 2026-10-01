@@ -46,6 +46,22 @@ def test_preview_view_builds_standalone() -> None:
     assert view.rotation == 0
 
 
+def test_the_marks_bar_toggles_and_yields_to_the_crop_editor() -> None:
+    """The bar hides on request and whenever the crop editor is open."""
+    from grawji.views.preview_view import PreviewView
+
+    view = PreviewView()
+    pump()
+    assert view.marks_slot.get_visible()
+    view.set_show_marks_bar(False)
+    assert not view.marks_slot.get_visible()
+    view.set_show_marks_bar(True)
+    view.crop_overlay.set_visible(True)
+    assert not view.marks_slot.get_visible()
+    view.crop_overlay.set_visible(False)
+    assert view.marks_slot.get_visible()
+
+
 def test_clipping_toggle_changes_the_shown_pixbuf() -> None:
     """Turning zebras on recomposites the preview."""
     from gi.repository import GdkPixbuf

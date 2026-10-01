@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiDetailBadges" parent="GtkBox">
+    <property name="spacing">3</property>
+    <property name="valign">center</property>
+    <child>
+      <object class="GtkBox" id="dot_red">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="mark-dot"/>
+          <class name="mark-red"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="dot_yellow">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="mark-dot"/>
+          <class name="mark-yellow"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="dot_green">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="mark-dot"/>
+          <class name="mark-green"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="dot_blue">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="mark-dot"/>
+          <class name="mark-blue"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="dot_purple">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="mark-dot"/>
+          <class name="mark-purple"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="ev_icon">
+        <property name="icon-name">grawji-ev-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Exposure adjusted</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkImage" id="crop_icon">
+        <property name="icon-name">grawji-crop-symbolic</property>
+        <property name="pixel-size">10</property>
+        <property name="tooltip-text">Crop/rotate applied</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+        </style>
+      </object>
+    </child>
+  </template>
+</interface>

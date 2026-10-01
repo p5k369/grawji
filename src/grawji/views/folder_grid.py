@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 import gi
 
@@ -11,24 +11,48 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gdk, GLib, Gtk
 
-from grawji import mainloop
+from grawji import catalog, mainloop
 from grawji.imaging.thumbnails import ThumbnailLoader
 from grawji.views import file_menu
+from grawji.views.card_badges import (
+    DetailBadges,
+    ExportBadge,
+    RatingBadges,
+    style_rejected,
+)
 from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
 # Decoded frames the grid holds on to.
 _KEEP_TILES = 400
-# Grid cells are square.
+# Grid tiles are square, before the marks row comes out of the cell.
 _CELL_RATIO = 1.0
 # Room for the caption under each thumbnail.
 _CAPTION_PX = 22
+# Room for the rating and export marks above each thumbnail.
+_MARKS_PX = 14
 # Breathing room between tiles.
 _GAP_PX = 10
 # How long the size slider settles before thumbnails are re-decoded.
 _RESIZE_SETTLE_MS = 350
 # Frames the grid waits for a tile to be placed before centring it.
 _CENTER_FRAMES = 30
+
+
+def _cell_size(tile: int) -> tuple[int, int]:
+    """The image cell of a tile, with the marks row taken out of it."""
+    return int(tile * _CELL_RATIO), tile - _MARKS_PX
+
+
+class _TileParts(NamedTuple):
+    """The widgets of one grid tile that binding fills in."""
+
+    picture: Gtk.Picture
+    caption: Gtk.Label
+    camera: Gtk.Label
+    rating: RatingBadges
+    export: ExportBadge
+    details: DetailBadges
 
 
 class FolderGrid(Gtk.ScrolledWindow):
@@ -43,6 +67,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         on_activate: Callable[[str], None] | None = None,
         on_select: Callable[[str], None] | None = None,
         on_file_action: Callable[[str, list[str]], None] | None = None,
+        on_mark_action: Callable[[str, object, list[str]], None] | None = None,
         stand_in: Callable[[str], Any] | None = None,
     ) -> None:
         """Build the grid over the folder shared with the strip."""
@@ -53,9 +78,14 @@ class FolderGrid(Gtk.ScrolledWindow):
         self._on_activate = on_activate
         self._on_select = on_select
         self._on_file_action = on_file_action
+        self._on_mark_action = on_mark_action
         self._menu_path: str | None = None
         self._tile_path: dict[Gtk.Widget, str] = {}
+        self._tile_parts: dict[Gtk.Widget, _TileParts] = {}
         file_menu.install_actions(self, self._on_menu_action)
+        self._mark_actions = file_menu.install_mark_actions(
+            self, self._on_menu_mark
+        )
         # True while the grid is being told where to stand, so
         # syncing the selection cannot bounce back.
         self._syncing = False
@@ -115,8 +145,10 @@ class FolderGrid(Gtk.ScrolledWindow):
         if height == self._tile:
             return
         self._tile = height
+        width, cell_height = _cell_size(height)
         for cell in self._cells.values():
-            cell.set_size_request(int(height * _CELL_RATIO), height)
+            cell.set_ratio(width / cell_height)
+            cell.set_size_request(width, cell_height)
         self._fit_columns()
         if self._resize_pending:
             GLib.source_remove(self._resize_pending)
@@ -140,7 +172,7 @@ class FolderGrid(Gtk.ScrolledWindow):
         if columns != self._view.get_max_columns():
             self._view.set_max_columns(columns)
 
-    def _on_model_event(self, reason: str, _path: str | None) -> None:
+    def _on_model_event(self, reason: str, path: str | None) -> None:
         """Follow the shared folder."""
         if reason == "folder":
             self._thumbs.clear()
@@ -154,6 +186,12 @@ class FolderGrid(Gtk.ScrolledWindow):
             self._thumbs.schedule(fresh=True)
         elif reason == "trimmed":
             self._thumbs.schedule(fresh=True)
+        elif reason in ("marks", "entry") and path is not None:
+            entry = self._folder.entry_for(path)
+            for box, shown in self._tile_path.items():
+                if shown == path and entry is not None:
+                    self._show_badges(box, entry)
+                    self._tile_parts[box].camera.set_text(entry.model)
 
     def _visible_paths(self) -> list[str]:
         """The frames the filter leaves, in the order they are shown."""
@@ -292,16 +330,32 @@ class FolderGrid(Gtk.ScrolledWindow):
         picture = Gtk.Picture()
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-        cell = Gtk.AspectFrame(ratio=_CELL_RATIO, obey_child=False)
-        cell.set_size_request(int(self._tile * _CELL_RATIO), self._tile)
+        width, cell_height = _cell_size(self._tile)
+        cell = Gtk.AspectFrame(ratio=width / cell_height, obey_child=False)
+        cell.set_size_request(width, cell_height)
         cell.set_child(picture)
-        caption = Gtk.Label(ellipsize=3, max_width_chars=1)
+        caption = Gtk.Label(ellipsize=3, max_width_chars=1, hexpand=True)
         caption.add_css_class("caption")
         caption.add_css_class("dim-label")
-        caption.set_size_request(-1, _CAPTION_PX)
+        camera = Gtk.Label(ellipsize=3, max_width_chars=1, hexpand=True)
+        camera.add_css_class("caption")
+        camera.add_css_class("dim-label")
+        rating = RatingBadges()
+        export = ExportBadge()
+        details = DetailBadges()
+        top = Gtk.CenterBox(
+            start_widget=rating, center_widget=camera, end_widget=export
+        )
+        top.set_size_request(-1, _MARKS_PX)
+        bottom = Gtk.CenterBox(center_widget=caption, end_widget=details)
+        bottom.set_size_request(-1, _CAPTION_PX)
+        box.append(top)
         box.append(cell)
-        box.append(caption)
+        box.append(bottom)
         self._cells[box] = cell
+        self._tile_parts[box] = _TileParts(
+            picture, caption, camera, rating, export, details
+        )
         item.set_child(box)
 
     def _on_bind(self, _factory: Any, item: Gtk.ListItem) -> None:
@@ -310,12 +364,21 @@ class FolderGrid(Gtk.ScrolledWindow):
         entry_item = item.get_item()
         if box is None or entry_item is None:
             return
-        cell, caption = box.get_first_child(), box.get_last_child()
-        picture = cell.get_child()
+        parts = self._tile_parts[box]
         entry = entry_item.entry
-        caption.set_text(entry.name)
+        parts.caption.set_text(entry.name)
+        parts.camera.set_text(entry.model)
         self._tile_path[box] = entry.path
-        self._thumbs.want(box, picture, entry.path)
+        self._show_badges(box, entry)
+        self._thumbs.want(box, parts.picture, entry.path)
+
+    def _show_badges(self, box: Gtk.Widget, entry: catalog.Entry) -> None:
+        """Draw one tile's marks and edit badges."""
+        parts = self._tile_parts[box]
+        parts.rating.show_entry(entry)
+        parts.export.show_entry(entry)
+        parts.details.show_entry(entry)
+        style_rejected(box, entry)
 
     def _on_unbind(self, _factory: Any, item: Gtk.ListItem) -> None:
         """Forget what a recycled tile was waiting for."""
@@ -338,12 +401,29 @@ class FolderGrid(Gtk.ScrolledWindow):
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._menu_path = path
-        file_menu.popup_menu(box, x, y, 1)
+        entry = self._folder.entry_for(path)
+        file_menu.popup_menu(
+            box,
+            x,
+            y,
+            1,
+            marks=(
+                entry.marks
+                if entry is not None and self._on_mark_action is not None
+                else None
+            ),
+            mark_actions=self._mark_actions,
+        )
 
     def _on_menu_action(self, kind: str) -> None:
         """Forward a context-menu choice for the clicked tile."""
         if self._on_file_action is not None and self._menu_path is not None:
             self._on_file_action(kind, [self._menu_path])
+
+    def _on_menu_mark(self, kind: str, value: object) -> None:
+        """Forward a context-menu mark choice for the clicked tile."""
+        if self._on_mark_action is not None and self._menu_path is not None:
+            self._on_mark_action(kind, value, [self._menu_path])
 
     def _on_activated(self, _view: Gtk.GridView, position: int) -> None:
         """Open the frame a tile was activated on."""

@@ -44,6 +44,7 @@ from grawji.controllers.exports import (
     SingleExportController,
 )
 from grawji.controllers.fileops import FileOpsController
+from grawji.controllers.marks import MarksController
 from grawji.imaging import imagemeta
 from grawji.imaging.pixbufs import trim_letterbox
 from grawji.imaging.render import (
@@ -51,6 +52,7 @@ from grawji.imaging.render import (
     thumb_jpeg,
 )
 from grawji.imaging.thumbnails import ThumbnailLoader
+from grawji.marks import Label
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
 from grawji.settings import (
@@ -127,6 +129,10 @@ gridview.folder-grid > child:hover,
 gridview.folder-grid > child:selected {
     background: none;
 }
+gridview.folder-grid > child:focus-visible,
+listview.filmstrip > row:focus-visible {
+    outline: none;
+}
 gridview.folder-grid > child:hover .grid-tile {
     background-color: alpha(currentColor, 0.1);
 }
@@ -146,6 +152,24 @@ row.recipe-modified {
     background-color: alpha(currentColor, 0.55);
     border-radius: 1px;
 }
+.card-badge { opacity: 0.75; }
+.mark-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px alpha(#000000, 0.45);
+}
+.mark-red { background-color: #e01b24; }
+.mark-yellow { background-color: #f6d32d; }
+.mark-green { background-color: #33d17a; }
+.mark-blue { background-color: #3584e4; }
+.mark-purple { background-color: #9141ac; }
+.mark-rejected picture { opacity: 0.35; }
+.marks-osd { border-radius: 8px; padding: 4px 2px; }
+.mark-button { min-width: 24px; padding: 2px 3px; }
+.mark-button .mark-dot { opacity: 0.3; }
+.mark-button.mark-on .mark-dot { opacity: 1; }
+.mark-button.mark-on image { color: @accent_color; }
 """
 
 _UI = (
@@ -181,6 +205,9 @@ class MainWindow(Adw.ApplicationWindow):
     select_bar = Gtk.Template.Child()
     select_label = Gtk.Template.Child()
     select_separator = Gtk.Template.Child()
+
+    _marks: MarksController
+    _mark_actions: list[Gio.SimpleAction]
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, the composite widgets and the controllers."""
@@ -354,6 +381,8 @@ class MainWindow(Adw.ApplicationWindow):
             ("cycle-background", self._cycle_background, ("b",)),
             ("toggle-peek", self._toggle_peek, ("backslash",)),
             ("toggle-crop", self._toggle_crop, ("c",)),
+            ("toggle-export", self._marks.toggle_export, ("e",)),
+            ("toggle-reject", self._marks.toggle_reject, ("x",)),
             (
                 "shortcuts",
                 lambda: dialogs.present_shortcuts(self),
@@ -387,6 +416,18 @@ class MainWindow(Adw.ApplicationWindow):
         if app is not None:
             app.set_accels_for_action("win.toggle-histogram", ["h"])
 
+        marks_bar = Gio.SimpleAction.new_stateful(
+            "toggle-marks-bar",
+            None,
+            GLib.Variant.new_boolean(self._settings.show_marks_bar),
+        )
+        marks_bar.connect("change-state", self._on_toggle_marks_bar)
+        self.add_action(marks_bar)
+        if app is not None:
+            app.set_accels_for_action("win.toggle-marks-bar", ["m"])
+
+        self._install_mark_actions()
+
         # Enabled only once at least one image is selected.
         self._selection_actions: list[Gio.SimpleAction] = []
         export_selection = Gio.SimpleAction.new("export-selection", None)
@@ -406,6 +447,52 @@ class MainWindow(Adw.ApplicationWindow):
             self._recipe_library.baseline is not None
         )
         self.add_action(self._compare_action)
+
+    def _install_mark_actions(self) -> None:
+        """The parameterized mark actions."""
+        app = self.get_application()
+        rate = Gio.SimpleAction.new("rate", GLib.VariantType.new("i"))
+        rate.connect("activate", lambda _a, v: self._marks.rate(v.get_int32()))
+        self.add_action(rate)
+        label = Gio.SimpleAction.new("toggle-label", GLib.VariantType.new("s"))
+        label.connect(
+            "activate",
+            lambda _a, v: self._marks.toggle_label(Label(v.get_string())),
+        )
+        self.add_action(label)
+        self._mark_actions.extend([rate, label])
+        for name in ("toggle-export", "toggle-reject"):
+            action = self.lookup_action(name)
+            if isinstance(action, Gio.SimpleAction):
+                self._mark_actions.append(action)
+        if app is None:
+            return
+        for stars in range(6):
+            app.set_accels_for_action(f"win.rate({stars})", [f"<Alt>{stars}"])
+        for index, color in enumerate(Label, start=1):
+            app.set_accels_for_action(
+                f"win.toggle-label('{color.value}')", [f"F{index}"]
+            )
+
+    def _on_card_mark(
+        self, kind: str, value: object, paths: list[str]
+    ) -> None:
+        """Apply a mark picked from a card's context menu."""
+        self._marks.from_menu(kind, value, paths)
+
+    def _on_marks_changed(self, paths: list[str]) -> None:
+        """Redraw the bar when the open image's marks changed."""
+        if self._filmstrip.current_path in paths:
+            self._show_current_marks()
+
+    def _show_current_marks(self) -> None:
+        """Show the open image's marks, and gate the mark actions."""
+        self.preview_view.marks_bar.show_marks(
+            self._marks.marks_of(self._filmstrip.current_path)
+        )
+        enabled = bool(self._filmstrip.mark_targets())
+        for action in self._mark_actions:
+            action.set_enabled(enabled)
 
     @staticmethod
     def _activate(callback: Callable[[], None], *_args: object) -> None:
@@ -433,6 +520,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Apply preview settings and hook up its crop editor."""
         self._set_canvas_background(self._settings.canvas_background)
         self.preview_view.set_show_histogram(self._settings.show_histogram)
+        self.preview_view.set_show_marks_bar(self._settings.show_marks_bar)
         self.preview_view.connect(
             "geometry-changed", self._on_geometry_changed
         )
@@ -490,7 +578,14 @@ class MainWindow(Adw.ApplicationWindow):
             on_loading=self._on_thumbs_loading,
             on_selection_changed=self._on_selection_changed,
             on_file_action=self._fileops.on_file_action,
+            on_mark_action=self._on_card_mark,
             drag_action=lambda: self._settings.drag_action,
+        )
+        self._mark_actions = []
+        self._marks = MarksController(
+            folder=self._folder_model,
+            targets=self._filmstrip.mark_targets,
+            on_changed=self._on_marks_changed,
         )
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
         self._filmstrip.set_hexpand(True)
@@ -508,6 +603,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._grid = FolderGrid(
             model=self._folder_model,
             on_file_action=self._fileops.on_file_action,
+            on_mark_action=self._on_card_mark,
             loader=ThumbnailLoader(
                 height=self._settings.grid_tile_px,
                 cache_dir=cache_dir() / "thumbs",
@@ -620,9 +716,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_grid_open(open_it=True)
 
     def _on_folder_event(self, reason: str, _path: str | None) -> None:
-        """Keep the frame count fresh while the grid shows."""
+        """Keep the frame count and the marks bar fresh."""
         if reason in ("folder", "filter", "trimmed") and self._grid_is_open():
             self._update_grid_count()
+        if reason in ("folder", "trimmed"):
+            self._show_current_marks()
 
     def _set_grid_open(self, *, open_it: bool) -> None:
         """Show one of the two views."""
@@ -638,6 +736,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Mark the grid's pick in the strip, without developing it."""
         if self._filmstrip.current_path != path:
             self._filmstrip.select_path(path, notify=False)
+        self._show_current_marks()
 
     def _on_grid_activated(self, path: str) -> None:
         """Open a frame picked in the grid and go back to the preview."""
@@ -684,6 +783,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._flush_pending_exposure()
         self._generation += 1
         self._raf_path = Path(raf_path)
+        self._show_current_marks()
         self._settings.last_image = raf_path
         self.set_title(f"grawji — {Path(raf_path).name}")
         self._set_busy(busy=True, status="Loading RAF…")
@@ -1265,6 +1365,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_selection_changed(self, count: int) -> None:
         """Reflect the batch selection in the bar label and its actions."""
+        self._show_current_marks()
         self.select_label.set_label(
             "Select images" if count == 0 else f"{count} selected"
         )
@@ -1512,6 +1613,14 @@ class MainWindow(Adw.ApplicationWindow):
         show = value.get_boolean()
         self._settings.show_histogram = show
         self.preview_view.set_show_histogram(show)
+        self._save_settings()
+
+    def _on_toggle_marks_bar(self, action: Any, value: Any) -> None:
+        """Show or hide the marks bar and remember the choice."""
+        action.set_state(value)
+        show = value.get_boolean()
+        self._settings.show_marks_bar = show
+        self.preview_view.set_show_marks_bar(show)
         self._save_settings()
 
     def _save_settings(self) -> None:

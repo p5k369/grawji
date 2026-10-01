@@ -35,6 +35,7 @@ from grawji.imaging.render import (
 )
 from grawji.keystone import Keystone
 from grawji.views.crop_editor import CropEditor
+from grawji.views.marks_bar import MarksBar
 from grawji.views.paintables import (
     RotatedPaintable,
     ScaledPaintable,
@@ -107,6 +108,7 @@ class PreviewView(Gtk.Box):
     scroll = Gtk.Template.Child()
     picture = Gtk.Template.Child()
     histogram_slot = Gtk.Template.Child()
+    marks_slot = Gtk.Template.Child()
     spinner = Gtk.Template.Child()
     status = Gtk.Template.Child()
     zoom_label = Gtk.Template.Child()
@@ -186,6 +188,7 @@ class PreviewView(Gtk.Box):
         self._histogram.set_hexpand(True)
         self._histogram.set_vexpand(True)
         self.histogram_slot.append(self._histogram)
+        self._init_marks_bar()
         self._init_viewport_controllers()
 
     def _on_crop_bar_revealed(self, *_args: object) -> None:
@@ -256,6 +259,27 @@ class PreviewView(Gtk.Box):
     def rotation(self) -> int:
         """The committed 90-degree orientation, degrees clockwise."""
         return self._crop.orientation
+
+    def _init_marks_bar(self) -> None:
+        """Float the open image's marks over the canvas."""
+        self.marks_bar = MarksBar()
+        self.marks_slot.append(self.marks_bar)
+        self._show_marks_bar = True
+        self.crop_overlay.connect(
+            "notify::visible", lambda *_a: self._sync_marks_bar()
+        )
+        self._sync_marks_bar()
+
+    def set_show_marks_bar(self, show: bool) -> None:
+        """Show or hide the marks bar over the canvas."""
+        self._show_marks_bar = show
+        self._sync_marks_bar()
+
+    def _sync_marks_bar(self) -> None:
+        """Show the bar when wanted and the crop editor is closed."""
+        self.marks_slot.set_visible(
+            self._show_marks_bar and not self.crop_overlay.get_visible()
+        )
 
     @property
     def crop_rotate(self) -> crop.CropRotate:

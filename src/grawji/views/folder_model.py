@@ -18,7 +18,9 @@ from grawji.imaging.thumbnails import (
     remembered_facts,
 )
 from grawji.mainloop import Dispatch
+from grawji.marks import Marks
 from grawji.settings import cache_dir
+from grawji.sidecar import summary
 
 _REFILTER_DELAY_MS = 150
 
@@ -151,6 +153,37 @@ class FolderModel:
         self._notify("entry", path)
         if self.filter.is_active:
             self._refilter_soon()
+
+    def set_marks(self, path: str, marks: Marks) -> None:
+        """Take one frame's new marks, in every view of the folder."""
+        entry = self.entries.get(path)
+        if entry is None:
+            return
+        self._replace(catalog.with_marks(entry, marks))
+        self._notify("marks", path)
+        if self.filter.is_active:
+            self._refilter_soon()
+
+    def reread_sidecar(self, path: str) -> catalog.Entry | None:
+        """Read one frame's sidecar again after an edit was saved."""
+        entry = self.entries.get(path)
+        if entry is None:
+            return None
+        found = summary(path)
+        entry = catalog.with_marks(
+            catalog.with_edits(entry, found.has_crop, found.has_ev),
+            found.marks,
+        )
+        self._replace(entry)
+        self._notify("marks", path)
+        return entry
+
+    def _replace(self, entry: catalog.Entry) -> None:
+        """Swap in a changed entry, in the dict and in its list item."""
+        self.entries[entry.path] = entry
+        item = self.item_for(entry.path)
+        if item is not None:
+            item.entry = entry
 
     def item_for(self, path: str) -> EntryItem | None:
         """The list item holding one frame, if the folder has it."""
