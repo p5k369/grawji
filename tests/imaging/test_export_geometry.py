@@ -16,7 +16,13 @@ gi.require_version("GExiv2", "0.10")
 from gi.repository import GdkPixbuf, GExiv2
 
 from grawji.crop import CropRotate
-from grawji.imaging.export import sidecar_decode, stamp_for, with_border
+from grawji.imaging.export import (
+    camera_file_format,
+    sidecar_decode,
+    stamp_for,
+    with_border,
+    write_camera_file,
+)
 from grawji.imaging.imagemeta import Stamp, with_credits
 from grawji.imaging.render import add_border, scale_to_edge
 from grawji.marks import Label, Marks
@@ -241,3 +247,55 @@ def test_the_stamp_reads_the_marks_from_the_sidecar(tmp_path):
     )
     settings.export_write_marks = False
     assert stamp_for(settings, "", str(raf)) == Stamp(artist="Jane Doe")
+
+
+def _camera_jpeg(tmp_path, width=12, height=8) -> str:
+    """A camera JPEG stand-in with a model tag."""
+    pixbuf = GdkPixbuf.Pixbuf.new(
+        GdkPixbuf.Colorspace.RGB, False, 8, width, height
+    )
+    pixbuf.fill(0x808080FF)
+    path = tmp_path / "DSCF0001.JPG"
+    pixbuf.savev(str(path), "jpeg", ["quality"], ["90"])
+    meta = GExiv2.Metadata()
+    meta.open_path(str(path))
+    meta.try_set_tag_string("Exif.Image.Model", "X-E5")
+    meta.save_file(str(path))
+    return str(path)
+
+
+def test_an_unedited_camera_jpeg_goes_out_byte_for_byte(tmp_path):
+    """No edit and nothing to stamp keeps the camera's file as it is."""
+    source = _camera_jpeg(tmp_path)
+    out = str(tmp_path / "out.jpg")
+    path, fmt = write_camera_file(
+        source, out, settings=Settings(), crop=CropRotate()
+    )
+    assert (path, fmt) == (out, "jpeg")
+    assert Path(path).read_bytes() == Path(source).read_bytes()
+
+
+def test_an_edited_camera_jpeg_is_encoded_once_with_its_exif(tmp_path):
+    """A crop decodes the JPEG, the camera EXIF comes back on."""
+    source = _camera_jpeg(tmp_path)
+    crop = CropRotate(rect=(0.0, 0.0, 0.5, 1.0))
+    path, _fmt = write_camera_file(
+        source, str(tmp_path / "out.jpg"), settings=Settings(), crop=crop
+    )
+    pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+    assert (pixbuf.get_width(), pixbuf.get_height()) == (6, 8)
+    meta = GExiv2.Metadata()
+    meta.open_path(path)
+    assert meta.try_get_tag_string("Exif.Image.Model") == "X-E5"
+
+
+def test_a_camera_jpeg_never_becomes_a_tiff(tmp_path):
+    """TIFF and HEIF would only wrap 8-bit JPEG pixels."""
+    source = _camera_jpeg(tmp_path)
+    settings = Settings(export_format="tiff16")
+    path, fmt = write_camera_file(
+        source, str(tmp_path / "out.tif"), settings=settings, crop=CropRotate()
+    )
+    assert fmt == "jpeg"
+    assert path.endswith(".jpg")
+    assert camera_file_format("heif") == "jpeg"

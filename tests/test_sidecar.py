@@ -9,6 +9,7 @@ import pytest
 
 from grawji.crop import CropRotate
 from grawji.marks import Label, Marks
+from grawji.pairs import Source
 from grawji.sidecar import (
     load_crop,
     load_exposure,
@@ -16,6 +17,7 @@ from grawji.sidecar import (
     save_crop,
     save_exposure,
     save_marks,
+    save_source,
     sidecar_path,
     summary,
 )
@@ -136,3 +138,14 @@ def test_sidecar_summary_reads_everything_once(tmp_path: Path) -> None:
     found = summary(raf)
     assert (found.has_crop, found.has_ev) == (False, True)
     assert found.marks.rejected
+
+
+def test_sidecar_source_lives_beside_the_rest(tmp_path: Path) -> None:
+    """The picked source is one more key, None clears it."""
+    raf = tmp_path / "DSCF0012.RAF"
+    raf.write_bytes(b"raf")
+    assert summary(raf).source is None
+    save_source(raf, Source.CAMERA)
+    assert summary(raf).source is Source.CAMERA
+    save_source(raf, None)
+    assert not sidecar_path(raf).exists()

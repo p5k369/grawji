@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any
 
@@ -624,3 +624,45 @@ def write_jpeg(  # noqa: PLR0913
             Path(path).write_bytes(Path(tmp_path).read_bytes())
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+def camera_file_format(wanted: str) -> str:
+    """The format a shot developed from its camera file exports in."""
+    if wanted in ("jxl", *_JXL_FROM_TIFF) and jxl_available():
+        return "jxl"
+    return "jpeg"
+
+
+def write_camera_file(
+    camera_file: str,
+    out_path: str,
+    *,
+    settings: Settings,
+    crop: CropRotate,
+    stamp: Stamp = NO_STAMP,
+) -> tuple[str, str]:
+    """Export a camera file, today a JPEG, with its edits."""
+    fmt = camera_file_format(settings.export_format)
+    path = corrected_path(out_path, fmt)
+    data = Path(camera_file).read_bytes()
+    edited = (
+        not crop.is_identity
+        or framing_active(settings)
+        or resize_active(settings)
+    )
+    if not edited:
+        write_passthrough(data, path, stamp=stamp, fmt=fmt)
+        return path, fmt
+    write_jpeg(
+        data,
+        path,
+        quality=settings.jpeg_quality,
+        decode=with_border(
+            with_max_edge(partial(baked_pixbuf, crop=crop), settings),
+            settings,
+        ),
+        stamp=stamp,
+        fmt=fmt,
+        geometry=geometry_for(crop, settings),
+    )
+    return path, fmt

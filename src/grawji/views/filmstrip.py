@@ -27,7 +27,7 @@ from grawji import catalog, mainloop
 from grawji.imaging.thumbnails import ThumbMeta
 from grawji.mainloop import Dispatch
 from grawji.marks import Label
-from grawji.pairs import is_jpeg_name
+from grawji.pairs import is_companion_name
 from grawji.views import file_menu
 from grawji.views.card_badges import (
     DetailBadges,
@@ -88,7 +88,7 @@ def _is_watched(gfile: Any) -> bool:
     if gfile is None:
         return False
     name = gfile.get_basename() or ""
-    return name.lower().endswith(".raf") or is_jpeg_name(name)
+    return name.lower().endswith(".raf") or is_companion_name(name)
 
 
 class FilmStrip(Gtk.ScrolledWindow):

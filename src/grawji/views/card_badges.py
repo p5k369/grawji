@@ -12,6 +12,7 @@ from gi.repository import Gtk
 
 from grawji.catalog import Entry
 from grawji.marks import MAX_RATING, Label
+from grawji.pairs import companion_label
 
 
 def _ui(name: str) -> str:
@@ -60,7 +61,7 @@ class ExportBadge(Gtk.Box):
 
 @Gtk.Template(string=_ui("detail_badges.ui"))
 class DetailBadges(Gtk.Box):
-    """The color labels, then the exposure and crop edits."""
+    """The color labels, the source, the exposure and crop edits."""
 
     __gtype_name__ = "GrawjiDetailBadges"
 
@@ -69,6 +70,7 @@ class DetailBadges(Gtk.Box):
     dot_green = Gtk.Template.Child()
     dot_blue = Gtk.Template.Child()
     dot_purple = Gtk.Template.Child()
+    source_badge = Gtk.Template.Child()
     ev_icon = Gtk.Template.Child()
     crop_icon = Gtk.Template.Child()
 
@@ -77,6 +79,9 @@ class DetailBadges(Gtk.Box):
         for label in Label:
             dot: Gtk.Widget = getattr(self, f"dot_{label.value}")
             dot.set_visible(label in entry.marks.labels)
+        self.source_badge.set_visible(entry.uses_camera_file)
+        if entry.uses_camera_file and entry.companion is not None:
+            self.source_badge.set_label(companion_label(entry.companion))
         self.ev_icon.set_visible(entry.has_ev)
         self.crop_icon.set_visible(entry.has_crop)
 

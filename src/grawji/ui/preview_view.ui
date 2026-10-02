@@ -287,6 +287,36 @@
           </object>
         </child>
         <child>
+          <object class="GtkBox" id="source_switch">
+            <property name="valign">center</property>
+            <property name="visible">false</property>
+            <property name="tooltip-text">Develop from the RAW or the camera file (j)</property>
+            <style>
+              <class name="linked"/>
+            </style>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="label">RAW</property>
+                <property name="action-name">win.source</property>
+                <property name="action-target">'raw'</property>
+                <style>
+                  <class name="source-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton" id="camera_source_button">
+                <property name="label">JPG</property>
+                <property name="action-name">win.source</property>
+                <property name="action-target">'camera'</property>
+                <style>
+                  <class name="source-button"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
           <object class="GtkButton" id="peek_button">
             <property name="icon-name">view-reveal-symbolic</property>
             <property name="tooltip-text">Hold to show the original</property>
