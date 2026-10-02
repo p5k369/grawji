@@ -242,3 +242,20 @@ def test_new_marks_update_the_entry():
     marked = catalog.with_marks(plain, Marks(export=True))
     assert marked.marks.export
     assert not plain.marks.export
+
+
+def test_the_camera_rating_stands_in_for_none():
+    """A never rated image shows the rating the camera wrote."""
+    plain = entry("a.RAF")
+    seeded = catalog.with_meta(plain, "X-E5", "", "", 3)
+    assert seeded.camera_rating == 3
+    assert seeded.marks.rating == 3
+
+
+def test_a_rating_of_the_person_wins_over_the_camera():
+    """Set or cleared in grawji, the camera's rating stays out."""
+    rated = entry("a.RAF", marks=Marks(rating=5))
+    cleared = entry("b.RAF", marks=Marks(rating=0))
+    assert catalog.with_meta(rated, "X-E5", "", "", 3).marks.rating == 5
+    assert catalog.with_meta(cleared, "X-E5", "", "", 3).marks.rating == 0
+    assert catalog.seeded(Marks(), 0) == Marks()

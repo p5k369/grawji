@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,27 @@ _TAG_HEIGHT = 0x0101
 _TYPE_SHORT = 3
 _TYPE_LONG = 4
 _SHORT_MAX = 0xFFFF
+# The Windows and Adobe percentages that go with one to five stars.
+_RATING_PERCENT = {1: 1, 2: 25, 3: 50, 4: 75, 5: 99}
+
+
+@dataclass(frozen=True)
+class Stamp:
+    """What an export stamps on top of the camera's metadata."""
+
+    artist: str = ""
+    rights: str = ""
+    comment: str = ""
+    rating: int = 0
+    label: str = ""
+
+    @property
+    def is_empty(self) -> bool:
+        """Whether there is nothing to stamp."""
+        return self == NO_STAMP
+
+
+NO_STAMP = Stamp()
 
 
 def exif_rows(jpeg: bytes) -> list[tuple[str, str]]:
@@ -107,14 +129,24 @@ def camera_model(path: str) -> str | None:
         return None
 
 
-def _stamp(metadata: Any, *, artist: str, rights: str, comment: str) -> None:
-    """Write the export credit and provenance tags onto open metadata."""
-    if artist:
-        metadata.try_set_tag_string("Exif.Image.Artist", artist)
-    if rights:
-        metadata.try_set_tag_string("Exif.Image.Copyright", rights)
-    if comment:
-        metadata.try_set_tag_string("Exif.Photo.UserComment", comment)
+def _stamp(metadata: Any, stamp: Stamp, *, xmp: bool = True) -> None:
+    """Write the export credit, provenance and mark tags."""
+    if stamp.artist:
+        metadata.try_set_tag_string("Exif.Image.Artist", stamp.artist)
+    if stamp.rights:
+        metadata.try_set_tag_string("Exif.Image.Copyright", stamp.rights)
+    if stamp.comment:
+        metadata.try_set_tag_string("Exif.Photo.UserComment", stamp.comment)
+    percent = _RATING_PERCENT.get(stamp.rating)
+    if percent is not None:
+        metadata.try_set_tag_string("Exif.Image.Rating", str(stamp.rating))
+        metadata.try_set_tag_string("Exif.Image.RatingPercent", str(percent))
+    if not xmp:
+        return
+    if stamp.rating:
+        metadata.try_set_tag_string("Xmp.xmp.Rating", str(stamp.rating))
+    if stamp.label:
+        metadata.try_set_tag_string("Xmp.xmp.Label", stamp.label)
 
 
 def _resize(metadata: Any, size: tuple[int, int] | None) -> None:
@@ -131,23 +163,16 @@ def copy_exif(
     source_jpeg: bytes,
     dest_path: str,
     *,
-    artist: str = "",
-    rights: str = "",
-    comment: str = "",
+    stamp: Stamp = NO_STAMP,
     size: tuple[int, int] | None = None,
+    xmp: bool = True,
 ) -> None:
-    """Transplant the camera JPEG's metadata onto the exported file.
-
-    The orientation tag is reset to normal because the caller bakes the
-    orientation into the pixels before writing. A non-empty artist,
-    copyright or provenance comment is written on top of the camera
-    EXIF.
-    """
+    """Transplant the camera JPEG's metadata onto the exported file."""
     try:
         metadata = GExiv2.Metadata()
         metadata.open_buf(source_jpeg)
         metadata.try_set_orientation(GExiv2.Orientation.NORMAL)
-        _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        _stamp(metadata, stamp, xmp=xmp)
         _resize(metadata, size)
         metadata.save_file(dest_path)
     except GLib.Error:
@@ -181,12 +206,10 @@ def _patch_ifd0_size(tiff: bytes, size: tuple[int, int] | None) -> bytes:
 def stamp_exif_block(
     block: bytes,
     *,
-    artist: str,
-    rights: str,
-    comment: str = "",
+    stamp: Stamp,
     size: tuple[int, int] | None = None,
 ) -> bytes:
-    """Return a HEIF Exif block with the export credits stamped in."""
+    """Return a HEIF Exif block with the export stamp stamped in."""
     if len(block) < _EXIF_BLOCK_PREFIX:
         return block
     offset = int.from_bytes(block[:4], "big")
@@ -200,7 +223,7 @@ def stamp_exif_block(
         metadata = GExiv2.Metadata()
         metadata.open_path(str(tmp_path))
         metadata.try_set_orientation(GExiv2.Orientation.NORMAL)
-        _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        _stamp(metadata, stamp, xmp=False)
         _resize(metadata, size)
         metadata.save_file(str(tmp_path))
         return header + _patch_ifd0_size(tmp_path.read_bytes(), size)
@@ -210,26 +233,22 @@ def stamp_exif_block(
         tmp_path.unlink(missing_ok=True)
 
 
-def stamp_file(
-    path: str, *, artist: str, rights: str, comment: str = ""
-) -> None:
-    """Stamp the export credits onto a file already on disk."""
-    if not artist and not rights and not comment:
+def stamp_file(path: str, *, stamp: Stamp) -> None:
+    """Stamp the export stamp onto a file already on disk."""
+    if stamp.is_empty:
         return
     try:
         metadata = GExiv2.Metadata()
         metadata.open_path(path)
-        _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        _stamp(metadata, stamp)
         metadata.save_file(path)
     except GLib.Error:
         pass
 
 
-def with_credits(
-    jpeg: bytes, *, artist: str, rights: str, comment: str = ""
-) -> bytes:
-    """Return jpeg with artist/copyright/comment stamped, pixels as-is."""
-    if not artist and not rights and not comment:
+def with_credits(jpeg: bytes, *, stamp: Stamp) -> bytes:
+    """Return jpeg with the stamp stamped, pixels as-is."""
+    if stamp.is_empty:
         return jpeg
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -237,7 +256,7 @@ def with_credits(
         tmp_path.write_bytes(jpeg)
         metadata = GExiv2.Metadata()
         metadata.open_path(str(tmp_path))
-        _stamp(metadata, artist=artist, rights=rights, comment=comment)
+        _stamp(metadata, stamp)
         metadata.save_file(str(tmp_path))
         return tmp_path.read_bytes()
     except GLib.Error:

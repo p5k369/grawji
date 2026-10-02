@@ -39,12 +39,14 @@ from grawji.imaging.export import (
     recipe_for_format,
     resize_active,
     sidecar_decode,
+    stamp_for,
     with_border,
     with_max_edge,
     write_jpeg,
     write_passthrough,
 )
 from grawji.imaging.heif_codec import HeifError
+from grawji.imaging.imagemeta import Stamp
 from grawji.imaging.tiff import TiffError
 from grawji.recipe import Recipe
 from grawji.settings import Settings
@@ -61,7 +63,7 @@ class _ExportJob:
     path: str
     recipe: Recipe
     crop: CropRotate
-    comment: str
+    stamp: Stamp
     wanted: str
     identity: bool
     dropped: str = ""
@@ -167,7 +169,11 @@ class SingleExportController:
             path=path,
             recipe=recipe,
             crop=self._get_crop(),
-            comment=self._get_provenance(),
+            stamp=stamp_for(
+                self._settings,
+                self._get_provenance(),
+                self._get_current_raf() or "",
+            ),
             wanted=wanted,
             identity=self._base_identity(),
             dropped=dropped,
@@ -198,9 +204,7 @@ class SingleExportController:
             write_passthrough(
                 rendered,
                 path,
-                artist=self._settings.export_artist,
-                rights=self._settings.export_copyright,
-                comment=job.comment,
+                stamp=job.stamp,
                 fmt=fmt,
                 quality=self._settings.jpeg_quality,
             )
@@ -215,9 +219,7 @@ class SingleExportController:
                     ),
                     self._settings,
                 ),
-                artist=self._settings.export_artist,
-                rights=self._settings.export_copyright,
-                comment=job.comment,
+                stamp=job.stamp,
                 fmt=fmt,
                 geometry=geometry_for(job.crop, self._settings),
             )
@@ -250,14 +252,12 @@ class BatchController:
         worker: CameraWorker,
         session: CameraSession,
         settings: Settings,
-        get_paths: Callable[[], list[str]],
         get_recipe: Callable[[], Recipe],
         get_provenance: Callable[[], str],
         get_current_raf: Callable[[], str | None],
         set_busy: SetBusy,
         on_status: Callable[[str], None],
         on_error: Callable[[Exception], None],
-        on_finished: Callable[[], None] | None = None,
         on_status_link: Callable[[str, str], None] | None = None,
     ) -> None:
         """Wire the controller to the window's session and callbacks.
@@ -267,8 +267,6 @@ class BatchController:
             worker: The camera worker the batch task runs on.
             session: The camera session the task drives directly.
             settings: Read and remember the overwrite choice.
-            get_paths: Returns the RAF paths to export when begin() is
-                called without an explicit list.
             get_recipe: Returns the recipe to render with.
             get_provenance: A short description of the recipe/source
                 the batch renders with.
@@ -277,8 +275,6 @@ class BatchController:
                 keyword arguments busy and status.
             on_status: Sets the status line without the busy plumbing.
             on_error: Receives a camera failure.
-            on_finished: Called after a run completes (not on camera
-                failure), e.g. to leave batch-select mode.
             on_status_link: Sets a status line whose text opens the
                 given path on click.
         """
@@ -286,27 +282,26 @@ class BatchController:
         self._worker = worker
         self._session = session
         self._settings = settings
-        self._get_paths = get_paths
         self._get_recipe = get_recipe
         self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
         self._set_busy = set_busy
         self._on_status = on_status
         self._on_error = on_error
-        self._on_finished = on_finished
         self._on_status_link = on_status_link
         self._dialog: BatchExportDialog | None = None
         self._cancel: threading.Event | None = None
         self._pending: list[str] = []
         self._out_dir: str | None = None
         self._dropped = ""
+        self._note = ""
 
-    def begin(self, paths: list[str] | None = None) -> str | None:
+    def begin(self, paths: list[str], *, note: str = "") -> str | None:
         """Start the flow with a folder pick."""
-        resolved = list(paths) if paths is not None else self._get_paths()
-        if not resolved:
+        if not paths:
             return "No images selected to export."
-        self._pending = resolved
+        self._pending = list(paths)
+        self._note = note
         dialog = Gtk.FileDialog()
         dialog.set_title("Export to folder")
         start = initial_folder(self._settings.last_export_dir)
@@ -428,14 +423,13 @@ class BatchController:
             )
         fmt = delivered_format(rendered, fmt)
         out_path = Path(corrected_path(str(out_path), fmt))
+        stamp = stamp_for(self._settings, comment, raf_file)
         try:
             if decode is None:
                 write_passthrough(
                     rendered,
                     str(out_path),
-                    artist=self._settings.export_artist,
-                    rights=self._settings.export_copyright,
-                    comment=comment,
+                    stamp=stamp,
                     fmt=fmt,
                     quality=self._settings.jpeg_quality,
                 )
@@ -445,9 +439,7 @@ class BatchController:
                     str(out_path),
                     quality=self._settings.jpeg_quality,
                     decode=decode,
-                    artist=self._settings.export_artist,
-                    rights=self._settings.export_copyright,
-                    comment=comment,
+                    stamp=stamp,
                     fmt=fmt,
                     geometry=geometry_for(
                         sidecar.load_crop(raf_file), self._settings
@@ -495,6 +487,8 @@ class BatchController:
             parts.append(f"Skipped {tally['foreign']} from another camera.")
         if tally["failed"]:
             parts.append(f"{tally['failed']} failed.")
+        if self._note:
+            parts.append(self._note)
         if self._dropped:
             parts.append(self._dropped)
         summary = " ".join(parts)
@@ -503,5 +497,3 @@ class BatchController:
             self._on_status_link(summary, self._out_dir)
         if self._dialog is not None:
             self._dialog.finish(summary)
-        if self._on_finished is not None:
-            self._on_finished()

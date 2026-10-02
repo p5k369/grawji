@@ -88,6 +88,8 @@ class Settings:
         export_artist: EXIF Artist written into exports. Empty writes nothing.
         export_copyright: EXIF Copyright written into exports. Empty
             writes nothing.
+        export_write_marks: Stamp the image's rating and first color
+            label into exports, as EXIF and XMP rating and XMP label.
         export_provenance: Record the applied recipe's name in the
             exported JPEG's EXIF user comment.
         export_format: Output format for exports, one of
@@ -125,6 +127,7 @@ class Settings:
     export_artist: str = ""
     export_copyright: str = ""
     export_provenance: bool = True
+    export_write_marks: bool = True
     export_format: str = "jpeg"
 
     def to_dict(self) -> dict[str, object]:

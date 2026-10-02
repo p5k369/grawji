@@ -32,6 +32,7 @@ class Entry:
     has_crop: bool = False
     has_ev: bool = False
     marks: Marks = field(default_factory=Marks)
+    camera_rating: int = 0
     jpeg: str | None = None
     model: str = ""
     lens: str = ""
@@ -88,7 +89,7 @@ def _key(entry: Entry, order: Order) -> tuple[object, ...]:
         value = entry.focal_value
         return (value is None, value or 0.0, entry.name)
     if order is Order.RATING:
-        return (entry.marks.rating, entry.name)
+        return (entry.marks.rating or 0, entry.name)
     return (entry.name,)
 
 
@@ -203,9 +204,29 @@ def scan(folder: Path | str) -> list[Entry]:
     return entries
 
 
-def with_meta(entry: Entry, model: str, lens: str, focal: str) -> Entry:
+def seeded(marks: Marks, camera_rating: int) -> Marks:
+    """The marks with the camera's rating standing in for none."""
+    if marks.rating is not None or camera_rating <= 0:
+        return marks
+    return marks.with_rating(camera_rating)
+
+
+def with_meta(
+    entry: Entry,
+    model: str,
+    lens: str,
+    focal: str,
+    camera_rating: int = 0,
+) -> Entry:
     """The entry again, with the metadata the thumbnail pass read."""
-    return replace(entry, model=model, lens=lens, focal=focal)
+    return replace(
+        entry,
+        model=model,
+        lens=lens,
+        focal=focal,
+        camera_rating=camera_rating,
+        marks=seeded(entry.marks, camera_rating),
+    )
 
 
 def with_aspect(entry: Entry, aspect: float) -> Entry:

@@ -26,6 +26,7 @@ from gi.repository import (
 from grawji import catalog, mainloop
 from grawji.imaging.thumbnails import ThumbMeta
 from grawji.mainloop import Dispatch
+from grawji.marks import MAX_RATING, STAR, Label
 from grawji.pairs import is_jpeg_name
 from grawji.views import file_menu
 from grawji.views.card_badges import (
@@ -115,7 +116,7 @@ class FilmStrip(Gtk.ScrolledWindow):
                 False when it finishes, for an activity indicator elsewhere.
             on_filter_changed: Called whenever the active filter changes.
             on_selection_changed: Called with the number of selected
-                thumbnails while in batch-select mode.
+                thumbnails whenever it changes.
             on_file_action: Called with ("export"/"copy"/"move"/"trash",
                 paths) from a card's context menu.
             on_mark_action: Called with a mark choice from a card's
@@ -145,9 +146,6 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._cards: dict[Gtk.Widget, dict[str, Any]] = {}
         self._card_path: dict[Gtk.Widget, str] = {}
         self._current = -1
-        # Batch-select mode: while active, a click toggles a card's
-        # membership in the export set (shown raised) instead of opening it.
-        self._select_mode = False
         self._selected: set[str] = set()
         self._anchor: str | None = None
         self._pending_mods: tuple[str, bool, bool] | None = None
@@ -252,6 +250,14 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._filter_focal: tuple[float, float] | None = None
         self._focal_wanted: tuple[float, float] | None = None
         self._focal_pending = 0
+        self._reset_marks_filter()
+
+    def _reset_marks_filter(self) -> None:
+        """Turn every mark rule of the filter off."""
+        self._filter_rating = 0
+        self._filter_labels: frozenset[Label] = frozenset()
+        self._filter_export = False
+        self._filter_rejects = catalog.Rejects.SHOW
 
     def adopt_filter_button(self, button: Gtk.MenuButton) -> None:
         """Drive the window's funnel button with the filter menu."""
@@ -263,6 +269,23 @@ class FilmStrip(Gtk.ScrolledWindow):
                 GLib.Variant.new_string(""),
             )
             action.connect("change-state", self._on_filter_action, axis)
+            group.add_action(action)
+            self._filter_actions[axis] = action
+        for axis, default in (("rating", "0"), ("rejects", "show")):
+            action = Gio.SimpleAction.new_stateful(
+                axis,
+                GLib.VariantType.new("s"),
+                GLib.Variant.new_string(default),
+            )
+            action.connect("change-state", self._on_marks_filter, axis)
+            group.add_action(action)
+            self._filter_actions[axis] = action
+        toggles = ["export", *(f"label-{label.value}" for label in Label)]
+        for axis in toggles:
+            action = Gio.SimpleAction.new_stateful(
+                axis, None, GLib.Variant.new_boolean(False)
+            )
+            action.connect("change-state", self._on_marks_filter, axis)
             group.add_action(action)
             self._filter_actions[axis] = action
         clear = Gio.SimpleAction.new("clear", None)
@@ -297,6 +320,7 @@ class FilmStrip(Gtk.ScrolledWindow):
             )
             section.append_item(item)
             menu.append_section("Focal length", section)
+        self._append_marks_sections(menu)
         footer = Gio.Menu()
         footer.append("Clear filter", "filter.clear")
         menu.append_section(None, footer)
@@ -304,6 +328,61 @@ class FilmStrip(Gtk.ScrolledWindow):
         if slider is not None:
             popover.add_child(slider, "focal")
         button.set_popover(popover)
+
+    @staticmethod
+    def _append_marks_sections(menu: Gio.Menu) -> None:
+        """The rating, color label and mark rules of the filter menu."""
+        rating = Gio.Menu()
+        for stars in range(MAX_RATING + 1):
+            title = "Any rating" if stars == 0 else STAR * stars
+            if 0 < stars < MAX_RATING:
+                title += " and up"
+            item = Gio.MenuItem.new(title, None)
+            item.set_action_and_target_value(
+                "filter.rating", GLib.Variant.new_string(str(stars))
+            )
+            rating.append_item(item)
+        menu.append_section("Rating", rating)
+        colors = Gio.Menu()
+        for label in Label:
+            colors.append(label.value.capitalize(), f"filter.label-{label}")
+        menu.append_section("Color label", colors)
+        marks = Gio.Menu()
+        marks.append("Marked for export only", "filter.export")
+        for title, value in (
+            ("Show rejects", catalog.Rejects.SHOW),
+            ("Hide rejects", catalog.Rejects.HIDE),
+            ("Only rejects", catalog.Rejects.ONLY),
+        ):
+            item = Gio.MenuItem.new(title, None)
+            item.set_action_and_target_value(
+                "filter.rejects", GLib.Variant.new_string(value.value)
+            )
+            marks.append_item(item)
+        menu.append_section("Marks", marks)
+
+    def _on_marks_filter(
+        self, action: Gio.SimpleAction, value: GLib.Variant, axis: str
+    ) -> None:
+        """Apply a rating, label, export or reject pick from the menu."""
+        action.set_state(value)
+        if axis == "rating":
+            self._filter_rating = int(value.get_string())
+        elif axis == "rejects":
+            self._filter_rejects = catalog.Rejects(value.get_string())
+        elif axis == "export":
+            self._filter_export = value.get_boolean()
+        else:
+            label = Label(axis.removeprefix("label-"))
+            labels = self._filter_labels - {label}
+            if value.get_boolean():
+                labels |= {label}
+            self._filter_labels = frozenset(labels)
+        self.set_filter(
+            model=self._filter_model,
+            lens=self._filter_lens,
+            focal=self._filter_focal,
+        )
 
     def _build_focal_sliders(self) -> Gtk.Widget | None:
         """The from/to focal-length sliders, snapping to folder values."""
@@ -412,6 +491,7 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _on_filter_cleared(self, *_args: object) -> None:
         """Reset every filter axis."""
+        self._reset_marks_filter()
         self.set_filter(model=None, lens=None, focal=None)
 
     def _init_file_actions(self) -> None:
@@ -527,8 +607,8 @@ class FilmStrip(Gtk.ScrolledWindow):
             keep = self._paths[self._current]
         self._tiles.clear()
         if folder != self._folder:
-            self._select_mode = False
             self.clear_selection()
+            self._reset_marks_filter()
             self.set_filter(model=None, lens=None, focal=None)
             self._folder = folder
             self._watch(folder)
@@ -641,7 +721,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._card_path.pop(button, None)
 
     def _style_card(self, button: Gtk.Widget, path: str) -> None:
-        """Mark a card as the current one or as batch-selected."""
+        """Mark a card as the current one or as selected."""
         current = self.current_path
         for style, wanted in (
             ("thumb-selected", path == current),
@@ -668,15 +748,12 @@ class FilmStrip(Gtk.ScrolledWindow):
             if self._on_filter_changed is not None:
                 self._on_filter_changed()
             return
-        if reason == "entry" and path is not None:
+        if reason in ("entry", "marks") and path is not None:
+            # A frame's metadata can bring the camera's rating along.
             entry = self._model.entry_for(path)
             for button, shown in self._card_path.items():
                 if shown == path and entry is not None:
                     self._cards[button]["camera"].set_text(entry.model)
-        if reason == "marks" and path is not None:
-            entry = self._model.entry_for(path)
-            for button, shown in self._card_path.items():
-                if shown == path and entry is not None:
                     self._show_entry_badges(button, entry)
 
     def _show_entry_badges(
@@ -688,10 +765,6 @@ class FilmStrip(Gtk.ScrolledWindow):
         parts["export"].show_entry(entry)
         parts["details"].show_entry(entry)
         style_rejected(button, entry)
-
-    def _item_for(self, path: str) -> EntryItem | None:
-        """The list item holding one frame, if the folder still has it."""
-        return self._model.item_for(path)
 
     def _path_of(self, button: Gtk.Widget) -> str | None:
         """Which frame a card currently shows."""
@@ -722,22 +795,11 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._model.entries = entries
 
     @property
-    def active_filter(self) -> catalog.Filter:
-        """What the folder is narrowed down to right now."""
-        return self._filter()
-
-    @property
     def current_path(self) -> str | None:
         """The selected RAF, or None while nothing is selected."""
         if 0 <= self._current < len(self._paths):
             return self._paths[self._current]
         return None
-
-    def _clear(self) -> None:
-        """Drop every thumbnail currently in the strip."""
-        self._tiles.clear()
-        self._cards.clear()
-        self._card_path.clear()
 
     def refresh_badges(self, path: str) -> None:
         """Re-read path's sidecar and update its badges everywhere."""
@@ -861,7 +923,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._activate(item.entry.path)
 
     def _activate(self, path: str) -> None:
-        """Open a frame, or mark it when batch-selecting."""
+        """Open a frame, or add it to the selection with a modifier."""
         pending = self._pending_mods
         self._pending_mods = None
         if pending is not None and pending[0] == path:
@@ -870,9 +932,6 @@ class FilmStrip(Gtk.ScrolledWindow):
                 self._select_range_to(path)
             elif ctrl:
                 self._toggle_selected(path)
-            return
-        if self._select_mode:
-            self._toggle_selected(path)
             return
         self.clear_selection()
         if path in self._paths:
@@ -922,49 +981,19 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._apply_selection_style()
         self._notify_selection()
 
-    def enter_select_mode(self) -> None:
-        """Begin batch-select: clicks toggle export selection.
-
-        The open-image highlight is hidden for the duration so the only
-        raised cards are the selected ones.
-        """
-        self._select_mode = True
-        self._selected.clear()
-        self._anchor = None
-        self._apply_selection_style()
-        self._notify_selection()
-
-    def exit_select_mode(self) -> None:
-        """Leave batch-select mode and clear the selection.
-
-        Restores the open image's highlight, hidden while selecting.
-        """
-        self._select_mode = False
-        self._selected.clear()
-        self._anchor = None
-        self._apply_selection_style()
-        self._notify_selection()
-
-    @property
-    def in_select_mode(self) -> bool:
-        """Whether batch-select mode is active."""
-        return self._select_mode
-
     @property
     def selected_paths(self) -> list[str]:
         """The selected RAF paths, in display order."""
         return [p for p in self._paths if p in self._selected]
 
     def select_all(self) -> None:
-        """Select every visible thumbnail (batch-select mode only)."""
-        if not self._select_mode:
-            return
+        """Select every thumbnail the filter shows."""
         self._selected = {self._paths[i] for i in self._visible_indices()}
         self._apply_selection_style()
         self._notify_selection()
 
     def _toggle_selected(self, path: str) -> None:
-        """Add or remove one thumbnail from the export selection."""
+        """Add or remove one thumbnail from the selection."""
         if path not in self._paths:
             return
         if path in self._selected:
@@ -997,17 +1026,33 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._filter_lens = lens or None
         self._filter_focal = focal
         self._model.set_filter(self._filter())
-        states = (("model", self._filter_model), ("lens", self._filter_lens))
-        for axis, value in states:
-            action = self._filter_actions.get(axis)
-            if action is not None:
-                action.set_state(GLib.Variant.new_string(value or ""))
+        self._sync_filter_actions()
         if self.filter_button is not None:
             active = self._filter().is_active
             if active:
                 self.filter_button.add_css_class("accent")
             else:
                 self.filter_button.remove_css_class("accent")
+
+    def _sync_filter_actions(self) -> None:
+        """Point the filter menu's states at the active filter."""
+        states = {
+            "model": GLib.Variant.new_string(self._filter_model or ""),
+            "lens": GLib.Variant.new_string(self._filter_lens or ""),
+            "rating": GLib.Variant.new_string(str(self._filter_rating)),
+            "rejects": GLib.Variant.new_string(self._filter_rejects.value),
+            "export": GLib.Variant.new_boolean(self._filter_export),
+            **{
+                f"label-{label.value}": GLib.Variant.new_boolean(
+                    label in self._filter_labels
+                )
+                for label in Label
+            },
+        }
+        for axis, value in states.items():
+            action = self._filter_actions.get(axis)
+            if action is not None:
+                action.set_state(value)
 
     def known_models(self) -> list[str]:
         """Camera models present in the folder, sorted."""
@@ -1027,6 +1072,10 @@ class FilmStrip(Gtk.ScrolledWindow):
             camera=self._filter_model,
             lens=self._filter_lens,
             focal=self._filter_focal,
+            min_rating=self._filter_rating,
+            labels=self._filter_labels,
+            export_only=self._filter_export,
+            rejects=self._filter_rejects,
         )
 
     def texture_for(self, path: str) -> Any | None:
@@ -1103,7 +1152,7 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _on_glide_tick(self, _widget: Any, clock: Any) -> bool:
         """Advance the glide by the elapsed frame time."""
-        now = clock.get_frame_time()  # microseconds
+        now = clock.get_frame_time()
         if self._glide_last is not None:
             elapsed = (now - self._glide_last) / 1e6
             self._scroll_by(self._glide_speed * elapsed * self._glide_dir)

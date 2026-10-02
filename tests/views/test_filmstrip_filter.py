@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from grawji import catalog
+from grawji.marks import Label, Marks
 
 pytestmark = pytest.mark.gui
 
@@ -113,9 +114,8 @@ def test_filter_drops_hidden_marks(strip: Any) -> None:
 
 
 def test_select_all_selects_only_visible(strip: Any) -> None:
-    """Select All in batch mode honors the filter."""
+    """Select All honors the filter."""
     strip.set_filter(model="X-E5", lens=None, focal=None)
-    strip.enter_select_mode()
     strip.select_all()
     names = [Path(p).name for p in strip.selected_paths]
     assert names == ["a.RAF", "c.RAF"]
@@ -427,3 +427,39 @@ def test_a_hand_on_the_scrollbar_outranks_pending_moves(
     assert strip._reveal_wanted is None
     assert strip._center_path is None
     assert strip._center_frames == 0
+
+
+def test_the_mark_rules_filter_the_strip(strip: Any) -> None:
+    """Rating, label, export and reject picks narrow the strip."""
+    from gi.repository import GLib, Gtk
+
+    button = Gtk.MenuButton()
+    strip.adopt_filter_button(button)
+    paths = strip.paths
+    marks = {
+        paths[0]: Marks(rating=4, labels=frozenset({Label.RED})),
+        paths[1]: Marks(rating=-1),
+        paths[2]: Marks(rating=2, export=True),
+    }
+    for path, mark in marks.items():
+        strip._entries[path] = catalog.with_marks(strip._entries[path], mark)
+    actions = strip._filter_actions
+
+    actions["rating"].change_state(GLib.Variant.new_string("2"))
+    assert visible(strip) == ["a.RAF", "c.RAF"]
+    actions["label-red"].change_state(GLib.Variant.new_boolean(True))
+    assert visible(strip) == ["a.RAF"]
+    assert button.has_css_class("accent")
+
+    strip._on_filter_cleared()
+    assert visible(strip) == ["a.RAF", "b.RAF", "c.RAF"]
+    assert actions["label-red"].get_state().get_boolean() is False
+    assert actions["rating"].get_state().get_string() == "0"
+
+    actions["export"].change_state(GLib.Variant.new_boolean(True))
+    assert visible(strip) == ["c.RAF"]
+    strip._on_filter_cleared()
+    actions["rejects"].change_state(GLib.Variant.new_string("hide"))
+    assert visible(strip) == ["a.RAF", "c.RAF"]
+    actions["rejects"].change_state(GLib.Variant.new_string("only"))
+    assert visible(strip) == ["b.RAF"]

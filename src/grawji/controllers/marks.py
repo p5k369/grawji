@@ -48,6 +48,19 @@ class MarksController:
         entry = self._folder.entry_for(path) if path else None
         return entry.marks if entry is not None else Marks()
 
+    def marked_for_export(self, paths: list[str]) -> list[str]:
+        """The paths marked for export, in their order."""
+        return [path for path in paths if self.marks_of(path).export]
+
+    def rejected(self, paths: list[str]) -> list[str]:
+        """The paths marked as rejects, in their order."""
+        return [path for path in paths if self.marks_of(path).rejected]
+
+    def without_rejects(self, paths: list[str]) -> tuple[list[str], int]:
+        """The paths a batch should export, and how many rejects it skips."""
+        kept = [path for path in paths if not self.marks_of(path).rejected]
+        return kept, len(paths) - len(kept)
+
     def rate(self, rating: int, paths: list[str] | None = None) -> None:
         """Set a star rating. Repeating the current rating clears it."""
         targets = self._resolve(paths)

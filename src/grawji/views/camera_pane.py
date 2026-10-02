@@ -90,7 +90,6 @@ class CameraPane(Gtk.Box):
     camera_header = Gtk.Template.Child()
     camera_stack = Gtk.Template.Child()
     camera_banks = Gtk.Template.Child()
-    camera_none_page = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Build the empty pane."""

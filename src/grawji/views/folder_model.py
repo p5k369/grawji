@@ -118,7 +118,7 @@ class FolderModel:
                 known.append(entry)
                 continue
             filled = catalog.with_meta(
-                entry, fact.model, fact.lens, fact.focal
+                entry, fact.model, fact.lens, fact.focal, fact.rating
             )
             known.append(
                 catalog.with_aspect(filled, fact.aspect)
@@ -143,7 +143,9 @@ class FolderModel:
         entry = self.entries.get(path)
         if entry is None:
             return
-        entry = catalog.with_meta(entry, meta.model, meta.lens, meta.focal)
+        entry = catalog.with_meta(
+            entry, meta.model, meta.lens, meta.focal, meta.rating
+        )
         if aspect:
             entry = catalog.with_aspect(entry, aspect)
         self.entries[path] = entry
@@ -172,7 +174,7 @@ class FolderModel:
         found = summary(path)
         entry = catalog.with_marks(
             catalog.with_edits(entry, found.has_crop, found.has_ev),
-            found.marks,
+            catalog.seeded(found.marks, entry.camera_rating),
         )
         self._replace(entry)
         self._notify("marks", path)

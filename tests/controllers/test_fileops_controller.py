@@ -31,11 +31,10 @@ class ImmediateThread:
 class FakeStrip:
     """The slice of FilmStrip the controller talks to."""
 
-    def __init__(self, *, paths=(), selected=(), select_mode=False):
+    def __init__(self, *, paths=(), selected=()):
         """Set up the strip state a test needs."""
         self.paths = list(paths)
         self.selected_paths = list(selected)
-        self.in_select_mode = select_mode
         self.selected_after_trash: list[str] = []
 
     def select_path(self, path):
@@ -173,10 +172,9 @@ def test_delete_prefers_the_marked_images(immediate, monkeypatch):
     assert "Trash" in state["toasts"][0].get_title()
 
 
-def test_delete_in_empty_select_mode_does_nothing(immediate):
-    """Batch-select mode with nothing selected leaves Delete alone."""
-    strip = FakeStrip(select_mode=True)
-    controller, _strip, _state = make_controller(strip=strip)
+def test_delete_with_nothing_open_does_nothing(immediate):
+    """No selection and no open image leaves Delete alone."""
+    controller, _strip, _state = make_controller(strip=FakeStrip())
     assert controller.handle_delete() is False
 
 

@@ -15,6 +15,12 @@
     </section>
     <section>
       <item>
+        <attribute name="label">Move Rejected to Trash…</attribute>
+        <attribute name="action">win.trash-rejected</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
         <attribute name="label">Back Up Camera Settings…</attribute>
         <attribute name="action">win.backup-camera</attribute>
       </item>
@@ -53,8 +59,12 @@
   <menu id="export_menu">
     <section>
       <item>
-        <attribute name="label">Batch Export…</attribute>
-        <attribute name="action">win.batch-export</attribute>
+        <attribute name="label">Export Marked…</attribute>
+        <attribute name="action">win.export-marked</attribute>
+      </item>
+      <item>
+        <attribute name="label">Export All Shown…</attribute>
+        <attribute name="action">win.export-shown</attribute>
       </item>
     </section>
   </menu>
@@ -310,63 +320,6 @@
             </child>
             <child>
               <object class="GtkSeparator"/>
-            </child>
-            <child>
-              <object class="GtkRevealer" id="select_bar">
-                <property name="transition-type">slide-up</property>
-                <property name="reveal-child">false</property>
-                <child>
-                  <object class="GtkBox">
-                    <property name="spacing">8</property>
-                    <property name="margin-start">10</property>
-                    <property name="margin-end">10</property>
-                    <property name="margin-top">4</property>
-                    <property name="margin-bottom">4</property>
-                    <style>
-                      <class name="toolbar"/>
-                    </style>
-                    <child>
-                      <object class="GtkLabel" id="select_label">
-                        <property name="label">Select images to export</property>
-                        <property name="xalign">0</property>
-                        <property name="hexpand">true</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkButton">
-                        <property name="label">Select All</property>
-                        <property name="action-name">win.select-all</property>
-                        <style>
-                          <class name="flat"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkButton">
-                        <property name="label">Cancel</property>
-                        <property name="action-name">win.cancel-selection</property>
-                        <style>
-                          <class name="flat"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkButton">
-                        <property name="label">Export…</property>
-                        <property name="action-name">win.export-selection</property>
-                        <style>
-                          <class name="suggested-action"/>
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-            <child>
-              <object class="GtkSeparator" id="select_separator">
-                <property name="visible">false</property>
-              </object>
             </child>
             <child>
               <object class="GtkBox" id="filmstrip_slot">

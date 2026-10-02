@@ -23,6 +23,7 @@ from grawji import sidecar
 from grawji.camera.capabilities import Capabilities
 from grawji.crop import CropRotate
 from grawji.imaging import heif, heif_codec, imagemeta, render16, tiff
+from grawji.imaging.imagemeta import NO_STAMP, Stamp
 from grawji.imaging.render import (
     add_border,
     bake_pixbuf,
@@ -271,9 +272,7 @@ def repack_jxl(jpeg: bytes, path: str) -> None:
 def _exif_stream(
     source: bytes,
     *,
-    artist: str,
-    rights: str,
-    comment: str,
+    stamp: Stamp,
     size: tuple[int, int],
 ) -> bytes | None:
     """The camera's metadata as a bare TIFF stream for a JXL Exif box."""
@@ -284,10 +283,9 @@ def _exif_stream(
         imagemeta.copy_exif(
             source,
             str(carrier),
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
             size=size,
+            xmp=False,
         )
         return carrier.read_bytes()
     except (OSError, tiff.TiffError):
@@ -352,32 +350,26 @@ def _check_complete(data: bytes, fmt: str) -> None:
         )
 
 
-def _heif_with_credits(
-    data: bytes, *, artist: str, rights: str, comment: str
-) -> bytes:
-    """Stamp the export credits into a HEIF, leaving its pixels alone."""
-    if not (artist or rights or comment):
+def _heif_with_credits(data: bytes, *, stamp: Stamp) -> bytes:
+    """Stamp the export stamp into a HEIF, leaving its pixels alone."""
+    if stamp.is_empty:
         return data
     block = heif.exif_block(data)
     if block is None:
         return data
-    stamped = imagemeta.stamp_exif_block(
-        block, artist=artist, rights=rights, comment=comment
-    )
+    stamped = imagemeta.stamp_exif_block(block, stamp=stamp)
     return heif.replace_exif(data, stamped) or data
 
 
-def write_passthrough(  # noqa: PLR0913
+def write_passthrough(
     data: bytes,
     path: str,
     *,
-    artist: str = "",
-    rights: str = "",
-    comment: str = "",
+    stamp: Stamp = NO_STAMP,
     fmt: str = "jpeg",
     quality: int = 95,
 ) -> None:
-    """Write the camera's own bytes, credits stamped, no re-encode."""
+    """Write the camera's own bytes."""
     _check_complete(data, fmt)
     if fmt in _JXL_FROM_TIFF:
         write_jxl_from_tiff(
@@ -386,31 +378,38 @@ def write_passthrough(  # noqa: PLR0913
             quality=quality,
             geometry=Geometry(crop=CropRotate()),
             fmt=fmt,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
         )
         return
     if fmt in _TIFF_BITS:
         Path(path).write_bytes(data)
-        imagemeta.stamp_file(
-            path, artist=artist, rights=rights, comment=comment
-        )
+        imagemeta.stamp_file(path, stamp=stamp)
         return
     if fmt == "heif":
-        Path(path).write_bytes(
-            _heif_with_credits(
-                data, artist=artist, rights=rights, comment=comment
-            )
-        )
+        Path(path).write_bytes(_heif_with_credits(data, stamp=stamp))
         return
-    stamped = imagemeta.with_credits(
-        data, artist=artist, rights=rights, comment=comment
-    )
+    stamped = imagemeta.with_credits(data, stamp=stamp)
     if fmt == "jxl":
         repack_jxl(stamped, path)
     else:
         Path(path).write_bytes(stamped)
+
+
+def stamp_for(settings: Settings, comment: str, raf_path: str) -> Stamp:
+    """The stamp one export stamps, the image's marks included."""
+    rating, label = 0, ""
+    if settings.export_write_marks:
+        marks = sidecar.load_marks(raf_path)
+        rating = marks.rating or 0
+        labels = marks.ordered_labels
+        label = labels[0].value.capitalize() if labels else ""
+    return Stamp(
+        artist=settings.export_artist,
+        rights=settings.export_copyright,
+        comment=comment,
+        rating=rating,
+        label=label,
+    )
 
 
 def format_suffix(fmt: str) -> str:
@@ -463,15 +462,13 @@ def geometry_for(crop: CropRotate, settings: Settings) -> Geometry:
     )
 
 
-def write_heif(  # noqa: PLR0913
+def write_heif(
     data: bytes,
     path: str,
     *,
     quality: int,
     geometry: Geometry,
-    artist: str = "",
-    rights: str = "",
-    comment: str = "",
+    stamp: Stamp = NO_STAMP,
 ) -> None:
     """Re-encode an edited camera HEIF, keeping its depth and metadata."""
     _check_complete(data, "heif")
@@ -493,9 +490,7 @@ def write_heif(  # noqa: PLR0913
     if exif:
         exif = imagemeta.stamp_exif_block(
             exif,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
             size=(samples.shape[1], samples.shape[0]),
         )
     heif_codec.encode(
@@ -508,9 +503,7 @@ def write_tiff(
     path: str,
     *,
     geometry: Geometry,
-    artist: str = "",
-    rights: str = "",
-    comment: str = "",
+    stamp: Stamp = NO_STAMP,
 ) -> None:
     """Re-encode an edited camera TIFF, keeping its depth and metadata."""
     _check_complete(data, "tiff16")
@@ -528,23 +521,19 @@ def write_tiff(
     imagemeta.copy_exif(
         data,
         path,
-        artist=artist,
-        rights=rights,
-        comment=comment,
+        stamp=stamp,
         size=(samples.shape[1], samples.shape[0]),
     )
 
 
-def write_jxl_from_tiff(  # noqa: PLR0913
+def write_jxl_from_tiff(
     data: bytes,
     path: str,
     *,
     quality: int,
     geometry: Geometry,
     fmt: str = "jxl16",
-    artist: str = "",
-    rights: str = "",
-    comment: str = "",
+    stamp: Stamp = NO_STAMP,
 ) -> None:
     """Pack an edited camera TIFF into JPEG XL at its own bit depth."""
     _check_complete(data, fmt)
@@ -566,9 +555,7 @@ def write_jxl_from_tiff(  # noqa: PLR0913
         icc=tiff.icc_profile(data),
         exif=_exif_stream(
             data,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
             size=(samples.shape[1], samples.shape[0]),
         ),
     )
@@ -580,9 +567,7 @@ def write_jpeg(  # noqa: PLR0913
     *,
     quality: int,
     decode: Callable[[bytes], Any],
-    artist: str = "",
-    rights: str = "",
-    comment: str = "",
+    stamp: Stamp = NO_STAMP,
     fmt: str = "jpeg",
     geometry: Geometry | None = None,
 ) -> None:
@@ -596,9 +581,7 @@ def write_jpeg(  # noqa: PLR0913
             quality=quality,
             geometry=geometry,
             fmt=fmt,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
         )
         return
     if fmt in _TIFF_BITS:
@@ -608,9 +591,7 @@ def write_jpeg(  # noqa: PLR0913
             jpeg,
             path,
             geometry=geometry,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
         )
         return
     if fmt == "heif":
@@ -621,9 +602,7 @@ def write_jpeg(  # noqa: PLR0913
             path,
             quality=quality,
             geometry=geometry,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
         )
         return
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -636,9 +615,7 @@ def write_jpeg(  # noqa: PLR0913
         imagemeta.copy_exif(
             jpeg,
             tmp_path,
-            artist=artist,
-            rights=rights,
-            comment=comment,
+            stamp=stamp,
             size=(pixbuf.get_width(), pixbuf.get_height()),
         )
         if fmt == "jxl":

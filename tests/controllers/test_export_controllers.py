@@ -21,6 +21,7 @@ from grawji.controllers.exports import (
     SingleExportController,
 )
 from grawji.crop import CropRotate
+from grawji.imaging.imagemeta import Stamp
 from grawji.recipe import Recipe
 from grawji.settings import Settings
 
@@ -61,7 +62,7 @@ def export_once(controller, path, *, identity=False, crop=None):
         path=str(path),
         recipe=Recipe(),
         crop=crop or CropRotate(),
-        comment="",
+        stamp=Stamp(),
         wanted=module.export_format(controller._settings),
         identity=identity,
     )
@@ -250,7 +251,6 @@ def batch_controller(session, settings):
         worker=None,
         session=session,
         settings=settings,
-        get_paths=list,
         get_recipe=Recipe,
         get_provenance=lambda: "",
         get_current_raf=lambda: None,
@@ -427,7 +427,7 @@ def test_heif_drops_clarity_and_says_so(tmp_path, monkeypatch):
         path=str(tmp_path / "out.heif"),
         recipe=recipe,
         crop=CropRotate(),
-        comment="",
+        stamp=Stamp(),
         wanted="heif",
         identity=True,
         dropped=dropped,

@@ -105,14 +105,12 @@ class FileOpsController:
         self._pick_folder("Move to folder", "move", paths)
 
     def handle_delete(self) -> bool:
-        """Delete-key policy: the marked images, else the open one."""
+        """Delete-key policy."""
         strip = self._filmstrip()
         paths = strip.selected_paths
         if paths:
             self.trash_paths(paths, confirm=len(paths) > 1)
             return True
-        if strip.in_select_mode:
-            return False
         if self._current_raf() is not None:
             self.trash_current()
             return True

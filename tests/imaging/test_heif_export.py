@@ -9,6 +9,7 @@ import pytest
 
 from grawji.camera import core
 from grawji.imaging import export, heif, heif_codec, imagemeta
+from grawji.imaging.imagemeta import Stamp
 
 
 def test_file_type_patches_the_profile_slot():
@@ -42,11 +43,11 @@ def test_format_suffix_and_basename():
 
 
 def test_stamp_exif_block_keeps_the_header_and_adds_credits():
-    """Credits go into the TIFF stream inside a HEIF Exif block."""
+    """Stamp go into the TIFF stream inside a HEIF Exif block."""
     tiff = _tiff_with_model()
     block = (6).to_bytes(4, "big") + b"Exif\x00\x00" + tiff
     stamped = imagemeta.stamp_exif_block(
-        block, artist="A", rights="R", comment="C"
+        block, stamp=Stamp(artist="A", rights="R", comment="C")
     )
     assert stamped[:10] == block[:10]
     assert stamped != block
@@ -55,9 +56,9 @@ def test_stamp_exif_block_keeps_the_header_and_adds_credits():
 def test_stamp_exif_block_passes_junk_through():
     """A block that is not a TIFF stream is returned untouched."""
     junk = b"\x00\x00\x00\x06Exif\x00\x00not a tiff"
-    assert imagemeta.stamp_exif_block(junk, artist="A", rights="") == junk
+    assert imagemeta.stamp_exif_block(junk, stamp=Stamp(artist="A")) == junk
     assert (
-        imagemeta.stamp_exif_block(b"\x00", artist="A", rights="") == b"\x00"
+        imagemeta.stamp_exif_block(b"\x00", stamp=Stamp(artist="A")) == b"\x00"
     )
 
 
@@ -109,7 +110,7 @@ def test_stamp_exif_block_rewrites_the_size():
     tiff = _tiff_with_size(7728, 5152)
     block = (6).to_bytes(4, "big") + b"Exif\x00\x00" + tiff
     stamped = imagemeta.stamp_exif_block(
-        block, artist="", rights="", size=(4066, 6100)
+        block, stamp=Stamp(), size=(4066, 6100)
     )
     assert _sizes_in(stamped[10:]) == (4066, 6100)
 
