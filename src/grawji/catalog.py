@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from grawji.marks import Label, Marks
-from grawji.pairs import jpegs_by_stem
+from grawji.pairs import Source, companions_by_stem
 from grawji.sidecar import summary
 
 # The RAF spellings a camera or a card reader may leave behind.
@@ -33,7 +33,8 @@ class Entry:
     has_ev: bool = False
     marks: Marks = field(default_factory=Marks)
     camera_rating: int = 0
-    jpeg: str | None = None
+    companion: str | None = None
+    source: Source = Source.RAW
     model: str = ""
     lens: str = ""
     focal: str = ""
@@ -48,6 +49,11 @@ class Entry:
     def edited(self) -> bool:
         """Whether the sidecar holds a crop or an exposure."""
         return self.has_crop or self.has_ev
+
+    @property
+    def uses_camera_file(self) -> bool:
+        """Whether the shot is developed from its camera file."""
+        return self.companion is not None and self.source is Source.CAMERA
 
     @property
     def focal_value(self) -> float | None:
@@ -177,20 +183,25 @@ class Filter:
         return True
 
 
-def scan(folder: Path | str) -> list[Entry]:
+def scan(
+    folder: Path | str, default_source: Source = Source.RAW
+) -> list[Entry]:
     """Every RAF of the folder, by file name, with its sidecar and JPEG."""
     base = Path(folder)
     paths = sorted(
         {path for pattern in _PATTERNS for path in base.glob(pattern)}
     )
     try:
-        jpegs = jpegs_by_stem(path.name for path in base.iterdir())
+        companions = companions_by_stem(path.name for path in base.iterdir())
     except OSError:
-        jpegs = {}
+        companions = {}
     entries = []
     for path in paths:
         found = summary(path)
-        jpeg = jpegs.get(path.stem)
+        companion = companions.get(path.stem)
+        source = Source.RAW
+        if companion is not None:
+            source = found.source or default_source
         entries.append(
             Entry(
                 path=str(path),
@@ -198,7 +209,8 @@ def scan(folder: Path | str) -> list[Entry]:
                 has_crop=found.has_crop,
                 has_ev=found.has_ev,
                 marks=found.marks,
-                jpeg=str(base / jpeg) if jpeg else None,
+                companion=str(base / companion) if companion else None,
+                source=source,
             )
         )
     return entries
@@ -237,6 +249,13 @@ def with_aspect(entry: Entry, aspect: float) -> Entry:
 def with_edits(entry: Entry, has_crop: bool, has_ev: bool) -> Entry:
     """The entry again, with the sidecar read afresh."""
     return replace(entry, has_crop=has_crop, has_ev=has_ev)
+
+
+def with_source(entry: Entry, source: Source) -> Entry:
+    """The entry again, developed from another source."""
+    return replace(
+        entry, source=source if entry.companion is not None else Source.RAW
+    )
 
 
 def with_marks(entry: Entry, marks: Marks) -> Entry:

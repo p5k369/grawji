@@ -524,3 +524,72 @@ def test_a_run_keeps_the_marks_when_told_to(tmp_path):
     )
     assert unmarked == []
     assert controller._settings.batch_clear_marks is False
+
+
+class CountingSession(FakeSession):
+    """Remembers which RAFs were sent to the camera."""
+
+    def __init__(self, jpeg):
+        """Serve jpeg and count the opens."""
+        super().__init__(jpeg)
+        self.opened: list[str] = []
+
+    def open(self, raf_file):
+        """Record the RAF the batch sent."""
+        self.opened.append(raf_file)
+
+
+def test_a_batch_takes_camera_jpegs_past_the_camera(tmp_path):
+    """A shot developed from its JPEG never reaches the camera."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    raw = str(tmp_path / "a.RAF")
+    paired = str(tmp_path / "b.RAF")
+    camera_jpeg = tmp_path / "b.JPG"
+    camera_jpeg.write_bytes(small_jpeg())
+    session = CountingSession(small_jpeg())
+    statuses: list[str] = []
+    settings = Settings(export_format="tiff16")
+    controller = BatchController(
+        parent=None,
+        worker=InlineWorker(),
+        session=session,
+        settings=settings,
+        get_recipe=Recipe,
+        get_provenance=lambda: "",
+        get_current_raf=lambda: paired,
+        set_busy=lambda **kw: statuses.append(kw["status"]),
+        on_status=lambda text: None,
+        on_error=lambda exc: None,
+        camera_file=lambda path: str(camera_jpeg) if path == paired else None,
+    )
+    controller._pending = [raw, paired]
+    controller._start(str(out_dir), overwrite=True, skip_foreign=True)
+    # Only the RAW went to the camera, and the open JPEG shot is not
+    # reopened on the camera afterwards.
+    assert session.opened == [raw]
+    assert (out_dir / "b.jpg").read_bytes() == camera_jpeg.read_bytes()
+    assert "from the camera JPEG went out as JPEG" in statuses[-1]
+
+
+def test_a_single_export_of_a_camera_jpeg_needs_no_render(tmp_path):
+    """The job carries the JPEG and the camera is never asked."""
+    camera_jpeg = tmp_path / "a.JPG"
+    camera_jpeg.write_bytes(small_jpeg())
+    state: dict[str, Any] = {}
+    controller = single_controller(state, jpeg=b"not used")
+    job = module._ExportJob(
+        path=str(tmp_path / "out.tif"),
+        recipe=Recipe(),
+        crop=CropRotate(),
+        stamp=Stamp(),
+        wanted="tiff16",
+        identity=True,
+        camera_file=str(camera_jpeg),
+    )
+    path, fmt, note = controller._render_and_write(job)
+    assert fmt == "jpeg"
+    assert path.endswith("out.jpg")
+    assert "went out as JPEG" in note
+    controller._on_written((path, fmt, note))
+    assert state["busy"][-1]["status"].startswith("Exported.")

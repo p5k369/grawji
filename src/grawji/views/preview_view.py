@@ -109,6 +109,8 @@ class PreviewView(Gtk.Box):
     picture = Gtk.Template.Child()
     histogram_slot = Gtk.Template.Child()
     marks_slot = Gtk.Template.Child()
+    source_switch = Gtk.Template.Child()
+    camera_source_button = Gtk.Template.Child()
     spinner = Gtk.Template.Child()
     status = Gtk.Template.Child()
     zoom_label = Gtk.Template.Child()

@@ -54,6 +54,7 @@ class Settings:
         grid_tile_px: Height of one tile in the folder grid.
         nav_glide_speed: Filmstrip scroll speed while an arrow is held,
             in pixels per second.
+        pair_source: What a RAW+JPEG shot opens with until it is switched.
         drag_action: What an unmodified drag of images onto a folder
             does, "move" or "copy". Holding Ctrl when starting a drag
             always copies, Shift always moves.
@@ -111,6 +112,7 @@ class Settings:
     nav_glide_speed: int = 600
     grid_tile_px: int = 240
     drag_action: str = "move"
+    pair_source: str = "raw"
     camera_auto_reconnect: bool = True
     bookmarks: list[str] = field(default_factory=list)
     color_scheme: str = "default"

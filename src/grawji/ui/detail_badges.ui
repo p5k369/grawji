@@ -55,6 +55,16 @@
       </object>
     </child>
     <child>
+      <object class="GtkLabel" id="source_badge">
+        <property name="tooltip-text">Developed from the camera file</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="card-badge"/>
+          <class name="source-badge"/>
+        </style>
+      </object>
+    </child>
+    <child>
       <object class="GtkImage" id="ev_icon">
         <property name="icon-name">grawji-ev-symbolic</property>
         <property name="pixel-size">10</property>

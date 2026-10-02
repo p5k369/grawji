@@ -37,6 +37,7 @@ _SHORTCUT_GROUPS = {
         ("Paste recipe from clipboard", "<Ctrl><Shift>V"),
         ("Reset to default", "<Ctrl>R"),
         ("Apply the recipe assigned to a number key (1 to 9)", "1"),
+        ("Develop a RAW+JPEG shot from the RAW or the camera JPEG", "j"),
     ],
     "Navigation": [
         ("Previous image (hold to glide)", "Left"),

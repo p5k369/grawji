@@ -10,6 +10,7 @@ import pytest
 from grawji import catalog
 from grawji.catalog import Entry, Filter, Order, Rejects
 from grawji.marks import Label, Marks
+from grawji.pairs import Source
 
 
 def make_raf(
@@ -191,8 +192,8 @@ def test_scan_pairs_the_camera_jpeg(tmp_path):
     (tmp_path / "orphan.JPG").write_bytes(b"jpg")
     entries = {e.name: e for e in catalog.scan(tmp_path)}
     assert set(entries) == {"pair.RAF", "single.RAF"}
-    assert entries["pair.RAF"].jpeg == str(tmp_path / "pair.JPG")
-    assert entries["single.RAF"].jpeg is None
+    assert entries["pair.RAF"].companion == str(tmp_path / "pair.JPG")
+    assert entries["single.RAF"].companion is None
 
 
 def test_the_mark_rules_narrow_the_folder():
@@ -259,3 +260,29 @@ def test_a_rating_of_the_person_wins_over_the_camera():
     assert catalog.with_meta(rated, "X-E5", "", "", 3).marks.rating == 5
     assert catalog.with_meta(cleared, "X-E5", "", "", 3).marks.rating == 0
     assert catalog.seeded(Marks(), 0) == Marks()
+
+
+def test_a_pair_takes_its_picked_source_or_the_default(tmp_path):
+    """The sidecar's pick wins, a lone RAF is always RAW."""
+    make_raf(tmp_path, "picked.RAF")
+    make_raf(tmp_path, "default.RAF")
+    make_raf(tmp_path, "lone.RAF")
+    for stem in ("picked", "default"):
+        (tmp_path / f"{stem}.JPG").write_bytes(b"jpg")
+    sidecar = tmp_path / "picked.RAF.grawji.json"
+    sidecar.write_text(json.dumps({"source": "raw"}))
+    shown = {
+        e.name: e for e in catalog.scan(tmp_path, default_source=Source.CAMERA)
+    }
+    assert shown["picked.RAF"].source is Source.RAW
+    assert shown["default.RAF"].uses_camera_file
+    assert shown["lone.RAF"].source is Source.RAW
+    assert not shown["lone.RAF"].uses_camera_file
+
+
+def test_a_lone_raf_cannot_switch_to_jpeg():
+    """Without a camera JPEG there is nothing to develop from."""
+    lone = entry("a.RAF")
+    assert catalog.with_source(lone, Source.CAMERA).source is Source.RAW
+    pair = entry("b.RAF", companion="/tmp/b.JPG")
+    assert catalog.with_source(pair, Source.CAMERA).uses_camera_file

@@ -92,6 +92,20 @@
               </object>
             </child>
             <child>
+              <object class="AdwComboRow" id="pair_source_row">
+                <property name="title">Open RAW+JPEG shots with</property>
+                <property name="subtitle">Switch a single image with j</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item translatable="yes">RAW</item>
+                      <item translatable="yes">Camera JPEG</item>
+                    </items>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
               <object class="AdwSwitchRow" id="auto_reconnect_row">
                 <property name="title">Reconnect when a camera appears</property>
                 <property name="subtitle">Reopen the current image automatically on connect</property>

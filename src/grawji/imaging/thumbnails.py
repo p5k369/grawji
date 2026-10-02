@@ -32,7 +32,7 @@ from grawji.imaging.pixbufs import (
 )
 from grawji.mainloop import Dispatch
 from grawji.marks import MAX_RATING
-from grawji.pairs import paired_jpeg
+from grawji.pairs import companion_of
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 
 # How much of the embedded JPEG to read for the EXIF thumbnail.
@@ -531,14 +531,14 @@ def _tags_of(meta: Any) -> ThumbMeta:
 
 
 def with_paired_rating(path: str, meta: ThumbMeta) -> ThumbMeta:
-    """The metadata with the rating of a RAW+JPEG pair's JPEG folded in."""
+    """The metadata with the rating of a pair's camera file folded in."""
     if meta.rating >= MAX_RATING:
         return meta
-    jpeg = paired_jpeg(path)
-    if jpeg is None:
+    companion = companion_of(path)
+    if companion is None:
         return meta
     try:
-        with jpeg.open("rb") as handle:
+        with companion.open("rb") as handle:
             head = handle.read(_PAIR_PREFIX_BYTES)
         tags = GExiv2.Metadata()
         tags.open_buf(head)

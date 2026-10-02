@@ -28,6 +28,7 @@ _UI = (
 )
 _COLOR_SCHEMES = ["default", "light", "dark"]
 _DRAG_ACTIONS = ["move", "copy"]
+_PAIR_SOURCES = ("raw", "camera")
 # What the quality slider does, where it is not the obvious thing.
 # HEIF runs into the encoder's own ceiling well before the top of the
 # scale, and 100 in JPEG XL means mathematically lossless, which is a
@@ -72,6 +73,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     glide_speed_scale = Gtk.Template.Child()
     drag_action_row = Gtk.Template.Child()
     format_row = Gtk.Template.Child()
+    pair_source_row = Gtk.Template.Child()
     quality_row = Gtk.Template.Child()
     max_edge_row = Gtk.Template.Child()
     artist_row = Gtk.Template.Child()
@@ -113,6 +115,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
         drag = settings.drag_action
         self.drag_action_row.set_selected(
             _DRAG_ACTIONS.index(drag) if drag in _DRAG_ACTIONS else 0
+        )
+        pair = settings.pair_source
+        self.pair_source_row.set_selected(
+            _PAIR_SOURCES.index(pair) if pair in _PAIR_SOURCES else 0
         )
         self._formats = available_formats(capabilities)
         model = Gtk.StringList()
@@ -163,6 +169,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.jpeg_quality_scale.connect("value-changed", self._on_edited)
         self.glide_speed_scale.connect("value-changed", self._on_edited)
         self.drag_action_row.connect("notify::selected", self._on_edited)
+        self.pair_source_row.connect("notify::selected", self._on_edited)
         self.format_row.connect("notify::selected", self._on_edited)
         self.format_row.connect("notify::selected", self._on_format_changed)
         self.max_edge_row.connect("notify::value", self._on_edited)
@@ -214,6 +221,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         )
         self._settings.drag_action = _DRAG_ACTIONS[
             self.drag_action_row.get_selected()
+        ]
+        self._settings.pair_source = _PAIR_SOURCES[
+            self.pair_source_row.get_selected()
         ]
         self._settings.export_format = self._formats[
             self.format_row.get_selected()

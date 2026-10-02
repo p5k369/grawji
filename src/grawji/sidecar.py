@@ -17,6 +17,7 @@ from pathlib import Path
 
 from grawji.crop import CropRotate
 from grawji.marks import Marks
+from grawji.pairs import Source, source_of
 
 SIDECAR_SUFFIX = ".grawji.json"
 
@@ -83,6 +84,7 @@ class Summary:
     has_crop: bool = False
     has_ev: bool = False
     marks: Marks = field(default_factory=Marks)
+    source: Source | None = None
 
 
 def summary(raf_path: Path | str) -> Summary:
@@ -96,6 +98,7 @@ def summary(raf_path: Path | str) -> Summary:
         has_crop="crop" in data,
         has_ev="exposure" in data,
         marks=Marks.from_dict(data.get("marks")),
+        source=source_of(data.get("source")),
     )
 
 
@@ -120,3 +123,8 @@ def load_marks(raf_path: Path | str) -> Marks:
 def save_marks(raf_path: Path | str, marks: Marks) -> None:
     """Store the RAF's marks, dropping the key when nothing is marked."""
     _update(raf_path, "marks", None if marks.is_empty else marks.to_dict())
+
+
+def save_source(raf_path: Path | str, source: Source | None) -> None:
+    """Store the source picked for a RAW+JPEG shot."""
+    _update(raf_path, "source", None if source is None else source.value)

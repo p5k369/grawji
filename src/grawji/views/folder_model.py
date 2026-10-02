@@ -19,6 +19,7 @@ from grawji.imaging.thumbnails import (
 )
 from grawji.mainloop import Dispatch
 from grawji.marks import Marks
+from grawji.pairs import Source
 from grawji.settings import cache_dir
 from grawji.sidecar import summary
 
@@ -58,6 +59,7 @@ class FolderModel:
         self.entries: dict[str, catalog.Entry] = {}
         self.paths: list[str] = []
         self.filter = catalog.Filter()
+        self.default_source = Source.RAW
         self._listeners: list[Listener] = []
         self._refilter_id = 0
 
@@ -72,7 +74,9 @@ class FolderModel:
 
     def scan(self, folder: str) -> list[catalog.Entry]:
         """List folder, fill in what is known, sweep what is not."""
-        entries = self._with_known_facts(catalog.scan(folder))
+        entries = self._with_known_facts(
+            catalog.scan(folder, self.default_source)
+        )
         paths = [entry.path for entry in entries]
         same = paths == self.paths
         trimmed = not same and set(paths) <= set(self.paths)
@@ -155,6 +159,14 @@ class FolderModel:
         self._notify("entry", path)
         if self.filter.is_active:
             self._refilter_soon()
+
+    def set_source(self, path: str, source: Source) -> None:
+        """Develop one frame from another source, in every view."""
+        entry = self.entries.get(path)
+        if entry is None:
+            return
+        self._replace(catalog.with_source(entry, source))
+        self._notify("marks", path)
 
     def set_marks(self, path: str, marks: Marks) -> None:
         """Take one frame's new marks, in every view of the folder."""

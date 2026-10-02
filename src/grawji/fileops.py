@@ -1,6 +1,6 @@
 """File operations on RAFs.
 
-Every RAF travels with its sidecar and with the camera JPEG of a
+Every RAF travels with its sidecar and with the camera file of a
 RAW+JPEG shot, so the three always keep one shared name.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from gi.repository import Gio
 
-from grawji.pairs import paired_jpeg
+from grawji.pairs import companion_of
 from grawji.sidecar import sidecar_path
 
 _log = logging.getLogger("grawji")
@@ -25,10 +25,10 @@ def _companions(source: Path) -> list[tuple[Path, Callable[[Path], Path]]]:
     side = sidecar_path(source)
     if side.exists():
         found.append((side, sidecar_path))
-    jpeg = paired_jpeg(source)
-    if jpeg is not None:
-        suffix = jpeg.suffix
-        found.append((jpeg, lambda raf: raf.with_suffix(suffix)))
+    companion = companion_of(source)
+    if companion is not None:
+        suffix = companion.suffix
+        found.append((companion, lambda raf: raf.with_suffix(suffix)))
     return found
 
 

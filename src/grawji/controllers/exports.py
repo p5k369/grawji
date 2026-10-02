@@ -28,6 +28,7 @@ from grawji.crop import CropRotate
 from grawji.imaging.export import (
     SetBusy,
     baked_pixbuf,
+    camera_file_format,
     camera_file_type,
     corrected_path,
     delivered_format,
@@ -42,6 +43,7 @@ from grawji.imaging.export import (
     stamp_for,
     with_border,
     with_max_edge,
+    write_camera_file,
     write_jpeg,
     write_passthrough,
 )
@@ -67,6 +69,8 @@ class _ExportJob:
     wanted: str
     identity: bool
     dropped: str = ""
+    # The camera file a shot is developed from, None for the RAW.
+    camera_file: str | None = None
 
 
 _EXPORT_TITLES = {
@@ -99,6 +103,7 @@ class SingleExportController:
         set_busy: SetBusy,
         on_error: Callable[[Exception], None],
         on_status_link: Callable[[str, str], None],
+        get_camera_file: Callable[[], str | None] | None = None,
     ) -> None:
         """Wire the controller to the window's session and callbacks.
 
@@ -119,11 +124,13 @@ class SingleExportController:
             set_busy: Toggles the busy spinner with a status line.
             on_error: Reports a camera error.
             on_status_link: Shows the clickable "Exported to" status.
+            get_camera_file: The camera file the open image is developed from.
         """
         self._parent = parent
         self._worker = worker
         self._session = session
         self._settings = settings
+        self._get_camera_file = get_camera_file or (lambda: None)
         self._save_settings = save_settings
         self._get_recipe = get_recipe
         self._get_provenance = get_provenance
@@ -137,6 +144,8 @@ class SingleExportController:
     def begin(self) -> None:
         """Show a save dialog for a full-resolution export."""
         fmt = export_format(self._settings)
+        if self._get_camera_file() is not None:
+            fmt = camera_file_format(fmt)
         dialog = Gtk.FileDialog()
         dialog.set_title(_EXPORT_TITLES[fmt])
         dialog.set_initial_name(
@@ -165,18 +174,21 @@ class SingleExportController:
         recipe, dropped = recipe_for_format(wanted, self._get_recipe())
         if dropped:
             _LOG.info("export: %s", dropped)
+        camera_file = self._get_camera_file()
         job = _ExportJob(
             path=path,
             recipe=recipe,
             crop=self._get_crop(),
             stamp=stamp_for(
                 self._settings,
-                self._get_provenance(),
+                # No recipe touched a camera file.
+                "" if camera_file else self._get_provenance(),
                 self._get_current_raf() or "",
             ),
             wanted=wanted,
             identity=self._base_identity(),
-            dropped=dropped,
+            dropped="" if camera_file else dropped,
+            camera_file=camera_file,
         )
         self._worker.submit(
             partial(self._render_and_write, job),
@@ -186,6 +198,20 @@ class SingleExportController:
 
     def _render_and_write(self, job: _ExportJob) -> tuple[str, str, str]:
         """Render and write the export."""
+        if job.camera_file is not None:
+            path, fmt = write_camera_file(
+                job.camera_file,
+                job.path,
+                settings=self._settings,
+                crop=job.crop,
+                stamp=job.stamp,
+            )
+            note = (
+                f"The camera JPEG went out as {fmt.upper()}."
+                if fmt != job.wanted
+                else ""
+            )
+            return path, fmt, note
         rendered = self._session.render(
             job.recipe,
             full_resolution=True,
@@ -229,7 +255,7 @@ class SingleExportController:
         """Report the finished export."""
         path, fmt, dropped = written
         wanted = export_format(self._settings)
-        if fmt != wanted:
+        if fmt != wanted and not dropped:
             self._set_busy(
                 busy=False,
                 status=(
@@ -259,6 +285,7 @@ class BatchController:
         on_status: Callable[[str], None],
         on_error: Callable[[Exception], None],
         on_status_link: Callable[[str, str], None] | None = None,
+        camera_file: Callable[[str], str | None] | None = None,
     ) -> None:
         """Wire the controller to the window's session and callbacks.
 
@@ -277,11 +304,13 @@ class BatchController:
             on_error: Receives a camera failure.
             on_status_link: Sets a status line whose text opens the
                 given path on click.
+            camera_file: The camera file a RAF is developed from.
         """
         self._parent = parent
         self._worker = worker
         self._session = session
         self._settings = settings
+        self._camera_file = camera_file or (lambda _path: None)
         self._get_recipe = get_recipe
         self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
@@ -294,6 +323,7 @@ class BatchController:
         self._pending: list[str] = []
         self._out_dir: str | None = None
         self._dropped = ""
+        self._wanted = "jpeg"
         self._note = ""
         self._unmark: Callable[[list[str]], None] | None = None
         self._clear_marks = False
@@ -381,19 +411,38 @@ class BatchController:
         if dropped:
             _LOG.info("batch export: %s", dropped)
         self._dropped = dropped
+        self._wanted = wanted
+        camera_files = {path: self._camera_file(path) for path in paths}
+        reopen = current is not None and self._camera_file(current) is None
 
         def task() -> tuple[dict[str, int], list[str]]:
-            tally = {"exported": 0, "existing": 0, "foreign": 0, "failed": 0}
+            tally = {
+                "exported": 0,
+                "existing": 0,
+                "foreign": 0,
+                "failed": 0,
+                "converted": 0,
+            }
             delivered: list[str] = []
             for done, raf_file in enumerate(paths, start=1):
                 if cancel.is_set():
                     tally["cancelled"] = 1
                     break
-                out_path = Path(out_dir, export_basename(raf_file, fmt=wanted))
+                camera_file = camera_files.get(raf_file)
+                fmt = (
+                    wanted
+                    if camera_file is None
+                    else camera_file_format(wanted)
+                )
+                out_path = Path(out_dir, export_basename(raf_file, fmt=fmt))
                 before = tally["exported"]
                 if not overwrite and out_path.exists():
                     tally["existing"] += 1
                     delivered.append(raf_file)
+                elif camera_file is not None:
+                    self._export_camera_file(
+                        raf_file, camera_file, out_path, tally
+                    )
                 else:
                     self._export_one(
                         raf_file,
@@ -403,10 +452,10 @@ class BatchController:
                         skip_foreign,
                         tally,
                     )
-                    if tally["exported"] > before:
-                        delivered.append(raf_file)
+                if tally["exported"] > before:
+                    delivered.append(raf_file)
                 mainloop.call(self._progress, done, total, Path(raf_file).name)
-            if current is not None:
+            if current is not None and reopen:
                 self._session.open(current)
             return tally, delivered
 
@@ -479,6 +528,30 @@ class BatchController:
         else:
             tally["exported"] += 1
 
+    def _export_camera_file(
+        self,
+        raf_file: str,
+        camera_file: str,
+        out_path: Path,
+        tally: dict[str, int],
+    ) -> None:
+        """Export one shot from its camera file."""
+        try:
+            _path, fmt = write_camera_file(
+                camera_file,
+                str(out_path),
+                settings=self._settings,
+                crop=sidecar.load_crop(raf_file),
+                stamp=stamp_for(self._settings, "", raf_file),
+            )
+        except (GLib.Error, OSError) as exc:
+            _LOG.warning("batch export could not write %s: %s", out_path, exc)
+            tally["failed"] += 1
+            return
+        tally["exported"] += 1
+        if fmt != self._wanted:
+            tally["converted"] += 1
+
     def _image_exposure(self, raf_file: str) -> float:
         """The EV to render raf_file."""
         stored = sidecar.load_exposure(raf_file)
@@ -514,6 +587,12 @@ class BatchController:
             parts.append(f"Skipped {tally['foreign']} from another camera.")
         if tally["failed"]:
             parts.append(f"{tally['failed']} failed.")
+        if tally.get("converted"):
+            parts.append(
+                f"{tally['converted']} from the camera JPEG went out as "
+                f"{camera_file_format(self._wanted).upper()}, not "
+                f"{self._wanted.upper()}."
+            )
         if self._note:
             parts.append(self._note)
         if self._dropped:

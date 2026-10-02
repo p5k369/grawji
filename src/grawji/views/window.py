@@ -53,6 +53,7 @@ from grawji.imaging.render import (
 )
 from grawji.imaging.thumbnails import ThumbnailLoader
 from grawji.marks import Label
+from grawji.pairs import Source, companion_label
 from grawji.recipe import Recipe
 from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
 from grawji.settings import (
@@ -153,6 +154,8 @@ row.recipe-modified {
     border-radius: 1px;
 }
 .card-badge { opacity: 0.75; }
+.source-badge { font-size: 7pt; font-weight: bold; }
+.source-button { padding: 0 6px; min-height: 22px; font-size: 9pt; }
 .mark-dot {
     min-width: 8px;
     min-height: 8px;
@@ -315,6 +318,7 @@ class MainWindow(Adw.ApplicationWindow):
             set_busy=self._set_busy,
             on_error=self._on_error,
             on_status_link=self.preview_view.set_status_link,
+            get_camera_file=lambda: self._camera_file_of(self._raf_path),
         )
         self._batch = BatchController(
             parent=self,
@@ -330,6 +334,7 @@ class MainWindow(Adw.ApplicationWindow):
             on_status=self.preview_view.set_status,
             on_error=self._on_error,
             on_status_link=self.preview_view.set_status_link,
+            camera_file=self._camera_file_of,
         )
         self._install_actions()
         self._refresh_camera_status()
@@ -425,6 +430,7 @@ class MainWindow(Adw.ApplicationWindow):
             app.set_accels_for_action("win.toggle-marks-bar", ["m"])
 
         self._install_mark_actions()
+        self._install_source_actions()
 
         # Compare is available only once a recipe is marked as baseline.
         self._compare_action = Gio.SimpleAction.new_stateful(
@@ -461,6 +467,84 @@ class MainWindow(Adw.ApplicationWindow):
             app.set_accels_for_action(
                 f"win.toggle-label('{color.value}')", [f"F{index}"]
             )
+
+    def _install_source_actions(self) -> None:
+        """The RAW or camera file choice of the open shot."""
+        self._source_action = Gio.SimpleAction.new_stateful(
+            "source",
+            GLib.VariantType.new("s"),
+            GLib.Variant.new_string(Source.RAW.value),
+        )
+        self._source_action.connect("change-state", self._on_source_picked)
+        self._source_action.set_enabled(False)
+        self.add_action(self._source_action)
+        toggle = Gio.SimpleAction.new("toggle-source", None)
+        toggle.connect("activate", lambda *_a: self._toggle_source())
+        self.add_action(toggle)
+        app = self.get_application()
+        if app is not None:
+            app.set_accels_for_action("win.toggle-source", ["j"])
+
+    def _camera_file_of(self, raf_path: str | Path | None) -> str | None:
+        """The camera file a shot is developed from."""
+        if raf_path is None:
+            return None
+        entry = self._folder_model.entry_for(str(raf_path))
+        if entry is None or not entry.uses_camera_file:
+            return None
+        return entry.companion
+
+    def _camera_file_status(self) -> str:
+        """Say which camera file the open shot is developed from."""
+        companion = self._camera_file_of(self._raf_path)
+        label = companion_label(companion) if companion else "file"
+        return f"Developed from the camera {label}."
+
+    def _toggle_source(self) -> None:
+        """Switch the open shot between its RAW and its camera file."""
+        if not self._source_action.get_enabled():
+            return
+        current = Source(self._source_action.get_state().get_string())
+        other = Source.RAW if current is Source.CAMERA else Source.CAMERA
+        self._source_action.change_state(GLib.Variant.new_string(other))
+
+    def _on_source_picked(
+        self, action: Gio.SimpleAction, value: GLib.Variant
+    ) -> None:
+        """Store the picked source and open the shot from it."""
+        if self._raf_path is None or value.equal(action.get_state()):
+            return
+        action.set_state(value)
+        path = str(self._raf_path)
+        source = Source(value.get_string())
+        sidecar.save_source(path, source)
+        self._folder_model.set_source(path, source)
+        self._on_raf_selected(path)
+
+    def _show_current_source(self) -> None:
+        """Offer the RAW or camera file switch for a pair."""
+        path = self._filmstrip.current_path
+        entry = self._folder_model.entry_for(path) if path else None
+        companion = entry.companion if entry is not None else None
+        paired = companion is not None
+        if companion is not None:
+            self.preview_view.camera_source_button.set_label(
+                companion_label(companion)
+            )
+        self.preview_view.source_switch.set_visible(paired)
+        self._source_action.set_enabled(paired)
+        source = entry.source if entry is not None else Source.RAW
+        self._source_action.set_state(GLib.Variant.new_string(source))
+        if entry is not None and entry.uses_camera_file:
+            compare = self._compare_action.get_state().get_boolean()
+            if compare:
+                self._compare_action.change_state(
+                    GLib.Variant.new_boolean(False)
+                )
+        self._compare_action.set_enabled(
+            self._recipe_library.baseline is not None
+            and not (entry is not None and entry.uses_camera_file)
+        )
 
     def _on_card_mark(
         self, kind: str, value: object, paths: list[str]
@@ -559,6 +643,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _init_filmstrip(self) -> None:
         """Build the filmstrip flanked by previous/next navigation."""
         self._folder_model = FolderModel()
+        self._folder_model.default_source = self._pair_source()
         self._folder_model.add_listener(self._on_folder_event)
         self._filmstrip = FilmStrip(
             model=self._folder_model,
@@ -772,6 +857,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._generation += 1
         self._raf_path = Path(raf_path)
         self._show_current_marks()
+        self._show_current_source()
         self._settings.last_image = raf_path
         self.set_title(f"grawji — {Path(raf_path).name}")
         self._set_busy(busy=True, status="Loading RAF…")
@@ -804,24 +890,34 @@ class MainWindow(Adw.ApplicationWindow):
         # and decode run on a short-lived thread. Neither blocks the UI, so
         # the filmstrip animation stays smooth and the image appears as soon
         # as it is decoded.
-        self._worker.open(
-            raf_path,
-            on_done=partial(self._on_opened, generation),
-            on_error=self._on_quiet_error if quiet else self._on_error,
-        )
+        jpeg = self._camera_file_of(raf_path)
+        if jpeg is None:
+            self._worker.open(
+                raf_path,
+                on_done=partial(self._on_opened, generation),
+                on_error=self._on_quiet_error if quiet else self._on_error,
+            )
+        else:
+            self._worker.submit(self._session.close)
         threading.Thread(
             target=self._decode_selection,
-            args=(generation, raf_path),
+            args=(generation, raf_path, jpeg),
             name="grawji-decode",
             daemon=True,
         ).start()
         return GLib.SOURCE_REMOVE
 
-    def _decode_selection(self, generation: int, raf_path: str) -> None:
-        """Read and decode the embedded preview off the main thread."""
-        native = imagemeta.native_size(raf_path)
+    def _decode_selection(
+        self, generation: int, raf_path: str, source: str | None = None
+    ) -> None:
+        """Read and decode the preview."""
+        native = imagemeta.native_size(source or raf_path)
         try:
-            jpeg = raf.embedded_jpeg(raf_path)
+            jpeg = (
+                Path(source).read_bytes()
+                if source is not None
+                else raf.embedded_jpeg(raf_path)
+            )
             pixbuf = oriented_pixbuf(jpeg)
             rows = imagemeta.exif_rows(jpeg)
         except (ValueError, OSError, GLib.Error):
@@ -852,6 +948,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.preview_view.clear_source()
         self._set_navigator_pixbuf(pixbuf)
         self._populate_exif_rows(rows)
+        if self._camera_file_of(self._raf_path) is not None:
+            self._set_busy(busy=False, status=self._camera_file_status())
         return GLib.SOURCE_REMOVE
 
     def _init_navigator(self) -> None:
@@ -1428,6 +1526,11 @@ class MainWindow(Adw.ApplicationWindow):
         name = self._recipe_library.recipe_for_hotkey(hotkey)
         if name is None:
             return False
+        if self._camera_file_of(self._raf_path) is not None:
+            self.preview_view.set_status(
+                "Recipes develop the RAW. Switch to it with j."
+            )
+            return True
         self._on_apply_recipe(None, name)
         return True
 
@@ -1475,14 +1578,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.set_spinner(active=busy)
         # Controls stay live while the camera works - the worker coalesces
         # rapid changes - so the UI never locks up mid-render.
-        enabled = self._session.is_open
+        enabled = (
+            self._session.is_open
+            and self._camera_file_of(self._raf_path) is None
+        )
         self.recipe_panel.set_controls_sensitive(enabled)
         self._update_export_button()
         self.preview_view.set_status(status)
 
     def _update_export_button(self) -> None:
         """Enable the header Export only when it applies."""
-        self.export_button.set_sensitive(self._session.is_open)
+        jpeg = self._camera_file_of(self._raf_path) is not None
+        self.export_button.set_sensitive(self._session.is_open or jpeg)
 
     def _on_error(self, exc: Exception) -> None:
         """Surface a camera error in a dialog and reset the busy state."""
@@ -1586,8 +1693,27 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings.expanded_folders = paths
         self._save_settings()
 
+    def _pair_source(self) -> Source:
+        """What a RAW+JPEG shot opens with."""
+        try:
+            return Source(self._settings.pair_source)
+        except ValueError:
+            return Source.RAW
+
+    def _apply_pair_source(self) -> None:
+        """Reopen the folder when the default source of a pair changed."""
+        source = self._pair_source()
+        if source is self._folder_model.default_source:
+            return
+        self._folder_model.default_source = source
+        if self._current_folder is not None:
+            self._filmstrip.scan(self._current_folder)
+        if self._raf_path is not None:
+            self._on_raf_selected(str(self._raf_path))
+
     def _on_settings_changed(self) -> None:
         """Persist settings and apply any that affect the live UI."""
+        self._apply_pair_source()
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)
         self._apply_export_border()
