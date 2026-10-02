@@ -168,7 +168,8 @@ row.recipe-modified {
 .marks-osd { border-radius: 8px; padding: 4px 2px; }
 .mark-button { min-width: 24px; padding: 2px 3px; }
 .mark-button .mark-dot { opacity: 0.3; }
-.mark-button.mark-on .mark-dot { opacity: 1; }
+.mark-button.mark-on .mark-dot,
+.mark-button:checked .mark-dot { opacity: 1; }
 .mark-button.mark-on image { color: @accent_color; }
 """
 
@@ -1349,6 +1350,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._export_batch(
             self._marks.marked_for_export(self._filmstrip.paths),
             "No images in this folder are marked for export.",
+            unmark=partial(self._marks.set_export, on=False),
         )
 
     def _export_shown(self) -> None:
@@ -1357,7 +1359,13 @@ class MainWindow(Adw.ApplicationWindow):
             self._filmstrip.visible_paths, "No images to export."
         )
 
-    def _export_batch(self, paths: list[str], empty: str) -> None:
+    def _export_batch(
+        self,
+        paths: list[str],
+        empty: str,
+        *,
+        unmark: Callable[[list[str]], None] | None = None,
+    ) -> None:
         """Export paths in one batch."""
         kept, rejected = self._marks.without_rejects(paths)
         if not kept:
@@ -1366,7 +1374,7 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return
         note = f"Skipped {rejected} rejected." if rejected else ""
-        complaint = self._batch.begin(kept, note=note)
+        complaint = self._batch.begin(kept, note=note, unmark=unmark)
         if complaint is not None:
             self.preview_view.set_status(complaint)
 

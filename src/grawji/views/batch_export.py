@@ -30,6 +30,7 @@ class BatchExportDialog(Adw.Dialog):
     intro_label = Gtk.Template.Child()
     overwrite_row = Gtk.Template.Child()
     foreign_row = Gtk.Template.Child()
+    clear_marks_row = Gtk.Template.Child()
     export_button = Gtk.Template.Child()
     cancel_options_button = Gtk.Template.Child()
     progress = Gtk.Template.Child()
@@ -43,8 +44,9 @@ class BatchExportDialog(Adw.Dialog):
         *,
         count: int,
         overwrite: bool,
-        on_start: Callable[[bool, bool], None],
+        on_start: Callable[[bool, bool, bool], None],
         on_cancel: Callable[[], None],
+        clear_marks: bool | None = None,
     ) -> None:
         """Wire the dialog to its options and intent callbacks."""
         super().__init__()
@@ -57,6 +59,8 @@ class BatchExportDialog(Adw.Dialog):
             "current recipe."
         )
         self.overwrite_row.set_active(overwrite)
+        self.clear_marks_row.set_visible(clear_marks is not None)
+        self.clear_marks_row.set_active(bool(clear_marks))
         self.export_button.connect("clicked", self._on_export_clicked)
         self.cancel_options_button.connect("clicked", lambda *_a: self.close())
         self.cancel_button.connect("clicked", self._on_cancel_clicked)
@@ -68,7 +72,10 @@ class BatchExportDialog(Adw.Dialog):
         self.stack.set_visible_child_name("progress")
         self._fit_current_page()
         self._on_start(
-            self.overwrite_row.get_active(), self.foreign_row.get_active()
+            self.overwrite_row.get_active(),
+            self.foreign_row.get_active(),
+            self.clear_marks_row.get_visible()
+            and self.clear_marks_row.get_active(),
         )
 
     def _fit_current_page(self) -> None:

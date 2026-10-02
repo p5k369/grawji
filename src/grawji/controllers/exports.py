@@ -295,13 +295,22 @@ class BatchController:
         self._out_dir: str | None = None
         self._dropped = ""
         self._note = ""
+        self._unmark: Callable[[list[str]], None] | None = None
+        self._clear_marks = False
 
-    def begin(self, paths: list[str], *, note: str = "") -> str | None:
+    def begin(
+        self,
+        paths: list[str],
+        *,
+        note: str = "",
+        unmark: Callable[[list[str]], None] | None = None,
+    ) -> str | None:
         """Start the flow with a folder pick."""
         if not paths:
             return "No images selected to export."
         self._pending = list(paths)
         self._note = note
+        self._unmark = unmark
         dialog = Gtk.FileDialog()
         dialog.set_title("Export to folder")
         start = initial_folder(self._settings.last_export_dir)
@@ -332,6 +341,11 @@ class BatchController:
             overwrite=self._settings.batch_overwrite,
             on_start=partial(self._start, out_dir),
             on_cancel=self._on_cancel,
+            clear_marks=(
+                self._settings.batch_clear_marks
+                if self._unmark is not None
+                else None
+            ),
         )
         self._dialog.connect("closed", self._on_dialog_closed)
         self._dialog.present(self._parent)
@@ -341,10 +355,17 @@ class BatchController:
         self._dialog = None
 
     def _start(
-        self, out_dir: str, overwrite: bool, skip_foreign: bool
+        self,
+        out_dir: str,
+        overwrite: bool,
+        skip_foreign: bool,
+        clear_marks: bool = False,
     ) -> None:
         """Render the pending RAFs with the current recipe."""
         self._settings.batch_overwrite = overwrite
+        if self._unmark is not None:
+            self._settings.batch_clear_marks = clear_marks
+        self._clear_marks = clear_marks and self._unmark is not None
         self._out_dir = out_dir
         paths = self._pending
         recipe = self._get_recipe()
@@ -361,15 +382,18 @@ class BatchController:
             _LOG.info("batch export: %s", dropped)
         self._dropped = dropped
 
-        def task() -> dict[str, int]:
+        def task() -> tuple[dict[str, int], list[str]]:
             tally = {"exported": 0, "existing": 0, "foreign": 0, "failed": 0}
+            delivered: list[str] = []
             for done, raf_file in enumerate(paths, start=1):
                 if cancel.is_set():
                     tally["cancelled"] = 1
                     break
                 out_path = Path(out_dir, export_basename(raf_file, fmt=wanted))
+                before = tally["exported"]
                 if not overwrite and out_path.exists():
                     tally["existing"] += 1
+                    delivered.append(raf_file)
                 else:
                     self._export_one(
                         raf_file,
@@ -379,10 +403,12 @@ class BatchController:
                         skip_foreign,
                         tally,
                     )
+                    if tally["exported"] > before:
+                        delivered.append(raf_file)
                 mainloop.call(self._progress, done, total, Path(raf_file).name)
             if current is not None:
                 self._session.open(current)
-            return tally
+            return tally, delivered
 
         self._worker.submit(
             task, on_done=self._on_done, on_error=self._on_error
@@ -475,8 +501,9 @@ class BatchController:
             self._dialog.update(done, total, name)
         return GLib.SOURCE_REMOVE
 
-    def _on_done(self, tally: dict[str, int]) -> None:
+    def _on_done(self, result: tuple[dict[str, int], list[str]]) -> None:
         """Report batch completion and show the dialog summary."""
+        tally, delivered = result
         self._cancel = None
         exported = tally["exported"]
         lead = "Cancelled after" if tally.get("cancelled") else "Exported"
@@ -491,6 +518,11 @@ class BatchController:
             parts.append(self._note)
         if self._dropped:
             parts.append(self._dropped)
+        if delivered and self._clear_marks and self._unmark is not None:
+            self._unmark(delivered)
+            count = len(delivered)
+            marks = "mark" if count == 1 else "marks"
+            parts.append(f"Cleared {count} export {marks}.")
         summary = " ".join(parts)
         self._set_busy(busy=False, status=summary)
         if exported and self._out_dir and self._on_status_link is not None:

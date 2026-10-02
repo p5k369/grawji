@@ -127,7 +127,7 @@ def test_menu_actions_drive_the_filter(strip: Any) -> None:
 
     button = Gtk.MenuButton()
     strip.adopt_filter_button(button)
-    strip._rebuild_filter_menu(button)
+    strip._refresh_filter_popover(button)
     assert button.get_popover() is not None
     lens_action = strip._filter_actions["lens"]
     lens_action.change_state(GLib.Variant.new_string(PRIME))
@@ -463,3 +463,30 @@ def test_the_mark_rules_filter_the_strip(strip: Any) -> None:
     assert visible(strip) == ["a.RAF", "c.RAF"]
     actions["rejects"].change_state(GLib.Variant.new_string("only"))
     assert visible(strip) == ["b.RAF"]
+
+
+def test_the_popover_radios_filter_and_follow_clear(strip: Any) -> None:
+    """A radio pick filters, and Clear moves the radio back to All."""
+    from gi.repository import GLib, Gtk
+
+    button = Gtk.MenuButton()
+    strip.adopt_filter_button(button)
+    strip._refresh_filter_popover(button)
+    popover = strip._filter_popover
+    assert button.get_popover() is popover
+    radios = popover._radios["model"]
+    assert set(radios) == {"", "X-E5", "X100F"}
+    assert radios[""].get_active()
+    radios["X100F"].set_active(True)
+    assert visible(strip) == ["b.RAF"]
+    strip._on_filter_cleared()
+    assert radios[""].get_active()
+    assert visible(strip) == ["a.RAF", "b.RAF", "c.RAF"]
+
+    rating = strip._filter_actions["rating"]
+    rating.change_state(GLib.Variant.new_string("3"))
+    assert strip._filter_rating == 3
+    # Clicking the same star again drops the rule.
+    rating.change_state(GLib.Variant.new_string("3"))
+    assert strip._filter_rating == 0
+    assert rating.get_state().get_string() == "0"

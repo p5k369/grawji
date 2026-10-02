@@ -26,7 +26,7 @@ from gi.repository import (
 from grawji import catalog, mainloop
 from grawji.imaging.thumbnails import ThumbMeta
 from grawji.mainloop import Dispatch
-from grawji.marks import MAX_RATING, STAR, Label
+from grawji.marks import Label
 from grawji.pairs import is_jpeg_name
 from grawji.views import file_menu
 from grawji.views.card_badges import (
@@ -35,6 +35,7 @@ from grawji.views.card_badges import (
     RatingBadges,
     style_rejected,
 )
+from grawji.views.filter_popover import FilterPopover
 from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
@@ -181,6 +182,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         # A strip that leaves the screen must not keep gliding.
         self.connect("unmap", lambda *_a: self.stop_glide())
         self.filter_button: Gtk.MenuButton | None = None
+        self._filter_popover: FilterPopover | None = None
         self._filter_actions: dict[str, Gio.SimpleAction] = {}
 
     def _watch_scroll(self) -> None:
@@ -292,82 +294,40 @@ class FilmStrip(Gtk.ScrolledWindow):
         clear.connect("activate", self._on_filter_cleared)
         group.add_action(clear)
         button.insert_action_group("filter", group)
-        button.set_create_popup_func(self._rebuild_filter_menu)
+        self._filter_popover = FilterPopover()
+        button.set_popover(self._filter_popover)
+        button.set_create_popup_func(self._refresh_filter_popover)
         self.filter_button = button
 
-    def _rebuild_filter_menu(self, button: Gtk.MenuButton) -> None:
-        """Build the menu from the folder's metadata on every open."""
-        menu = Gio.Menu()
-        axes = (
-            ("Camera", "model", self.known_models()),
-            ("Lens", "lens", self.known_lenses()),
-        )
-        for title, axis, values in axes:
-            section = Gio.Menu()
-            for label, value in [("All", ""), *((v, v) for v in values)]:
-                item = Gio.MenuItem.new(label, None)
-                item.set_action_and_target_value(
-                    f"filter.{axis}", GLib.Variant.new_string(value)
-                )
-                section.append_item(item)
-            menu.append_section(title, section)
-        slider = self._build_focal_sliders()
-        if slider is not None:
-            section = Gio.Menu()
-            item = Gio.MenuItem.new(None, None)
-            item.set_attribute_value(
-                "custom", GLib.Variant.new_string("focal")
-            )
-            section.append_item(item)
-            menu.append_section("Focal length", section)
-        self._append_marks_sections(menu)
-        footer = Gio.Menu()
-        footer.append("Clear filter", "filter.clear")
-        menu.append_section(None, footer)
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        if slider is not None:
-            popover.add_child(slider, "focal")
-        button.set_popover(popover)
-
-    @staticmethod
-    def _append_marks_sections(menu: Gio.Menu) -> None:
-        """The rating, color label and mark rules of the filter menu."""
-        rating = Gio.Menu()
-        for stars in range(MAX_RATING + 1):
-            title = "Any rating" if stars == 0 else STAR * stars
-            if 0 < stars < MAX_RATING:
-                title += " and up"
-            item = Gio.MenuItem.new(title, None)
-            item.set_action_and_target_value(
-                "filter.rating", GLib.Variant.new_string(str(stars))
-            )
-            rating.append_item(item)
-        menu.append_section("Rating", rating)
-        colors = Gio.Menu()
-        for label in Label:
-            colors.append(label.value.capitalize(), f"filter.label-{label}")
-        menu.append_section("Color label", colors)
-        marks = Gio.Menu()
-        marks.append("Marked for export only", "filter.export")
-        for title, value in (
-            ("Show rejects", catalog.Rejects.SHOW),
-            ("Hide rejects", catalog.Rejects.HIDE),
-            ("Only rejects", catalog.Rejects.ONLY),
+    def _refresh_filter_popover(self, _button: Gtk.MenuButton) -> None:
+        """Offer the folder's own cameras, lenses and focals on every open."""
+        popover = self._filter_popover
+        if popover is None:
+            return
+        for axis, values, selected in (
+            ("model", self.known_models(), self._filter_model),
+            ("lens", self.known_lenses(), self._filter_lens),
         ):
-            item = Gio.MenuItem.new(title, None)
-            item.set_action_and_target_value(
-                "filter.rejects", GLib.Variant.new_string(value.value)
+            popover.set_choices(
+                axis, values, selected, partial(self._pick_filter, axis)
             )
-            marks.append_item(item)
-        menu.append_section("Marks", marks)
+        popover.set_focal(self._build_focal_sliders())
+        popover.show_rating(self._filter_rating)
+
+    def _pick_filter(self, axis: str, value: str) -> None:
+        """Apply a camera or lens radio picked in the popover."""
+        self._filter_actions[axis].change_state(GLib.Variant.new_string(value))
 
     def _on_marks_filter(
         self, action: Gio.SimpleAction, value: GLib.Variant, axis: str
     ) -> None:
-        """Apply a rating, label, export or reject pick from the menu."""
-        action.set_state(value)
+        """Apply a rating, label, export or reject pick from the popover."""
         if axis == "rating":
-            self._filter_rating = int(value.get_string())
+            rating = int(value.get_string())
+            self._filter_rating = (
+                0 if rating == self._filter_rating else rating
+            )
+            value = GLib.Variant.new_string(str(self._filter_rating))
         elif axis == "rejects":
             self._filter_rejects = catalog.Rejects(value.get_string())
         elif axis == "export":
@@ -378,6 +338,7 @@ class FilmStrip(Gtk.ScrolledWindow):
             if value.get_boolean():
                 labels |= {label}
             self._filter_labels = frozenset(labels)
+        action.set_state(value)
         self.set_filter(
             model=self._filter_model,
             lens=self._filter_lens,
@@ -1053,6 +1014,10 @@ class FilmStrip(Gtk.ScrolledWindow):
             action = self._filter_actions.get(axis)
             if action is not None:
                 action.set_state(value)
+        if self._filter_popover is not None:
+            self._filter_popover.select("model", self._filter_model)
+            self._filter_popover.select("lens", self._filter_lens)
+            self._filter_popover.show_rating(self._filter_rating)
 
     def known_models(self) -> list[str]:
         """Camera models present in the folder, sorted."""

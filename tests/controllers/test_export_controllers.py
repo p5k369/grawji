@@ -450,3 +450,77 @@ def test_recipe_for_format_only_touches_heif_with_clarity():
     recipe, note = module_export.recipe_for_format("heif", Recipe())
     assert recipe.clarity == 0
     assert note == ""
+
+
+class InlineWorker:
+    """Runs a submitted task at once, like the camera worker would."""
+
+    def submit(self, task, on_done, on_error):
+        """Run task and hand its result over."""
+        on_done(task())
+
+
+class PickySession(FakeSession):
+    """Refuses one RAF as shot by another body."""
+
+    def open(self, raf_file):
+        """Accept every RAF except c.RAF."""
+        if raf_file.endswith("c.RAF"):
+            raise ForeignRafError("0x2002")
+
+
+def test_a_run_unmarks_what_it_delivered(tmp_path):
+    """Exported and already present count, skipped ones do not."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "b.jpg").write_bytes(b"from an earlier run")
+    paths = [str(tmp_path / name) for name in ("a.RAF", "b.RAF", "c.RAF")]
+    controller = BatchController(
+        parent=None,
+        worker=InlineWorker(),
+        session=PickySession(small_jpeg()),
+        settings=Settings(),
+        get_recipe=Recipe,
+        get_provenance=lambda: "",
+        get_current_raf=lambda: None,
+        set_busy=lambda **kw: None,
+        on_status=lambda text: None,
+        on_error=lambda exc: None,
+    )
+    unmarked: list[list[str]] = []
+    statuses: list[str] = []
+    controller._set_busy = lambda **kw: statuses.append(kw["status"])
+    controller._pending = paths
+    controller._unmark = unmarked.append
+    controller._start(
+        str(out_dir), overwrite=False, skip_foreign=True, clear_marks=True
+    )
+    assert unmarked == [paths[:2]]
+    assert (out_dir / "a.jpg").exists()
+    assert "Cleared 2 export marks." in statuses[-1]
+
+
+def test_a_run_keeps_the_marks_when_told_to(tmp_path):
+    """With the switch off nothing is unmarked."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    controller = BatchController(
+        parent=None,
+        worker=InlineWorker(),
+        session=PickySession(small_jpeg()),
+        settings=Settings(),
+        get_recipe=Recipe,
+        get_provenance=lambda: "",
+        get_current_raf=lambda: None,
+        set_busy=lambda **kw: None,
+        on_status=lambda text: None,
+        on_error=lambda exc: None,
+    )
+    unmarked: list[list[str]] = []
+    controller._pending = [str(tmp_path / "a.RAF")]
+    controller._unmark = unmarked.append
+    controller._start(
+        str(out_dir), overwrite=False, skip_foreign=True, clear_marks=False
+    )
+    assert unmarked == []
+    assert controller._settings.batch_clear_marks is False

@@ -46,6 +46,13 @@
                             <property name="active">true</property>
                           </object>
                         </child>
+                        <child>
+                          <object class="AdwSwitchRow" id="clear_marks_row">
+                            <property name="title">Clear export marks afterwards</property>
+                            <property name="subtitle">Only for images that end up in the folder.</property>
+                            <property name="visible">false</property>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>
