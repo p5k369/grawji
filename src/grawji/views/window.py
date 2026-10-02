@@ -168,7 +168,8 @@ row.recipe-modified {
 .marks-osd { border-radius: 8px; padding: 4px 2px; }
 .mark-button { min-width: 24px; padding: 2px 3px; }
 .mark-button .mark-dot { opacity: 0.3; }
-.mark-button.mark-on .mark-dot { opacity: 1; }
+.mark-button.mark-on .mark-dot,
+.mark-button:checked .mark-dot { opacity: 1; }
 .mark-button.mark-on image { color: @accent_color; }
 """
 
@@ -202,9 +203,6 @@ class MainWindow(Adw.ApplicationWindow):
     grid_count = Gtk.Template.Child()
     foldertree_slot = Gtk.Template.Child()
     toast_overlay = Gtk.Template.Child()
-    select_bar = Gtk.Template.Child()
-    select_label = Gtk.Template.Child()
-    select_separator = Gtk.Template.Child()
 
     _marks: MarksController
     _mark_actions: list[Gio.SimpleAction]
@@ -323,7 +321,6 @@ class MainWindow(Adw.ApplicationWindow):
             worker=self._worker,
             session=self._session,
             settings=self._settings,
-            get_paths=lambda: self._filmstrip.paths,
             get_recipe=self.recipe_panel.get_recipe,
             get_provenance=self._provenance,
             get_current_raf=(
@@ -332,7 +329,6 @@ class MainWindow(Adw.ApplicationWindow):
             set_busy=self._set_busy,
             on_status=self.preview_view.set_status,
             on_error=self._on_error,
-            on_finished=self._end_select_mode,
             on_status_link=self.preview_view.set_status_link,
         )
         self._install_actions()
@@ -368,9 +364,11 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             ("reset", self._reset_recipe, ("<Ctrl>r",)),
             ("preferences", self._on_preferences, ("<Ctrl>comma",)),
-            ("batch-export", self._on_batch_export, ()),
-            ("select-all", self._select_all, ("<Ctrl>a",)),
-            ("cancel-selection", self._end_select_mode, ("Escape",)),
+            ("export-marked", self._export_marked, ()),
+            ("export-shown", self._export_shown, ()),
+            ("trash-rejected", self._trash_rejected, ()),
+            ("select-all", self._filmstrip.select_all, ("<Ctrl>a",)),
+            ("cancel-selection", self._filmstrip.clear_selection, ("Escape",)),
             ("manage-recipes", self._library.manage, ()),
             ("try-recipes", self._on_try_recipes, ()),
             ("backup-camera", self._backup.backup, ()),
@@ -427,16 +425,6 @@ class MainWindow(Adw.ApplicationWindow):
             app.set_accels_for_action("win.toggle-marks-bar", ["m"])
 
         self._install_mark_actions()
-
-        # Enabled only once at least one image is selected.
-        self._selection_actions: list[Gio.SimpleAction] = []
-        export_selection = Gio.SimpleAction.new("export-selection", None)
-        export_selection.connect(
-            "activate", partial(self._activate, self._export_selection)
-        )
-        export_selection.set_enabled(False)
-        self.add_action(export_selection)
-        self._selection_actions.append(export_selection)
 
         # Compare is available only once a recipe is marked as baseline.
         self._compare_action = Gio.SimpleAction.new_stateful(
@@ -1353,41 +1341,50 @@ class MainWindow(Adw.ApplicationWindow):
         """Start a single full-resolution export."""
         self._single_export.begin()
 
-    def _on_batch_export(self) -> None:
-        """Enter batch-select mode: pick images, then export them."""
-        if not self._filmstrip.paths:
-            self.preview_view.set_status("No images to export.")
-            return
-        self._filmstrip.enter_select_mode()
-        self.select_bar.set_reveal_child(True)
-        self.select_separator.set_visible(True)
-        self._update_export_button()
-
-    def _on_selection_changed(self, count: int) -> None:
-        """Reflect the batch selection in the bar label and its actions."""
+    def _on_selection_changed(self, _count: int) -> None:
+        """Retarget the marks bar and its actions at the new selection."""
         self._show_current_marks()
-        self.select_label.set_label(
-            "Select images" if count == 0 else f"{count} selected"
+
+    def _export_marked(self) -> None:
+        """Export every image of the folder marked for export."""
+        self._export_batch(
+            self._marks.marked_for_export(self._filmstrip.paths),
+            "No images in this folder are marked for export.",
+            unmark=partial(self._marks.set_export, on=False),
         )
-        for action in self._selection_actions:
-            action.set_enabled(count > 0)
 
-    def _select_all(self) -> None:
-        """Select every image."""
-        self._filmstrip.select_all()
+    def _export_shown(self) -> None:
+        """Export every image the filter leaves."""
+        self._export_batch(
+            self._filmstrip.visible_paths, "No images to export."
+        )
 
-    def _end_select_mode(self) -> None:
-        """Leave batch-select mode and hide the selection bar."""
-        self._filmstrip.exit_select_mode()
-        self.select_bar.set_reveal_child(False)
-        self.select_separator.set_visible(False)
-        self._update_export_button()
-
-    def _export_selection(self) -> None:
-        """Export the selected images; the bar stays until the run ends."""
-        complaint = self._batch.begin(self._filmstrip.selected_paths)
+    def _export_batch(
+        self,
+        paths: list[str],
+        empty: str,
+        *,
+        unmark: Callable[[list[str]], None] | None = None,
+    ) -> None:
+        """Export paths in one batch."""
+        kept, rejected = self._marks.without_rejects(paths)
+        if not kept:
+            self.preview_view.set_status(
+                "All of them are rejected." if rejected else empty
+            )
+            return
+        note = f"Skipped {rejected} rejected." if rejected else ""
+        complaint = self._batch.begin(kept, note=note, unmark=unmark)
         if complaint is not None:
             self.preview_view.set_status(complaint)
+
+    def _trash_rejected(self) -> None:
+        """Move every rejected image of the folder to the trash."""
+        rejected = self._marks.rejected(self._filmstrip.paths)
+        if not rejected:
+            self.preview_view.set_status("No rejected images in this folder.")
+            return
+        self._fileops.trash_paths(rejected, confirm=True)
 
     def _cycle_background(self) -> None:
         """Cycle the preview background and remember the choice."""
@@ -1485,9 +1482,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _update_export_button(self) -> None:
         """Enable the header Export only when it applies."""
-        self.export_button.set_sensitive(
-            self._session.is_open and not self._filmstrip.in_select_mode
-        )
+        self.export_button.set_sensitive(self._session.is_open)
 
     def _on_error(self, exc: Exception) -> None:
         """Surface a camera error in a dialog and reset the busy state."""

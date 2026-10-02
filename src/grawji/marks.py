@@ -9,6 +9,8 @@ from enum import StrEnum
 REJECTED = -1
 UNRATED = 0
 MAX_RATING = 5
+# The star menus spell a rating with.
+STAR = "\u2605"
 
 
 class Label(StrEnum):
@@ -21,10 +23,10 @@ class Label(StrEnum):
     PURPLE = "purple"
 
 
-def _clamped_rating(value: object) -> int:
-    """A stored rating inside the valid range, or unrated."""
+def _clamped_rating(value: object) -> int | None:
+    """A stored rating inside the valid range."""
     if isinstance(value, bool) or not isinstance(value, int):
-        return UNRATED
+        return None
     return max(REJECTED, min(MAX_RATING, value))
 
 
@@ -40,7 +42,7 @@ def _known_labels(value: object) -> frozenset[Label]:
 class Marks:
     """Everything a person marked on one image."""
 
-    rating: int = UNRATED
+    rating: int | None = None
     labels: frozenset[Label] = frozenset()
     export: bool = False
 
@@ -51,8 +53,8 @@ class Marks:
 
     @property
     def stars(self) -> int:
-        """The star count, zero for a reject."""
-        return max(UNRATED, self.rating)
+        """The star count."""
+        return max(UNRATED, self.rating or UNRATED)
 
     @property
     def is_empty(self) -> bool:
@@ -66,7 +68,7 @@ class Marks:
 
     def with_rating(self, rating: int) -> Marks:
         """The marks with another rating, clamped to the valid range."""
-        return replace(self, rating=_clamped_rating(rating))
+        return replace(self, rating=max(REJECTED, min(MAX_RATING, rating)))
 
     def with_label(self, label: Label, *, on: bool) -> Marks:
         """The marks with one color label set or cleared."""
@@ -80,7 +82,7 @@ class Marks:
     def to_dict(self) -> dict[str, object]:
         """The stored form, leaving out whatever is unset."""
         data: dict[str, object] = {}
-        if self.rating != UNRATED:
+        if self.rating is not None:
             data["rating"] = self.rating
         if self.labels:
             data["labels"] = [label.value for label in self.ordered_labels]
@@ -94,7 +96,7 @@ class Marks:
         if not isinstance(data, dict):
             return cls()
         return cls(
-            rating=_clamped_rating(data.get("rating", UNRATED)),
+            rating=_clamped_rating(data.get("rating")),
             labels=_known_labels(data.get("labels")),
             export=data.get("export") is True,
         )

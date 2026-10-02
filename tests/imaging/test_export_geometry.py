@@ -16,11 +16,12 @@ gi.require_version("GExiv2", "0.10")
 from gi.repository import GdkPixbuf, GExiv2
 
 from grawji.crop import CropRotate
-from grawji.imaging.export import sidecar_decode, with_border
-from grawji.imaging.imagemeta import with_credits
+from grawji.imaging.export import sidecar_decode, stamp_for, with_border
+from grawji.imaging.imagemeta import Stamp, with_credits
 from grawji.imaging.render import add_border, scale_to_edge
+from grawji.marks import Label, Marks
 from grawji.settings import Settings
-from grawji.sidecar import save_crop
+from grawji.sidecar import save_crop, save_marks
 
 
 def _jpeg_bytes(width: int, height: int) -> bytes:
@@ -156,15 +157,17 @@ def test_with_credits_stamps_exif(tmp_path):
     pixbuf.savev(str(source), "jpeg", [], [])
     jpeg = source.read_bytes()
 
-    stamped = with_credits(jpeg, artist="Jane Doe", rights="CC BY 4.0")
+    stamped = with_credits(
+        jpeg, stamp=Stamp(artist="Jane Doe", rights="CC BY 4.0")
+    )
     out = tmp_path / "stamped.jpg"
     out.write_bytes(stamped)
     meta = GExiv2.Metadata()
     meta.open_path(str(out))
     assert meta.try_get_tag_string("Exif.Image.Artist") == "Jane Doe"
     assert meta.try_get_tag_string("Exif.Image.Copyright") == "CC BY 4.0"
-    # no credits configured: bytes pass through untouched
-    assert with_credits(jpeg, artist="", rights="") is jpeg
+    # no stamp configured: bytes pass through untouched
+    assert with_credits(jpeg, stamp=Stamp()) is jpeg
 
 
 def test_with_credits_stamps_provenance(tmp_path):
@@ -174,12 +177,67 @@ def test_with_credits_stamps_provenance(tmp_path):
     pixbuf.savev(str(source), "jpeg", [], [])
     jpeg = source.read_bytes()
 
-    stamped = with_credits(
-        jpeg, artist="", rights="", comment="grawji recipe: Portra"
-    )
+    stamped = with_credits(jpeg, stamp=Stamp(comment="grawji recipe: Portra"))
     out = tmp_path / "stamped.jpg"
     out.write_bytes(stamped)
     meta = GExiv2.Metadata()
     meta.open_path(str(out))
     comment = meta.try_get_tag_string("Exif.Photo.UserComment") or ""
     assert "grawji recipe: Portra" in comment
+
+
+def _plain_jpeg(tmp_path) -> bytes:
+    """A tiny JPEG without metadata."""
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 8, 8)
+    source = tmp_path / "plain.jpg"
+    pixbuf.savev(str(source), "jpeg", [], [])
+    return source.read_bytes()
+
+
+def _read(tmp_path, data: bytes) -> GExiv2.Metadata:
+    """The metadata of data, read back from disk."""
+    out = tmp_path / "stamped.jpg"
+    out.write_bytes(data)
+    meta = GExiv2.Metadata()
+    meta.open_path(str(out))
+    return meta
+
+
+def test_the_rating_and_label_go_out_as_exif_and_xmp(tmp_path):
+    """Other photo apps read either the EXIF or the XMP rating."""
+    jpeg = _plain_jpeg(tmp_path)
+    meta = _read(
+        tmp_path, with_credits(jpeg, stamp=Stamp(rating=4, label="Red"))
+    )
+    assert meta.try_get_tag_string("Exif.Image.Rating") == "4"
+    assert meta.try_get_tag_string("Exif.Image.RatingPercent") == "75"
+    assert meta.try_get_tag_string("Xmp.xmp.Rating") == "4"
+    assert meta.try_get_tag_string("Xmp.xmp.Label") == "Red"
+
+
+def test_a_reject_is_xmp_only(tmp_path):
+    """EXIF has no reject, so only the XMP rating carries the -1."""
+    jpeg = _plain_jpeg(tmp_path)
+    meta = _read(tmp_path, with_credits(jpeg, stamp=Stamp(rating=-1)))
+    assert meta.try_get_tag_string("Xmp.xmp.Rating") == "-1"
+    assert meta.try_get_tag_string("Exif.Image.Rating") is None
+
+
+def test_the_stamp_reads_the_marks_from_the_sidecar(tmp_path):
+    """The export takes its rating and first label from the sidecar."""
+    raf = tmp_path / "a.RAF"
+    raf.write_bytes(b"raf")
+    save_marks(
+        raf,
+        Marks(rating=3, labels=frozenset({Label.BLUE, Label.GREEN})),
+    )
+    settings = Settings(export_artist="Jane Doe")
+    stamp = stamp_for(settings, "grawji recipe: Portra", str(raf))
+    assert stamp == Stamp(
+        artist="Jane Doe",
+        comment="grawji recipe: Portra",
+        rating=3,
+        label="Green",
+    )
+    settings.export_write_marks = False
+    assert stamp_for(settings, "", str(raf)) == Stamp(artist="Jane Doe")

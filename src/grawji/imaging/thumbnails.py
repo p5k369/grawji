@@ -31,6 +31,8 @@ from grawji.imaging.pixbufs import (
     trim_letterbox,
 )
 from grawji.mainloop import Dispatch
+from grawji.marks import MAX_RATING
+from grawji.pairs import paired_jpeg
 from grawji.raf import embedded_jpeg, embedded_jpeg_prefix
 
 # How much of the embedded JPEG to read for the EXIF thumbnail.
@@ -51,8 +53,11 @@ def remembered_facts(cache_dir: Path) -> dict[str, Facts]:
                 fields = meta.split("|")
                 if len(fields) != _FACT_FIELDS:
                     continue
+                model, lens, focal, rating = fields
                 with contextlib.suppress(ValueError):
-                    facts[key] = Facts(float(ratio), *fields)
+                    facts[key] = Facts(
+                        float(ratio), model, lens, focal, int(rating)
+                    )
     except OSError:
         return facts
     return facts
@@ -81,8 +86,9 @@ def prune_cache(
                 entry.unlink()
                 removed += 1
     _prune_facts(cache_dir)
-    with contextlib.suppress(OSError):
-        (cache_dir / "shapes.v1").unlink(missing_ok=True)
+    for retired in ("shapes.v1", "facts.v1"):
+        with contextlib.suppress(OSError):
+            (cache_dir / retired).unlink(missing_ok=True)
     return removed
 
 
@@ -101,7 +107,7 @@ def _fact_line(key: str, fact: Facts) -> str:
     """One line of the memory file."""
     meta = "|".join(
         field.replace("|", " ").replace("\n", " ")
-        for field in (fact.model, fact.lens, fact.focal)
+        for field in (fact.model, fact.lens, fact.focal, str(fact.rating))
     )
     return f"{key} {fact.aspect:.4f} {meta}\n"
 
@@ -110,9 +116,19 @@ def _fact_line(key: str, fact: Facts) -> str:
 _MODEL_TAG = "Exif.Image.Model"
 _LENS_TAG = "Exif.Photo.LensModel"
 _FOCAL_TAG = "Exif.Image.ImageDescription"
-_FACTS_FILE = "facts.v1"
-# Model, lens and focal length, in that order, on every line.
-_FACT_FIELDS = 3
+_RATING_TAG = "Exif.Image.Rating"
+_FACTS_FILE = "facts.v2"
+# Model, lens, focal length and rating, in that order, on every line.
+_FACT_FIELDS = 4
+# Where cameras put the rating they set in playback: XMP on the newer
+# bodies, the Fujifilm makernote on the X100F, IFD0 on others.
+_CAMERA_RATING_TAGS = (
+    "Xmp.xmp.Rating",
+    "Exif.Image.Rating",
+    "Exif.Fujifilm.Rating",
+)
+# How much of a paired JPEG to read for its rating.
+_PAIR_PREFIX_BYTES = 128 * 1024
 # How many frames the memory holds before the oldest age out.
 _FACTS_CAP = 50_000
 _CACHE_QUALITY = "88"
@@ -126,6 +142,8 @@ class ThumbMeta(NamedTuple):
     model: str
     lens: str
     focal: str
+    # The camera's own rating of the shot
+    rating: int = 0
 
 
 class Facts(NamedTuple):
@@ -135,11 +153,12 @@ class Facts(NamedTuple):
     model: str
     lens: str
     focal: str
+    rating: int = 0
 
     @property
     def meta(self) -> ThumbMeta:
         """The filter-relevant part."""
-        return ThumbMeta(self.model, self.lens, self.focal)
+        return ThumbMeta(self.model, self.lens, self.focal, self.rating)
 
 
 OnOne = Callable[[str, Any, ThumbMeta, bool], None]
@@ -231,9 +250,7 @@ class ThumbnailLoader:
         meta, aspect = found
         key = self.cache_key(path)
         if key is not None:
-            self._remember_fact(
-                key, Facts(aspect or 0.0, meta.model, meta.lens, meta.focal)
-            )
+            self._remember_fact(key, Facts(aspect or 0.0, *meta))
         self._dispatch(partial(on_ready, path, meta, aspect))
 
     def _request_one(self, path: str, on_ready: OnOne) -> None:
@@ -263,7 +280,7 @@ class ThumbnailLoader:
         pixbuf = orient_exif(pixbuf, orientation)
         if pixbuf.get_height() > self._height:
             pixbuf = self._to_height(pixbuf)
-        return pixbuf, meta
+        return pixbuf, with_paired_rating(path, meta)
 
     def _thumbnail(self, path: str) -> tuple[Any, ThumbMeta]:
         """Return path's pixbuf and meta, cached when possible."""
@@ -296,6 +313,7 @@ class ThumbnailLoader:
                 tags.try_get_tag_string(_MODEL_TAG) or "",
                 tags.try_get_tag_string(_LENS_TAG) or "",
                 tags.try_get_tag_string(_FOCAL_TAG) or "",
+                _rating_of(tags, (_RATING_TAG,)),
             )
         except GLib.Error:
             return ThumbMeta("", "", "")
@@ -312,7 +330,7 @@ class ThumbnailLoader:
     def _digest(self, target: Path, stat: os.stat_result) -> str:
         """Hash the identity a cached thumbnail is bound to."""
         key = (
-            f"v7|{self._real(target)}|{stat.st_mtime_ns}"
+            f"v8|{self._real(target)}|{stat.st_mtime_ns}"
             f"|{stat.st_size}|{self._height}|{int(self._sharp)}"
         )
         return hashlib.sha1(key.encode("utf-8")).hexdigest()  # noqa: S324
@@ -335,6 +353,7 @@ class ThumbnailLoader:
         # v7: the cache is a JPEG carrying its metadata in Exif. PNG
         # cost four milliseconds and 45 KB per frame to write, against
         # half a millisecond and 9 KB here.
+        # v8: the camera's rating joined that metadata.
         return self._cache_dir / f"{self._digest(target, stat)}.jpg"
 
     def _remember(self, cache: Path, pixbuf: Any, meta: ThumbMeta) -> None:
@@ -342,9 +361,7 @@ class ThumbnailLoader:
         height = pixbuf.get_height()
         if height <= 0:
             return
-        fact = Facts(
-            pixbuf.get_width() / height, meta.model, meta.lens, meta.focal
-        )
+        fact = Facts(pixbuf.get_width() / height, *meta)
         self._remember_fact(cache.stem, fact)
 
     def _remember_fact(self, key: str, fact: Facts) -> None:
@@ -365,13 +382,14 @@ class ThumbnailLoader:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
             pixbuf.savev(str(cache), "jpeg", ["quality"], [_CACHE_QUALITY])
             self._remember(cache, pixbuf, meta)
-            if any((meta.model, meta.lens, meta.focal)):
+            if any((meta.model, meta.lens, meta.focal, meta.rating)):
                 tags = GExiv2.Metadata()
                 tags.open_path(str(cache))
                 for tag, value in (
                     (_MODEL_TAG, meta.model),
                     (_LENS_TAG, meta.lens),
                     (_FOCAL_TAG, meta.focal),
+                    (_RATING_TAG, str(meta.rating) if meta.rating else ""),
                 ):
                     if value:
                         tags.try_set_tag_string(tag, value)
@@ -391,7 +409,7 @@ class ThumbnailLoader:
             pixbuf = self._decode_bytes(jpeg, downscale=True)
             pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
             meta = _meta_of(jpeg)
-        return self._to_height(pixbuf), meta
+        return self._to_height(pixbuf), with_paired_rating(path, meta)
 
     @staticmethod
     def _exif_thumbnail_of(
@@ -478,7 +496,7 @@ def read_frame_meta(path: str) -> tuple[ThumbMeta, float | None] | None:
         meta.open_buf(prefix)
     except (ValueError, OSError, GLib.Error):
         return None
-    return _tags_of(meta), _frame_ratio(meta)
+    return with_paired_rating(path, _tags_of(meta)), _frame_ratio(meta)
 
 
 def _tag_of(meta: Any, tag: str) -> str:
@@ -489,6 +507,18 @@ def _tag_of(meta: Any, tag: str) -> str:
         return ""
 
 
+def _rating_of(meta: Any, tags: tuple[str, ...]) -> int:
+    """The first star rating among tags, 0 for none or a reject."""
+    for tag in tags:
+        try:
+            value = int(_tag_of(meta, tag) or 0)
+        except ValueError:
+            continue
+        if value > 0:
+            return min(MAX_RATING, value)
+    return 0
+
+
 def _tags_of(meta: Any) -> ThumbMeta:
     """The filter metadata of open EXIF metadata."""
     raw = _tag_of(meta, "Exif.Photo.FocalLength")
@@ -496,7 +526,26 @@ def _tags_of(meta: Any) -> ThumbMeta:
         model=_tag_of(meta, "Exif.Image.Model"),
         lens=_tag_of(meta, "Exif.Photo.LensModel"),
         focal=format_focal(raw) if raw else "",
+        rating=_rating_of(meta, _CAMERA_RATING_TAGS),
     )
+
+
+def with_paired_rating(path: str, meta: ThumbMeta) -> ThumbMeta:
+    """The metadata with the rating of a RAW+JPEG pair's JPEG folded in."""
+    if meta.rating >= MAX_RATING:
+        return meta
+    jpeg = paired_jpeg(path)
+    if jpeg is None:
+        return meta
+    try:
+        with jpeg.open("rb") as handle:
+            head = handle.read(_PAIR_PREFIX_BYTES)
+        tags = GExiv2.Metadata()
+        tags.open_buf(head)
+    except (OSError, GLib.Error):
+        return meta
+    rating = _rating_of(tags, _CAMERA_RATING_TAGS)
+    return meta._replace(rating=max(meta.rating, rating))
 
 
 def _meta_of(jpeg: bytes) -> ThumbMeta:

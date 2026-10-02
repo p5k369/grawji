@@ -54,12 +54,12 @@ def test_a_rating_is_stored_and_published(tmp_path: Path) -> None:
 
 
 def test_the_same_rating_again_clears_it(tmp_path: Path) -> None:
-    """Pressing the current rating toggles it off."""
+    """Pressing the current rating toggles it off, and that sticks."""
     controller, folder, paths, _targets, _changed = make(tmp_path, "a.RAF")
     controller.rate(4)
     controller.rate(4)
     assert folder.entries[paths[0]].marks.rating == 0
-    assert load_marks(paths[0]) == Marks()
+    assert load_marks(paths[0]) == Marks(rating=0)
 
 
 def test_a_toggle_sets_a_mixed_selection_uniformly(tmp_path: Path) -> None:
@@ -137,3 +137,18 @@ def test_no_target_does_nothing(tmp_path: Path) -> None:
     controller.toggle_label(Label.GREEN)
     assert changed == []
     assert folder.published == []
+
+
+def test_a_batch_leaves_the_rejects_out(tmp_path: Path) -> None:
+    """Marked for export or not, a reject never goes out in a batch."""
+    controller, _folder, paths, _targets, _changed = make(
+        tmp_path, "a.RAF", "b.RAF", "c.RAF"
+    )
+    controller.set_export(paths, on=True)
+    controller.set_rejected([paths[1]], on=True)
+    marked = controller.marked_for_export(paths)
+    assert marked == paths
+    assert controller.rejected(paths) == [paths[1]]
+    kept, skipped = controller.without_rejects(marked)
+    assert kept == [paths[0], paths[2]]
+    assert skipped == 1

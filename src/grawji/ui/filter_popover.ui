@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiFilterPopover" parent="GtkPopover">
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">6</property>
+        <property name="margin-start">6</property>
+        <property name="margin-end">6</property>
+        <property name="margin-top">6</property>
+        <property name="margin-bottom">6</property>
+        <property name="width-request">240</property>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Camera</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="heading"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="camera_box">
+            <property name="orientation">vertical</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Lens</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="heading"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="lens_box">
+            <property name="orientation">vertical</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="focal_section">
+            <property name="orientation">vertical</property>
+            <property name="spacing">6</property>
+            <property name="visible">false</property>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Focal length</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="heading"/>
+            </style>
+          </object>
+        </child>
+            <child>
+              <object class="GtkBox" id="focal_slot">
+                <property name="orientation">vertical</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Rating</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="heading"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <child>
+              <object class="GtkButton" id="star_1">
+                <property name="icon-name">non-starred-symbolic</property>
+                <property name="tooltip-text">1 star and up</property>
+                <property name="action-name">filter.rating</property>
+                <property name="action-target">'1'</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="star_2">
+                <property name="icon-name">non-starred-symbolic</property>
+                <property name="tooltip-text">2 stars and up</property>
+                <property name="action-name">filter.rating</property>
+                <property name="action-target">'2'</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="star_3">
+                <property name="icon-name">non-starred-symbolic</property>
+                <property name="tooltip-text">3 stars and up</property>
+                <property name="action-name">filter.rating</property>
+                <property name="action-target">'3'</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="star_4">
+                <property name="icon-name">non-starred-symbolic</property>
+                <property name="tooltip-text">4 stars and up</property>
+                <property name="action-name">filter.rating</property>
+                <property name="action-target">'4'</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="star_5">
+                <property name="icon-name">non-starred-symbolic</property>
+                <property name="tooltip-text">5 stars and up</property>
+                <property name="action-name">filter.rating</property>
+                <property name="action-target">'5'</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Color label</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="heading"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <child>
+              <object class="GtkToggleButton">
+                <property name="tooltip-text">Red</property>
+                <property name="action-name">filter.label-red</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="mark-dot"/>
+                      <class name="mark-red"/>
+                    </style>
+                  </object>
+                </property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="tooltip-text">Yellow</property>
+                <property name="action-name">filter.label-yellow</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="mark-dot"/>
+                      <class name="mark-yellow"/>
+                    </style>
+                  </object>
+                </property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="tooltip-text">Green</property>
+                <property name="action-name">filter.label-green</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="mark-dot"/>
+                      <class name="mark-green"/>
+                    </style>
+                  </object>
+                </property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="tooltip-text">Blue</property>
+                <property name="action-name">filter.label-blue</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="mark-dot"/>
+                      <class name="mark-blue"/>
+                    </style>
+                  </object>
+                </property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="tooltip-text">Purple</property>
+                <property name="action-name">filter.label-purple</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="mark-dot"/>
+                      <class name="mark-purple"/>
+                    </style>
+                  </object>
+                </property>
+                <style>
+                  <class name="flat"/>
+                  <class name="mark-button"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Marks</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="heading"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkCheckButton">
+            <property name="label">Marked for export only</property>
+            <property name="action-name">filter.export</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Rejects</property>
+            <property name="xalign">0</property>
+            <style>
+              <class name="dim-label"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <style>
+              <class name="linked"/>
+            </style>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="label">Show</property>
+                <property name="hexpand">true</property>
+                <property name="action-name">filter.rejects</property>
+                <property name="action-target">'show'</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="label">Hide</property>
+                <property name="hexpand">true</property>
+                <property name="action-name">filter.rejects</property>
+                <property name="action-target">'hide'</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton">
+                <property name="label">Only</property>
+                <property name="hexpand">true</property>
+                <property name="action-name">filter.rejects</property>
+                <property name="action-target">'only'</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkSeparator"/>
+        </child>
+        <child>
+          <object class="GtkButton">
+            <property name="label">Clear filter</property>
+            <property name="action-name">filter.clear</property>
+            <style>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </property>
+  </template>
+</interface>

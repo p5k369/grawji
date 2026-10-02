@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
 from grawji import mainloop
-from grawji.marks import MAX_RATING, Label, Marks
+from grawji.marks import MAX_RATING, STAR, Label, Marks
 
 ACTIONS = ("open-with", "export", "copy", "move", "trash")
 
@@ -84,7 +84,7 @@ def _on_toggle(
 def _show_marks(group: Gio.SimpleActionGroup, marks: Marks) -> None:
     """Point the mark actions' states at one card's marks."""
     for name, value in (
-        ("rate", GLib.Variant.new_int32(marks.rating)),
+        ("rate", GLib.Variant.new_int32(marks.rating or 0)),
         ("reject", GLib.Variant.new_boolean(marks.rejected)),
         ("export", GLib.Variant.new_boolean(marks.export)),
         *(
@@ -104,7 +104,7 @@ def _marks_section(suffix: str) -> Gio.Menu:
     """Rating, color labels, reject and export, as one menu section."""
     rating = Gio.Menu()
     for stars in range(MAX_RATING + 1):
-        title = "No Stars" if stars == 0 else "\u2605" * stars
+        title = "No Stars" if stars == 0 else STAR * stars
         item = Gio.MenuItem.new(title, None)
         item.set_action_and_target_value(
             "marks.rate", GLib.Variant.new_int32(stars)

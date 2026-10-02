@@ -8,9 +8,19 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("gi")
+gi = pytest.importorskip("gi")
+gi.require_version("GdkPixbuf", "2.0")
+gi.require_version("GExiv2", "0.10")
 
-from grawji.imaging.thumbnails import prune_cache
+from gi.repository import GdkPixbuf, GExiv2
+
+from grawji.imaging.thumbnails import (
+    ThumbMeta,
+    ThumbnailLoader,
+    prune_cache,
+    remembered_facts,
+    with_paired_rating,
+)
 
 _DAY = 24 * 3600
 
@@ -269,3 +279,34 @@ def test_swept_frames_are_remembered_without_a_thumbnail(
     assert facts[key].meta == meta
     prune_cache(tmp_path, max_age_s=0, now=1e12)
     assert remembered_facts(tmp_path)[key].meta == meta
+
+
+def test_the_camera_rating_is_remembered(tmp_path: Path) -> None:
+    """The rating rides along in the facts like the lens does."""
+    loader = ThumbnailLoader(
+        height=110,
+        cache_dir=tmp_path,
+        workers=1,
+        dispatch=lambda call: call(),
+    )
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 30, 20)
+    meta = ThumbMeta("X100F", "", "23.0 mm", 4)
+    loader._remember(tmp_path / "abc.jpg", pixbuf, meta)
+    assert remembered_facts(tmp_path)["abc"].meta == meta
+
+
+def test_a_paired_jpeg_lends_the_raf_its_rating(tmp_path: Path) -> None:
+    """A camera that rated only the JPEG still rates the shot."""
+    raf = tmp_path / "DSCF0001.RAF"
+    raf.write_bytes(b"not a real raf")
+    meta = ThumbMeta("X100F", "", "23.0 mm")
+    assert with_paired_rating(str(raf), meta) == meta
+    jpeg = tmp_path / "DSCF0001.JPG"
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 8, 8)
+    pixbuf.savev(str(jpeg), "jpeg", [], [])
+    tags = GExiv2.Metadata()
+    tags.open_path(str(jpeg))
+    tags.try_set_tag_string("Exif.Image.Rating", "3")
+    tags.save_file(str(jpeg))
+    assert with_paired_rating(str(raf), meta).rating == 3
+    assert with_paired_rating(str(raf), meta._replace(rating=5)).rating == 5

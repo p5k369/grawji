@@ -47,6 +47,8 @@ class Settings:
         batch_overwrite: On batch export, re-export images whose JPEG
             already exists in the target folder. When False, such images
             are skipped so an interrupted batch can be resumed cheaply.
+        batch_clear_marks: After Export Marked, clear the export mark
+            of every image that ended up in the folder.
         wb_grid_tint: When True, tint each white-balance shift grid cell
             with the color it nudges the image toward.
         grid_tile_px: Height of one tile in the folder grid.
@@ -88,6 +90,8 @@ class Settings:
         export_artist: EXIF Artist written into exports. Empty writes nothing.
         export_copyright: EXIF Copyright written into exports. Empty
             writes nothing.
+        export_write_marks: Stamp the image's rating and first color
+            label into exports, as EXIF and XMP rating and XMP label.
         export_provenance: Record the applied recipe's name in the
             exported JPEG's EXIF user comment.
         export_format: Output format for exports, one of
@@ -102,6 +106,7 @@ class Settings:
     window_height: int = 0
     jpeg_quality: int = 95
     batch_overwrite: bool = False
+    batch_clear_marks: bool = True
     wb_grid_tint: bool = True
     nav_glide_speed: int = 600
     grid_tile_px: int = 240
@@ -125,6 +130,7 @@ class Settings:
     export_artist: str = ""
     export_copyright: str = ""
     export_provenance: bool = True
+    export_write_marks: bool = True
     export_format: str = "jpeg"
 
     def to_dict(self) -> dict[str, object]:

@@ -148,6 +148,12 @@
               </object>
             </child>
             <child>
+              <object class="AdwSwitchRow" id="marks_row">
+                <property name="title">Record rating and label</property>
+                <property name="subtitle">Write the image's stars and first color label into the export, for other photo apps</property>
+              </object>
+            </child>
+            <child>
               <object class="AdwExpanderRow" id="border_row">
                 <property name="title">Border</property>
                 <property name="subtitle">Frame exports with a solid border</property>

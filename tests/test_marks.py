@@ -34,11 +34,22 @@ def test_a_reject_is_no_stars() -> None:
 
 @pytest.mark.parametrize(
     ("given", "kept"),
-    [(7, MAX_RATING), (-4, REJECTED), ("3", 0), (True, 0), (2.5, 0)],
+    [(7, MAX_RATING), (-4, REJECTED), ("3", None), (True, None), (2.5, None)],
 )
 def test_a_malformed_rating_is_clamped_or_dropped(given, kept) -> None:
     """A hand-edited sidecar cannot push the rating out of range."""
     assert Marks.from_dict({"rating": given}).rating == kept
+
+
+def test_a_cleared_rating_is_not_no_rating() -> None:
+    """Clearing is remembered, so the camera's rating stays out."""
+    assert Marks().rating is None
+    cleared = Marks(rating=5).with_rating(0)
+    assert cleared.rating == 0
+    assert not cleared.is_empty
+    assert cleared.to_dict() == {"rating": 0}
+    assert Marks.from_dict({"rating": 0}) == cleared
+    assert cleared.stars == 0
 
 
 def test_unknown_labels_and_junk_are_ignored() -> None:

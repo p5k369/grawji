@@ -39,12 +39,14 @@ from grawji.imaging.export import (
     recipe_for_format,
     resize_active,
     sidecar_decode,
+    stamp_for,
     with_border,
     with_max_edge,
     write_jpeg,
     write_passthrough,
 )
 from grawji.imaging.heif_codec import HeifError
+from grawji.imaging.imagemeta import Stamp
 from grawji.imaging.tiff import TiffError
 from grawji.recipe import Recipe
 from grawji.settings import Settings
@@ -61,7 +63,7 @@ class _ExportJob:
     path: str
     recipe: Recipe
     crop: CropRotate
-    comment: str
+    stamp: Stamp
     wanted: str
     identity: bool
     dropped: str = ""
@@ -167,7 +169,11 @@ class SingleExportController:
             path=path,
             recipe=recipe,
             crop=self._get_crop(),
-            comment=self._get_provenance(),
+            stamp=stamp_for(
+                self._settings,
+                self._get_provenance(),
+                self._get_current_raf() or "",
+            ),
             wanted=wanted,
             identity=self._base_identity(),
             dropped=dropped,
@@ -198,9 +204,7 @@ class SingleExportController:
             write_passthrough(
                 rendered,
                 path,
-                artist=self._settings.export_artist,
-                rights=self._settings.export_copyright,
-                comment=job.comment,
+                stamp=job.stamp,
                 fmt=fmt,
                 quality=self._settings.jpeg_quality,
             )
@@ -215,9 +219,7 @@ class SingleExportController:
                     ),
                     self._settings,
                 ),
-                artist=self._settings.export_artist,
-                rights=self._settings.export_copyright,
-                comment=job.comment,
+                stamp=job.stamp,
                 fmt=fmt,
                 geometry=geometry_for(job.crop, self._settings),
             )
@@ -250,14 +252,12 @@ class BatchController:
         worker: CameraWorker,
         session: CameraSession,
         settings: Settings,
-        get_paths: Callable[[], list[str]],
         get_recipe: Callable[[], Recipe],
         get_provenance: Callable[[], str],
         get_current_raf: Callable[[], str | None],
         set_busy: SetBusy,
         on_status: Callable[[str], None],
         on_error: Callable[[Exception], None],
-        on_finished: Callable[[], None] | None = None,
         on_status_link: Callable[[str, str], None] | None = None,
     ) -> None:
         """Wire the controller to the window's session and callbacks.
@@ -267,8 +267,6 @@ class BatchController:
             worker: The camera worker the batch task runs on.
             session: The camera session the task drives directly.
             settings: Read and remember the overwrite choice.
-            get_paths: Returns the RAF paths to export when begin() is
-                called without an explicit list.
             get_recipe: Returns the recipe to render with.
             get_provenance: A short description of the recipe/source
                 the batch renders with.
@@ -277,8 +275,6 @@ class BatchController:
                 keyword arguments busy and status.
             on_status: Sets the status line without the busy plumbing.
             on_error: Receives a camera failure.
-            on_finished: Called after a run completes (not on camera
-                failure), e.g. to leave batch-select mode.
             on_status_link: Sets a status line whose text opens the
                 given path on click.
         """
@@ -286,27 +282,35 @@ class BatchController:
         self._worker = worker
         self._session = session
         self._settings = settings
-        self._get_paths = get_paths
         self._get_recipe = get_recipe
         self._get_provenance = get_provenance
         self._get_current_raf = get_current_raf
         self._set_busy = set_busy
         self._on_status = on_status
         self._on_error = on_error
-        self._on_finished = on_finished
         self._on_status_link = on_status_link
         self._dialog: BatchExportDialog | None = None
         self._cancel: threading.Event | None = None
         self._pending: list[str] = []
         self._out_dir: str | None = None
         self._dropped = ""
+        self._note = ""
+        self._unmark: Callable[[list[str]], None] | None = None
+        self._clear_marks = False
 
-    def begin(self, paths: list[str] | None = None) -> str | None:
+    def begin(
+        self,
+        paths: list[str],
+        *,
+        note: str = "",
+        unmark: Callable[[list[str]], None] | None = None,
+    ) -> str | None:
         """Start the flow with a folder pick."""
-        resolved = list(paths) if paths is not None else self._get_paths()
-        if not resolved:
+        if not paths:
             return "No images selected to export."
-        self._pending = resolved
+        self._pending = list(paths)
+        self._note = note
+        self._unmark = unmark
         dialog = Gtk.FileDialog()
         dialog.set_title("Export to folder")
         start = initial_folder(self._settings.last_export_dir)
@@ -337,6 +341,11 @@ class BatchController:
             overwrite=self._settings.batch_overwrite,
             on_start=partial(self._start, out_dir),
             on_cancel=self._on_cancel,
+            clear_marks=(
+                self._settings.batch_clear_marks
+                if self._unmark is not None
+                else None
+            ),
         )
         self._dialog.connect("closed", self._on_dialog_closed)
         self._dialog.present(self._parent)
@@ -346,10 +355,17 @@ class BatchController:
         self._dialog = None
 
     def _start(
-        self, out_dir: str, overwrite: bool, skip_foreign: bool
+        self,
+        out_dir: str,
+        overwrite: bool,
+        skip_foreign: bool,
+        clear_marks: bool = False,
     ) -> None:
         """Render the pending RAFs with the current recipe."""
         self._settings.batch_overwrite = overwrite
+        if self._unmark is not None:
+            self._settings.batch_clear_marks = clear_marks
+        self._clear_marks = clear_marks and self._unmark is not None
         self._out_dir = out_dir
         paths = self._pending
         recipe = self._get_recipe()
@@ -366,15 +382,18 @@ class BatchController:
             _LOG.info("batch export: %s", dropped)
         self._dropped = dropped
 
-        def task() -> dict[str, int]:
+        def task() -> tuple[dict[str, int], list[str]]:
             tally = {"exported": 0, "existing": 0, "foreign": 0, "failed": 0}
+            delivered: list[str] = []
             for done, raf_file in enumerate(paths, start=1):
                 if cancel.is_set():
                     tally["cancelled"] = 1
                     break
                 out_path = Path(out_dir, export_basename(raf_file, fmt=wanted))
+                before = tally["exported"]
                 if not overwrite and out_path.exists():
                     tally["existing"] += 1
+                    delivered.append(raf_file)
                 else:
                     self._export_one(
                         raf_file,
@@ -384,10 +403,12 @@ class BatchController:
                         skip_foreign,
                         tally,
                     )
+                    if tally["exported"] > before:
+                        delivered.append(raf_file)
                 mainloop.call(self._progress, done, total, Path(raf_file).name)
             if current is not None:
                 self._session.open(current)
-            return tally
+            return tally, delivered
 
         self._worker.submit(
             task, on_done=self._on_done, on_error=self._on_error
@@ -428,14 +449,13 @@ class BatchController:
             )
         fmt = delivered_format(rendered, fmt)
         out_path = Path(corrected_path(str(out_path), fmt))
+        stamp = stamp_for(self._settings, comment, raf_file)
         try:
             if decode is None:
                 write_passthrough(
                     rendered,
                     str(out_path),
-                    artist=self._settings.export_artist,
-                    rights=self._settings.export_copyright,
-                    comment=comment,
+                    stamp=stamp,
                     fmt=fmt,
                     quality=self._settings.jpeg_quality,
                 )
@@ -445,9 +465,7 @@ class BatchController:
                     str(out_path),
                     quality=self._settings.jpeg_quality,
                     decode=decode,
-                    artist=self._settings.export_artist,
-                    rights=self._settings.export_copyright,
-                    comment=comment,
+                    stamp=stamp,
                     fmt=fmt,
                     geometry=geometry_for(
                         sidecar.load_crop(raf_file), self._settings
@@ -483,8 +501,9 @@ class BatchController:
             self._dialog.update(done, total, name)
         return GLib.SOURCE_REMOVE
 
-    def _on_done(self, tally: dict[str, int]) -> None:
+    def _on_done(self, result: tuple[dict[str, int], list[str]]) -> None:
         """Report batch completion and show the dialog summary."""
+        tally, delivered = result
         self._cancel = None
         exported = tally["exported"]
         lead = "Cancelled after" if tally.get("cancelled") else "Exported"
@@ -495,13 +514,18 @@ class BatchController:
             parts.append(f"Skipped {tally['foreign']} from another camera.")
         if tally["failed"]:
             parts.append(f"{tally['failed']} failed.")
+        if self._note:
+            parts.append(self._note)
         if self._dropped:
             parts.append(self._dropped)
+        if delivered and self._clear_marks and self._unmark is not None:
+            self._unmark(delivered)
+            count = len(delivered)
+            marks = "mark" if count == 1 else "marks"
+            parts.append(f"Cleared {count} export {marks}.")
         summary = " ".join(parts)
         self._set_busy(busy=False, status=summary)
         if exported and self._out_dir and self._on_status_link is not None:
             self._on_status_link(summary, self._out_dir)
         if self._dialog is not None:
             self._dialog.finish(summary)
-        if self._on_finished is not None:
-            self._on_finished()
