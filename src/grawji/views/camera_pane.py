@@ -176,7 +176,7 @@ class CameraPane(Gtk.Box):
         """The bank recipes, bank names and FS recipes to transfer."""
         return (
             dict(self._bank_recipe),
-            self._transfer_names(),
+            self._names_by_slot(),
             dict(self._fs_recipe),
         )
 
@@ -201,6 +201,7 @@ class CameraPane(Gtk.Box):
             bank["name_row"].set_visible(True)
             bank["name_label"].set_label(name)
             bank["loaded"] = name
+            bank["dropped"] = None
 
     def _build_fs_section(self, model: str | None) -> None:
         """Add FS1-FSn dial-position cards if this body has an FS layout."""
@@ -266,6 +267,7 @@ class CameraPane(Gtk.Box):
                 "name_label": name_label,
                 "assigned": assigned,
                 "loaded": "",
+                "dropped": None,
             }
         )
         return card
@@ -338,7 +340,18 @@ class CameraPane(Gtk.Box):
         label = self._banks[slot]["assigned"]
         label.set_label(f"→ {name}{self._compat_note(name)}")
         label.remove_css_class("dim-label")
+        self._name_after_recipe(slot, name)
         return True
+
+    def _name_after_recipe(self, slot: int, name: str) -> None:
+        """Give a bank the name of the recipe dropped on it."""
+        if not self._bank_names_loaded:
+            return
+        bank = self._banks[slot]
+        shown = bank["name_label"].get_text()
+        if shown in (bank["loaded"], bank["dropped"]):
+            bank["name_label"].set_label(name)
+            bank["dropped"] = name
 
     def _on_fs_drop(
         self, _target: Any, value: Any, _x: float, _y: float, slot: int
@@ -373,16 +386,6 @@ class CameraPane(Gtk.Box):
             if text and text != bank["loaded"]:
                 out[slot] = text
         return out
-
-    def _transfer_names(self) -> dict[int, str]:
-        """Renames, plus default names for drops into unnamed banks."""
-        names = self._names_by_slot()
-        if not self._bank_names_loaded:
-            return names
-        for slot, recipe_name in self._bank_recipe.items():
-            if slot not in names and not self._banks[slot]["loaded"]:
-                names[slot] = recipe_name
-        return names
 
     def _prompt(
         self,

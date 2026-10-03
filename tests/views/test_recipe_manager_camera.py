@@ -94,10 +94,10 @@ def test_transfer_finished_clears_assignments(tmp_path: Any) -> None:
     assert dialog.camera_pane._bank_recipe == {}
 
 
-def test_drop_into_unnamed_bank_defaults_the_name(tmp_path: Any) -> None:
-    """A drop into a bank with no stored name carries the recipe name.
+def test_a_drop_names_the_bank_after_the_recipe(tmp_path: Any) -> None:
+    """Named or empty, a bank takes the name of what goes into it.
 
-    Writing the name is what materializes an empty slot on the body
+    Writing the name is also what materializes an empty slot on the body
     (X-E5: a value-only write leaves the bank "empty" in the menu).
     """
     captured: dict[str, Any] = {}
@@ -109,9 +109,32 @@ def test_drop_into_unnamed_bank_defaults_the_name(tmp_path: Any) -> None:
     dialog.set_bank_names("X-E5", ["BW", "", "", "", "", "", ""])
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
     dialog.camera_pane._on_bank_drop(None, "Acros look", 0.0, 0.0, 4)
+    assert dialog.camera_pane._banks[0]["name_label"].get_text() == (
+        "Velvia look"
+    )
     pump()
     dialog._on_transfer_clicked(None)
-    assert captured["names"] == {4: "Acros look"}
+    assert captured["names"] == {0: "Velvia look", 4: "Acros look"}
+
+
+def test_a_second_drop_renames_again(tmp_path: Any) -> None:
+    """The name follows the latest drop until the user types one."""
+    captured: dict[str, Any] = {}
+    dialog = _dialog(
+        tmp_path,
+        model="X-E5",
+        on_transfer=lambda a, n, fs: captured.update(names=n),
+    )
+    dialog.set_bank_names("X-E5", ["BW", "", "", "", "", "", ""])
+    pane = dialog.camera_pane
+    pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
+    pane._on_bank_drop(None, "Acros look", 0.0, 0.0, 0)
+    assert pane._banks[0]["name_label"].get_text() == "Acros look"
+    pane._banks[0]["name_label"].set_label("MINE")
+    pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
+    pump()
+    dialog._on_transfer_clicked(None)
+    assert captured["names"] == {0: "MINE"}
 
 
 def test_no_default_names_when_none_were_loaded(tmp_path: Any) -> None:
@@ -160,7 +183,7 @@ def test_bank_rename_is_collected(tmp_path: Any) -> None:
     pump()
     dialog._on_transfer_clicked(None)
     assert captured["recipes"] == {0: "Velvia look"}
-    assert captured["names"] == {1: "KODAK"}
+    assert captured["names"] == {0: "Velvia look", 1: "KODAK"}
 
 
 def test_name_row_visible_on_every_body(tmp_path: Any) -> None:
