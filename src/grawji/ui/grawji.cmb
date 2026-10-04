@@ -3,13 +3,13 @@
 <!-- Created with Cambalache 1.0.3 -->
 <cambalache-project version="1.0.0" target_tk="gtk-4.0" depends="libadwaita-1">
   <ui filename="preview_view.ui" sha256="bd0666386118ef6e349033c34b049caa18899029dbe981d4205880a112945458"/>
-  <ui filename="recipe_panel.ui" sha256="e043c4224bb444f5fd5bbb98175aa19904a5f9b0ae8ac91b96139f8cc96b482a"/>
+  <ui filename="recipe_panel.ui" sha256="78399b358c31f11bed4aff5b820c7f54cba88595b8dec9d503bdb0038849e447"/>
   <ui filename="grawji.ui" sha256="4cc567c1cfcfb18387940e650c39cdd8bce5a45e09bb0b6452e1df9d70bec127"/>
   <ui filename="batch_export.ui" sha256="a2179fe58eb83df67efeb1f81836592aadcbb6564009d891ecb6f0c076dfd5b3"/>
   <ui filename="preferences.ui" sha256="687ffc844addffe311afaa5eade062294ea924a4312a992e0f368859433dafa6"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
   <ui filename="camera_pane.ui" sha256="51c0aeea0a911b551751560d9390c83a661c45e3d68f6aa0d686cd26916a0563"/>
-  <ui filename="recipe_manager.ui" sha256="1482cbae69eeab2e7c7be552fafbb3624f03fb222eff758ecbd4f15d3f2e4dc6"/>
+  <ui filename="recipe_manager.ui" sha256="c06cc55cd050839992f442c188538e9af8a3765eeb312620e07a0eb39986f7fb"/>
   <ui filename="marks_bar.ui" sha256="7a025ea24fdf7691485fb6f78bf17028700b1b959d39887b3d8736f35880eb7b"/>
   <ui filename="rating_badges.ui" sha256="bfcb271d7e0ce49798eb113c85adeb489bc49c2974804794b6e65cf5e2624151"/>
   <ui filename="detail_badges.ui" sha256="480f1b6ce9fbe1d5456dc29e8da219d65c30afc42db9fce9d3c2da21b41046ae"/>

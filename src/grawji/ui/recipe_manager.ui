@@ -13,9 +13,9 @@
         <child type="top">
           <object class="AdwHeaderBar">
             <child type="start">
-              <object class="GtkButton" id="import_button">
-                <property name="icon-name">document-open-symbolic</property>
-                <property name="tooltip-text">Import an X RAW Studio recipe</property>
+              <object class="GtkButton" id="new_folder_button">
+                <property name="icon-name">folder-new-symbolic</property>
+                <property name="tooltip-text">New folder</property>
               </object>
             </child>
             <child type="start">
@@ -31,12 +31,6 @@
                 <style>
                   <class name="suggested-action"/>
                 </style>
-              </object>
-            </child>
-            <child type="end">
-              <object class="GtkButton" id="new_folder_button">
-                <property name="icon-name">folder-new-symbolic</property>
-                <property name="tooltip-text">New folder</property>
               </object>
             </child>
           </object>
@@ -68,7 +62,7 @@
                       <object class="AdwStatusPage">
                         <property name="icon-name">emblem-documents-symbolic</property>
                         <property name="title">No recipes</property>
-                        <property name="description">Import a recipe, or save the current settings.</property>
+                        <property name="description">Save the current settings, or import a recipe with the import button above the recipe settings.</property>
                       </object>
                     </property>
                   </object>

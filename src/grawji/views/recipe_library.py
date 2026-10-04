@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -14,8 +15,11 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
+from grawji import mainloop
 from grawji.camera import compatibility as compat
 from grawji.camera.fp_xml import parse_fp, serialize_fp
+from grawji.imaging import imagemeta
+from grawji.photo_recipe import PhotoRecipe, recipe_from_tags
 from grawji.recipe import Recipe
 from grawji.recipe_text import format_recipe_text, parse_recipe_text
 from grawji.recipes import UNGROUPED, RecipeLibrary
@@ -232,6 +236,57 @@ class RecipeLibraryController:
         dialog.set_filters(filters)
         dialog.set_default_filter(fp_filter)
         dialog.open(self._parent, None, self._on_import_response)
+
+    def import_photo(self) -> None:
+        """Pick a Fujifilm photo and import the recipe it was shot with."""
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Recipe from a photo")
+        photos = Gtk.FileFilter()
+        photos.set_name("Fujifilm photos (JPEG, HEIF, JPEG XL, RAF)")
+        for suffix in ("jpg", "jpeg", "hif", "heif", "jxl", "raf"):
+            photos.add_suffix(suffix)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(photos)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(photos)
+        dialog.open(self._parent, None, self._on_photo_response)
+
+    def _on_photo_response(self, dialog: Any, result: Any) -> None:
+        """Read the picked photo's makernote."""
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = gfile.get_path()
+        if path is None:
+            return
+        threading.Thread(
+            target=self._read_photo,
+            args=(path,),
+            name="grawji-photo-recipe",
+            daemon=True,
+        ).start()
+
+    def _read_photo(self, path: str) -> None:
+        """Read the recipe of one photo."""
+        read = imagemeta.photo_tags(path)
+        found = recipe_from_tags(read) if read is not None else None
+        mainloop.call(self._apply_photo_recipe, path, found)
+
+    def _apply_photo_recipe(
+        self, path: str, found: PhotoRecipe | None
+    ) -> None:
+        """Apply a photo's recipe like any other import."""
+        if found is None:
+            message = f"No Fujifilm recipe found in {Path(path).name}."
+            self._on_status(message)
+            if self._manager is not None:
+                self._manager.show_toast(message)
+            return
+        self._apply_unsaved(found.recipe, Path(path).stem)
+        if found.missing:
+            kept = ", ".join(name.replace("_", " ") for name in found.missing)
+            self._on_status(f"The photo does not record the {kept}.")
 
     def export_recipe(self, name: str) -> None:
         """Pick a path and write the named saved recipe as an FP file."""

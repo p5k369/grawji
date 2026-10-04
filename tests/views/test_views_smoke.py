@@ -341,21 +341,37 @@ def test_recipe_manager_badges_duplicates(tmp_path: Any) -> None:
     assert len(dup_chips) == 2
 
 
-def test_recipe_manager_import_button_fires_callback(tmp_path: Any) -> None:
-    """The manager's Import button invokes the host's import."""
-    from grawji.views.recipe_manager import RecipeManagerDialog
+def test_the_import_button_offers_every_import() -> None:
+    """Imports have their own button beside the recipe settings."""
+    from grawji.views.recipe_panel import RecipePanel
 
-    library = RecipeLibrary(tmp_path / "recipes.json")
-    library.add("A", Recipe())
-    imported: list[int] = []
-    dialog = RecipeManagerDialog(
-        library=library,
-        host=StubManagerHost(import_recipe=lambda: imported.append(1)),
-    )
-    pump()
-    assert dialog.import_button.get_visible()
-    dialog.import_button.emit("clicked")
-    assert imported == [1]
+    panel = RecipePanel()
+    panel.set_recipe_menu(["A"], [])
+    menu = panel.import_button.get_menu_model()
+    section = menu.get_item_link(0, "section")
+    actions = [
+        section.get_item_attribute_value(item, "action", None).get_string()
+        for item in range(section.get_n_items())
+    ]
+    assert actions == [
+        "recipe.import-photo",
+        "recipe.import-fp",
+        "recipe.paste",
+    ]
+    picker = panel.recipe_button.get_menu_model()
+    labels = [
+        picker.get_item_link(0, "section")
+        .get_item_attribute_value(item, "label", None)
+        .get_string()
+        for item in range(picker.get_item_link(0, "section").get_n_items())
+    ]
+    assert "From a Photo…" not in labels
+    fired: list[str] = []
+    for signal in ("import-photo", "import-fp", "paste-recipe"):
+        panel.connect(signal, lambda *_a, s=signal: fired.append(s))
+    for action in ("import-photo", "import-fp", "paste"):
+        panel.activate_action(f"recipe.{action}")
+    assert fired == ["import-photo", "import-fp", "paste-recipe"]
 
 
 def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:

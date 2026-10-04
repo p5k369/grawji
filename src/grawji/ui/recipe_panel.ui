@@ -2,6 +2,22 @@
 <interface>
   <requires lib="gtk" version="4.0"/>
   <requires lib="libadwaita" version="1.0"/>
+  <menu id="import_menu">
+    <section>
+      <item>
+        <attribute name="label">From a Photo…</attribute>
+        <attribute name="action">recipe.import-photo</attribute>
+      </item>
+      <item>
+        <attribute name="label">From an X RAW Studio File…</attribute>
+        <attribute name="action">recipe.import-fp</attribute>
+      </item>
+      <item>
+        <attribute name="label">From Text in the Clipboard</attribute>
+        <attribute name="action">recipe.paste</attribute>
+      </item>
+    </section>
+  </menu>
   <template class="GrawjiRecipePanel" parent="AdwPreferencesPage">
     <property name="width-request">345</property>
     <child>
@@ -9,6 +25,16 @@
         <property name="header-suffix">
           <object class="GtkBox">
             <property name="spacing">2</property>
+            <child>
+              <object class="GtkMenuButton" id="import_button">
+                <property name="icon-name">list-add-symbolic</property>
+                <property name="tooltip-text">Import a recipe</property>
+                <property name="menu-model">import_menu</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
             <child>
               <object class="GtkButton">
                 <property name="icon-name">view-list-symbolic</property>

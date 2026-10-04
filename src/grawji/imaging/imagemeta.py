@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -127,6 +128,30 @@ def camera_model(path: str) -> str | None:
         return meta.try_get_tag_string("Exif.Image.Model")
     except GLib.Error:
         return None
+
+
+_RAF_META_BYTES = 256 * 1024
+
+
+def photo_tags(path: str) -> Callable[[str], str | None] | None:
+    """A reader for one photo's metadata tags."""
+    metadata = GExiv2.Metadata()
+    try:
+        if path.lower().endswith(".raf"):
+            metadata.open_buf(raf.embedded_jpeg_prefix(path, _RAF_META_BYTES))
+        else:
+            metadata.open_path(path)
+    except (GLib.Error, OSError, ValueError):
+        return None
+
+    def read(tag: str) -> str | None:
+        try:
+            value = metadata.try_get_tag_string(tag)
+        except GLib.Error:
+            return None
+        return str(value) if value else None
+
+    return read
 
 
 def _stamp(metadata: Any, stamp: Stamp, *, xmp: bool = True) -> None:
