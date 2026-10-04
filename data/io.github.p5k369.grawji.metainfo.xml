@@ -49,6 +49,19 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.0" date="2026-10-04">
+      <description>
+        <p>This release adds image marks, recipe import, and several export improvements.</p>
+        <ul>
+          <li>Mark images while browsing to keep track of your picks</li>
+          <li>Develop a RAW+JPEG shot starting from its camera JPEG</li>
+          <li>Exports are now resampled at maximum quality</li>
+          <li>Import the recipe a photo was shot with</li>
+          <li>Drop a recipe on a camera bank to name the bank after it</li>
+          <li>Automatic keystone correction is now applied to 16-bit exports</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-09-27">
       <description>
         <p>Version 0.6.0 adds new export formats, a folder grid view, and smoother previews.</p>
