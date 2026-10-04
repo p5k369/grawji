@@ -23,9 +23,10 @@ from grawji.imaging.export import (
     with_border,
     write_camera_file,
 )
-from grawji.imaging.imagemeta import Stamp, with_credits
+from grawji.imaging.imagemeta import Stamp, photo_tags, with_credits
 from grawji.imaging.render import add_border, scale_to_edge
 from grawji.marks import Label, Marks
+from grawji.photo_recipe import recipe_from_tags
 from grawji.settings import Settings
 from grawji.sidecar import save_crop, save_marks
 
@@ -299,3 +300,25 @@ def test_a_camera_jpeg_never_becomes_a_tiff(tmp_path):
     assert fmt == "jpeg"
     assert path.endswith(".jpg")
     assert camera_file_format("heif") == "jpeg"
+
+
+def test_photo_tags_read_a_fujifilm_makernote(tmp_path):
+    """A JPEG carrying Fujifilm tags reads back through photo_tags."""
+    path = tmp_path / "DSCF0001.JPG"
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 8, 8)
+    pixbuf.savev(str(path), "jpeg", [], [])
+    meta = GExiv2.Metadata()
+    meta.open_path(str(path))
+    meta.try_set_tag_string("Exif.Image.Make", "FUJIFILM")
+    meta.try_set_tag_string("Exif.Image.Model", "X-E5")
+    meta.try_set_tag_string("Exif.Fujifilm.FilmMode", "2816")
+    meta.try_set_tag_string("Exif.Fujifilm.HighlightTone", "-8")
+    meta.save_file(str(path))
+    read = photo_tags(str(path))
+    assert read is not None
+    assert read("Exif.Fujifilm.FilmMode") == "2816"
+    found = recipe_from_tags(read)
+    assert found is not None
+    assert found.recipe.film_simulation == "RealaAce"
+    assert found.recipe.highlights == 0.5
+    assert photo_tags(str(tmp_path / "missing.jpg")) is None

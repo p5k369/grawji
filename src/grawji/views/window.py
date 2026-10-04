@@ -1249,6 +1249,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.connect(
             "copy-recipe", lambda *_a: self._library.copy_text()
         )
+        self.recipe_panel.connect(
+            "import-photo", lambda *_a: self._library.import_photo()
+        )
+        self.recipe_panel.connect(
+            "import-fp", lambda *_a: self._library.import_recipe()
+        )
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
         """Apply the picker's choice, guarding unsaved recipe edits."""

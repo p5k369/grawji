@@ -88,9 +88,6 @@ class RecipeManagerHost(Protocol):
     def edit_comment(self, name: str) -> None:
         """Prompt for the recipe's hover comment."""
 
-    def import_recipe(self) -> None:
-        """Pick and import an X RAW Studio FP file."""
-
 
 @Gtk.Template(string=_UI)
 class RecipeManagerDialog(Adw.Dialog):
@@ -100,7 +97,6 @@ class RecipeManagerDialog(Adw.Dialog):
 
     toasts = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
-    import_button = Gtk.Template.Child()
     search_entry = Gtk.Template.Child()
     transfer_button = Gtk.Template.Child()
     content = Gtk.Template.Child()
@@ -124,9 +120,6 @@ class RecipeManagerDialog(Adw.Dialog):
         self.new_folder_button.connect("clicked", self._on_new_folder)
         self.search_entry.connect("search-changed", self._apply_search)
         self.transfer_button.connect("clicked", self._on_transfer_clicked)
-        self.import_button.connect(
-            "clicked", lambda *_a: self._host.import_recipe()
-        )
         self.refresh()
         self.camera_pane.wire(
             library=library,

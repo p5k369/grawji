@@ -84,9 +84,12 @@ class RecipePanel(Adw.PreferencesPage):
         "apply-recipe": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "paste-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "copy-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "import-photo": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "import-fp": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     recipe_button = Gtk.Template.Child()
+    import_button = Gtk.Template.Child()
     recipe_group = Gtk.Template.Child()
     exposure_group = Gtk.Template.Child()
 
@@ -109,12 +112,17 @@ class RecipePanel(Adw.PreferencesPage):
         apply_action = Gio.SimpleAction.new("apply", GLib.VariantType.new("s"))
         apply_action.connect("activate", self._on_apply_action)
         self._apply_actions.add_action(apply_action)
-        paste_action = Gio.SimpleAction.new("paste", None)
-        paste_action.connect("activate", lambda *_a: self.emit("paste-recipe"))
-        self._apply_actions.add_action(paste_action)
-        copy_action = Gio.SimpleAction.new("copy", None)
-        copy_action.connect("activate", lambda *_a: self.emit("copy-recipe"))
-        self._apply_actions.add_action(copy_action)
+        for name, signal in (
+            ("paste", "paste-recipe"),
+            ("copy", "copy-recipe"),
+            ("import-photo", "import-photo"),
+            ("import-fp", "import-fp"),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect(
+                "activate", lambda *_a, signal=signal: self.emit(signal)
+            )
+            self._apply_actions.add_action(action)
         self.insert_action_group("recipe", self._apply_actions)
 
         self._build_rows()
@@ -499,7 +507,6 @@ class RecipePanel(Adw.PreferencesPage):
         # The dynamic "From image" selection is the default.
         special = Gio.Menu()
         special.append_item(self._apply_item(FROM_IMAGE_LABEL, FROM_IMAGE))
-        special.append("Paste from Clipboard…", "recipe.paste")
         special.append("Copy as Text", "recipe.copy")
         menu.append_section(None, special)
         top = Gio.Menu()
