@@ -355,6 +355,7 @@ def test_the_import_button_offers_every_import() -> None:
     ]
     assert actions == [
         "recipe.import-photo",
+        "recipe.import-edit",
         "recipe.import-fp",
         "recipe.paste",
     ]
@@ -367,11 +368,53 @@ def test_the_import_button_offers_every_import() -> None:
     ]
     assert "From a Photo…" not in labels
     fired: list[str] = []
-    for signal in ("import-photo", "import-fp", "paste-recipe"):
+    for signal in ("import-photo", "import-edit", "import-fp", "paste-recipe"):
         panel.connect(signal, lambda *_a, s=signal: fired.append(s))
-    for action in ("import-photo", "import-fp", "paste"):
+    for action in ("import-photo", "import-edit", "import-fp", "paste"):
         panel.activate_action(f"recipe.{action}")
-    assert fired == ["import-photo", "import-fp", "paste-recipe"]
+    assert fired == [
+        "import-photo",
+        "import-edit",
+        "import-fp",
+        "paste-recipe",
+    ]
+
+
+def test_the_edit_match_dialog_follows_a_search() -> None:
+    """The dialog shows both images, then offers the found recipe."""
+    import numpy as np
+
+    from grawji.look_match import STAGE_LOOK, Match
+    from grawji.recipe import Recipe
+    from grawji.views.edit_match import EditMatchDialog
+
+    applied: list[Recipe] = []
+    dialog = EditMatchDialog(on_apply=applied.append)
+    pixels = np.zeros((20, 30, 3), np.uint8)
+    dialog.show_edit(pixels)
+    dialog.show_view(pixels)
+    dialog.set_stage(STAGE_LOOK)
+    assert dialog.status_label.get_label() == "Tuning tones and color…"
+    found = Recipe(film_simulation="ClassicChrome")
+    dialog.set_progress(found, 12)
+    assert "Classic Chrome" in dialog.detail_label.get_label()
+    assert not dialog.apply_button.get_visible()
+    dialog.finish(Match(found, 1.5, 9.0, 40))
+    assert dialog.status_label.get_label() == "Very close to your edit."
+    assert dialog.apply_button.get_visible()
+    dialog.apply_button.emit("clicked")
+    assert applied == [found]
+
+
+def test_closing_the_edit_match_dialog_cancels_the_search() -> None:
+    """Closing a running search stops it, a finished one does not care."""
+    from grawji.views.edit_match import EditMatchDialog
+
+    stopped: list[bool] = []
+    dialog = EditMatchDialog(on_apply=lambda _recipe: None)
+    dialog.set_cancel(lambda: stopped.append(True))
+    dialog.emit("closed")
+    assert stopped == [True]
 
 
 def test_recipe_panel_menu_handles_ampersand(tmp_path: Any) -> None:

@@ -198,7 +198,7 @@ class RecipeLibraryController:
             if self._manager is not None:
                 self._manager.show_toast("No recipe found in the clipboard.")
             return
-        self._apply_unsaved(parsed.recipe, parsed.title or "Pasted recipe")
+        self.apply_unsaved(parsed.recipe, parsed.title or "Pasted recipe")
         if parsed.notes:
             skipped = "; ".join(parsed.notes[:3])
             self._on_status(f"Pasted with notes: {skipped}")
@@ -213,7 +213,7 @@ class RecipeLibraryController:
         if self._manager is not None:
             self._manager.show_toast("Recipe copied as text.")
 
-    def _apply_unsaved(self, recipe: Recipe, title: str) -> None:
+    def apply_unsaved(self, recipe: Recipe, title: str) -> None:
         """Apply an imported/pasted recipe right away, marked unsaved."""
         self._panel.set_active(recipe, title, unsaved=True)
         self._on_render()
@@ -283,7 +283,7 @@ class RecipeLibraryController:
             if self._manager is not None:
                 self._manager.show_toast(message)
             return
-        self._apply_unsaved(found.recipe, Path(path).stem)
+        self.apply_unsaved(found.recipe, Path(path).stem)
         if found.missing:
             kept = ", ".join(name.replace("_", " ") for name in found.missing)
             self._on_status(f"The photo does not record the {kept}.")
@@ -505,7 +505,7 @@ class RecipeLibraryController:
         except (OSError, ValueError) as exc:
             self._on_status(f"Could not import recipe: {exc}")
             return
-        self._apply_unsaved(recipe, Path(path).stem)
+        self.apply_unsaved(recipe, Path(path).stem)
 
     def _on_export_response(
         self, dialog: Any, result: Any, name: str, recipe: Recipe

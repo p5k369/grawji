@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiEditMatchDialog" parent="AdwDialog">
+    <property name="title">Recipe from an Edit</property>
+    <property name="content-width">820</property>
+    <property name="content-height">420</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar"/>
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-top">12</property>
+            <property name="margin-bottom">6</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">12</property>
+                <property name="homogeneous">true</property>
+                <property name="vexpand">true</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkPicture" id="edit_picture">
+                        <property name="content-fit">contain</property>
+                        <property name="vexpand">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Your edit</property>
+                        <style>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkPicture" id="camera_picture">
+                        <property name="content-fit">contain</property>
+                        <property name="vexpand">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Camera</property>
+                        <style>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="status_label">
+                <property name="label">Loading the edit…</property>
+                <property name="wrap">true</property>
+                <property name="xalign">0</property>
+              </object>
+            </child>
+          </object>
+        </property>
+        <child type="bottom">
+          <object class="GtkBox">
+            <property name="spacing">8</property>
+            <property name="margin-start">12</property>
+            <property name="margin-end">12</property>
+            <property name="margin-top">6</property>
+            <property name="margin-bottom">10</property>
+            <child>
+              <object class="GtkSpinner" id="spinner">
+                <property name="spinning">true</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="detail_label">
+                <property name="hexpand">true</property>
+                <property name="xalign">0</property>
+                <property name="ellipsize">end</property>
+                <style>
+                  <class name="dim-label"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="cancel_button">
+                <property name="label">Cancel</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="apply_button">
+                <property name="label">Apply</property>
+                <property name="visible">false</property>
+                <style>
+                  <class name="suggested-action"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </property>
+  </template>
+</interface>

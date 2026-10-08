@@ -37,6 +37,24 @@ def quadrants(width: int = 64, height: int = 96) -> np.ndarray:
     return frame
 
 
+def scene(size: tuple[int, int], seed: int = 1) -> np.ndarray:
+    """A photo-like frame."""
+    rng = np.random.default_rng(seed)
+    width, height = size
+    spectrum = np.fft.rfft2(rng.normal(size=(height, width, 3)), axes=(0, 1))
+    fy = np.fft.fftfreq(height)[:, None, None]
+    fx = np.fft.rfftfreq(width)[None, :, None]
+    spectrum *= np.exp(-(fx**2 + fy**2) / (2 * 0.02**2))
+    field = np.fft.irfft2(spectrum, (height, width), axes=(0, 1))
+    field = (field - field.min()) / (field.max() - field.min())
+    image = (40 + 170 * field).astype(np.uint8)
+    for _ in range(25):
+        x, y = rng.integers(0, width - 40), rng.integers(0, height - 40)
+        w, h = rng.integers(8, 60), rng.integers(8, 60)
+        image[y : y + h, x : x + w] = rng.integers(0, 256, size=3)
+    return image
+
+
 def stored_as(upright: np.ndarray, tag: int) -> np.ndarray:
     """The frame as a file with that orientation tag would hold it."""
     return np.ascontiguousarray(STORED[tag](upright))

@@ -24,6 +24,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 from grawji import mainloop, raf, sidecar
 from grawji.camera import camera_info
 from grawji.camera.capabilities import (
+    BASELINE,
     Capabilities,
     capabilities_for,
     capabilities_for_model,
@@ -39,6 +40,12 @@ from grawji.camera.core import (
 from grawji.camera.preview import CameraWorker
 from grawji.controllers.backup import BackupController
 from grawji.controllers.camera_ops import CameraOpsController
+from grawji.controllers.edit_match import (
+    EditMatchCallbacks,
+    EditMatchController,
+    EditMatchError,
+    EditMatchRequest,
+)
 from grawji.controllers.exports import (
     BatchController,
     SingleExportController,
@@ -52,6 +59,7 @@ from grawji.imaging.render import (
     thumb_jpeg,
 )
 from grawji.imaging.thumbnails import ThumbnailLoader
+from grawji.look_match import SearchCancelledError
 from grawji.marks import Label
 from grawji.pairs import Source, companion_label
 from grawji.recipe import Recipe
@@ -65,6 +73,7 @@ from grawji.settings import (
     settings_path,
 )
 from grawji.views import dialogs
+from grawji.views.edit_match import EditMatchDialog
 from grawji.views.filmstrip import FilmStrip
 from grawji.views.filmstrip_nav import FilmStripNav
 from grawji.views.folder_grid import FolderGrid
@@ -1255,6 +1264,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.connect(
             "import-fp", lambda *_a: self._library.import_recipe()
         )
+        self._edit_match = EditMatchController(self._session, self._worker)
+        self.recipe_panel.connect(
+            "import-edit", lambda *_a: self._recipe_from_edit()
+        )
 
     def _on_apply_recipe(self, _panel: Any, name: str) -> None:
         """Apply the picker's choice, guarding unsaved recipe edits."""
@@ -1268,6 +1281,81 @@ class MainWindow(Adw.ApplicationWindow):
             self._apply_from_image()
         else:
             self._library.apply(name)
+
+    def _recipe_from_edit(self) -> None:
+        """Pick an edited export of the open shot and match its look."""
+        if self._raf_path is None or not self._session.is_open:
+            self.preview_view.set_status(
+                "Open an image with its camera connected first."
+            )
+            return
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Choose an edited version of this image")
+        images = Gtk.FileFilter()
+        images.set_name("Images")
+        images.add_pixbuf_formats()
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(images)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(images)
+        dialog.open(self, None, self._on_edit_picked)
+
+    def _on_edit_picked(self, dialog: Any, result: Any) -> None:
+        """Start the search for the picked edit."""
+        try:
+            gfile = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = gfile.get_path()
+        if path is None or self._raf_path is None:
+            return
+        raf_path = str(self._raf_path)
+        title = Path(path).stem
+        match_dialog = EditMatchDialog(
+            on_apply=lambda recipe: self._confirm_recipe_discard(
+                partial(self._apply_edit_recipe, recipe, title)
+            )
+        )
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, SearchCancelledError):
+                return
+            if isinstance(error, EditMatchError):
+                match_dialog.fail(str(error))
+                return
+            logging.getLogger("grawji").warning(
+                "recipe from an edit failed: %s", error
+            )
+            match_dialog.fail(f"The camera stopped the search: {error}")
+
+        cancel = self._edit_match.start(
+            EditMatchRequest(
+                raf_path=raf_path,
+                edit_path=path,
+                orientation=imagemeta.exif_orientation(raf_path),
+                start=self.recipe_panel.get_recipe(),
+                capabilities=self.recipe_panel.capabilities or BASELINE,
+            ),
+            EditMatchCallbacks(
+                on_edit=match_dialog.show_edit,
+                on_view=match_dialog.show_view,
+                on_progress=match_dialog.set_progress,
+                on_stage=match_dialog.set_stage,
+                on_done=match_dialog.finish,
+                on_error=failed,
+            ),
+        )
+        match_dialog.set_cancel(cancel)
+        dialogs.fit_dialog(
+            match_dialog, self, width_fraction=0.6, height_fraction=0.45
+        )
+        match_dialog.present(self)
+
+    def _apply_edit_recipe(self, recipe: Recipe, title: str) -> None:
+        """Apply a recipe found for an edit, its exposure as the image EV."""
+        self._library.apply_unsaved(recipe, title)
+        self._image_ev = recipe.exposure
+        self._persist_exposure()
 
     def _confirm_recipe_discard(self, proceed: Callable[[], None]) -> None:
         """Run proceed, first asking about unsaved recipe edits."""

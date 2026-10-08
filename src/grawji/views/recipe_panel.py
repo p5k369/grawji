@@ -1,4 +1,4 @@
-"""The recipe side panel: every image-quality control, in Fuji menu order."""
+"""The recipe side panel."""
 
 from __future__ import annotations
 
@@ -85,6 +85,7 @@ class RecipePanel(Adw.PreferencesPage):
         "paste-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "copy-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "import-photo": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "import-edit": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "import-fp": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
@@ -116,6 +117,7 @@ class RecipePanel(Adw.PreferencesPage):
             ("paste", "paste-recipe"),
             ("copy", "copy-recipe"),
             ("import-photo", "import-photo"),
+            ("import-edit", "import-edit"),
             ("import-fp", "import-fp"),
         ):
             action = Gio.SimpleAction.new(name, None)
@@ -459,6 +461,11 @@ class RecipePanel(Adw.PreferencesPage):
             return ""
         suffix = " (modified)" if self.is_modified else ""
         return f"grawji recipe: {self._active_label}{suffix}"
+
+    @property
+    def capabilities(self) -> Capabilities | None:
+        """What the open image's body offers."""
+        return self._caps
 
     def apply_capabilities(self, caps: Capabilities) -> None:
         """Restrict the recipe controls to what the camera supports.

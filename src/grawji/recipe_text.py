@@ -173,6 +173,11 @@ class ParsedText:
     notes: list[str] = field(default_factory=list)
 
 
+def film_sim_label(name: str) -> str:
+    """A film simulation's name as the camera menu spells it."""
+    return _FILM_SIM_LABELS.get(name, name)
+
+
 def _key(text: str) -> str:
     """Normalize a label or value word: lowercase alphanumerics only."""
     joined = "".join(c for c in text.lower() if c.isalnum())
@@ -245,10 +250,7 @@ def format_recipe_text(recipe: Recipe, title: str = "") -> str:
     lines: list[str] = []
     if title.strip():
         lines.append(title.strip())
-    lines.append(
-        "Film Simulation: "
-        + _FILM_SIM_LABELS.get(recipe.film_simulation, recipe.film_simulation)
-    )
+    lines.append("Film Simulation: " + film_sim_label(recipe.film_simulation))
     lines.append(f"Dynamic Range: {recipe.dynamic_range}")
     if recipe.white_balance == "Temperature":
         lines.append(f"White Balance: {recipe.color_temp}K")
