@@ -389,9 +389,16 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     from grawji.views.edit_match import EditMatchDialog
 
     applied: list[Recipe] = []
-    dialog = EditMatchDialog(on_apply=applied.append)
+    started: list[bool] = []
+    dialog = EditMatchDialog(on_apply=applied.append, on_start=started.append)
     pixels = np.zeros((20, 30, 3), np.uint8)
+    assert not dialog.start_button.get_sensitive()
     dialog.show_edit(pixels)
+    assert dialog.start_button.get_sensitive()
+    dialog.skin_row.set_active(False)
+    dialog.start_button.emit("clicked")
+    assert started == [False]
+    assert not dialog.skin_row.get_sensitive()
     dialog.show_view(pixels)
     dialog.set_stage(STAGE_LOOK)
     assert dialog.status_label.get_label() == "Tuning tones and color…"
@@ -402,6 +409,8 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     dialog.finish(Match(found, 1.5, 9.0, 40))
     assert dialog.status_label.get_label() == "Very close to your edit."
     assert dialog.apply_button.get_visible()
+    assert dialog.start_button.get_label() == "Search Again"
+    assert dialog.skin_row.get_sensitive()
     dialog.apply_button.emit("clicked")
     assert applied == [found]
 
@@ -411,7 +420,9 @@ def test_closing_the_edit_match_dialog_cancels_the_search() -> None:
     from grawji.views.edit_match import EditMatchDialog
 
     stopped: list[bool] = []
-    dialog = EditMatchDialog(on_apply=lambda _recipe: None)
+    dialog = EditMatchDialog(
+        on_apply=lambda _recipe: None, on_start=lambda _skin: None
+    )
     dialog.set_cancel(lambda: stopped.append(True))
     dialog.emit("closed")
     assert stopped == [True]

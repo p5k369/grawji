@@ -15,5 +15,5 @@
   <ui filename="detail_badges.ui" sha256="480f1b6ce9fbe1d5456dc29e8da219d65c30afc42db9fce9d3c2da21b41046ae"/>
   <ui filename="export_badge.ui" sha256="159a910c8e77d396f92e3de623d9e57f5b4166406bb292aa3d71e68f2bce97a0"/>
   <ui filename="filter_popover.ui" sha256="6bd3802d9f5fe12b851fd94f3bec4486775e6ed4626f9f4e60f690abb33432f8"/>
-  <ui filename="edit_match.ui" sha256="34ad7d897902b2f4028c0922cc48ac7d8db82db18817198bf5ae5fc475558b7c"/>
+  <ui filename="edit_match.ui" sha256="e6a9b8a0142e221d5c6232b9fc8ddcd267bf22db5c108e7a908df646c652dd81"/>
 </cambalache-project>

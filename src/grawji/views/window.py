@@ -45,6 +45,7 @@ from grawji.controllers.edit_match import (
     EditMatchController,
     EditMatchError,
     EditMatchRequest,
+    load_edit,
 )
 from grawji.controllers.exports import (
     BatchController,
@@ -1311,11 +1312,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         raf_path = str(self._raf_path)
         title = Path(path).stem
-        match_dialog = EditMatchDialog(
-            on_apply=lambda recipe: self._confirm_recipe_discard(
-                partial(self._apply_edit_recipe, recipe, title)
-            )
-        )
+        orientation = imagemeta.exif_orientation(raf_path)
+        start = self.recipe_panel.get_recipe()
+        capabilities = self.recipe_panel.capabilities or BASELINE
 
         def failed(error: Exception) -> None:
             if isinstance(error, SearchCancelledError):
@@ -1326,28 +1325,51 @@ class MainWindow(Adw.ApplicationWindow):
             logging.getLogger("grawji").warning(
                 "recipe from an edit failed: %s", error
             )
-            match_dialog.fail(f"The camera stopped the search: {error}")
+            match_dialog.fail(
+                f"The camera stopped the search: {error}", retry=True
+            )
 
-        cancel = self._edit_match.start(
-            EditMatchRequest(
-                raf_path=raf_path,
-                edit_path=path,
-                orientation=imagemeta.exif_orientation(raf_path),
-                start=self.recipe_panel.get_recipe(),
-                capabilities=self.recipe_panel.capabilities or BASELINE,
+        def run(skin_priority: bool) -> None:
+            cancel = self._edit_match.start(
+                EditMatchRequest(
+                    raf_path=raf_path,
+                    edit_path=path,
+                    orientation=orientation,
+                    start=start,
+                    capabilities=capabilities,
+                    skin_priority=skin_priority,
+                ),
+                EditMatchCallbacks(
+                    on_edit=match_dialog.show_edit,
+                    on_view=match_dialog.show_view,
+                    on_progress=match_dialog.set_progress,
+                    on_stage=match_dialog.set_stage,
+                    on_done=match_dialog.finish,
+                    on_error=failed,
+                ),
+            )
+            match_dialog.set_cancel(cancel)
+
+        match_dialog = EditMatchDialog(
+            on_apply=lambda recipe: self._confirm_recipe_discard(
+                partial(self._apply_edit_recipe, recipe, title)
             ),
-            EditMatchCallbacks(
-                on_edit=match_dialog.show_edit,
-                on_view=match_dialog.show_view,
-                on_progress=match_dialog.set_progress,
-                on_stage=match_dialog.set_stage,
-                on_done=match_dialog.finish,
-                on_error=failed,
-            ),
+            on_start=run,
         )
-        match_dialog.set_cancel(cancel)
+
+        def preview() -> None:
+            try:
+                pixels = load_edit(path)
+            except EditMatchError as error:
+                mainloop.call(match_dialog.fail, str(error))
+                return
+            mainloop.call(match_dialog.show_edit, pixels)
+
+        threading.Thread(
+            target=preview, name="grawji-edit-preview", daemon=True
+        ).start()
         dialogs.fit_dialog(
-            match_dialog, self, width_fraction=0.6, height_fraction=0.45
+            match_dialog, self, width_fraction=0.6, height_fraction=0.5
         )
         match_dialog.present(self)
 

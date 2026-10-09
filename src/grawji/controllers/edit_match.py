@@ -43,6 +43,7 @@ class EditMatchRequest:
     orientation: int
     start: Recipe
     capabilities: Capabilities
+    skin_priority: bool = False
 
 
 @dataclass
@@ -122,7 +123,10 @@ class EditMatchController:
             mainloop.call(callbacks.on_stage, name)
 
         target = look_match.LookTarget(
-            edit, alignment, (frame.shape[1], frame.shape[0])
+            edit,
+            alignment,
+            (frame.shape[1], frame.shape[0]),
+            skin_priority=request.skin_priority,
         )
         return look_match.search(
             request.start,

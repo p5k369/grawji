@@ -183,12 +183,12 @@ def test_stages_are_announced_in_order() -> None:
         target_for(Recipe(film_simulation="Velvia")),
         SearchHooks(stage=stages.append),
     )
-    assert stages == [
-        look_match.STAGE_FILM,
-        look_match.STAGE_LOOK,
-        look_match.STAGE_FINE,
-        look_match.STAGE_RECHECK,
-    ]
+    assert stages[0] == look_match.STAGE_FILM
+    assert stages[-1] == look_match.STAGE_RECHECK
+    middle = stages[1:-1]
+    assert middle[0] == look_match.STAGE_LOOK
+    assert 1 <= middle.count(look_match.STAGE_LOOK) <= look_match._CANDIDATES
+    assert look_match.STAGE_FINE in middle
 
 
 def test_a_far_white_balance_does_not_hide_the_color_sim() -> None:
@@ -216,3 +216,54 @@ def test_the_tuned_recipe_is_checked_against_every_sim() -> None:
         and r.film_simulation != match.recipe.film_simulation
         for r in seen
     )
+
+
+def test_a_sharp_subject_outweighs_a_soft_background() -> None:
+    """An error in the detailed half costs more than one in the flat half."""
+    rng = np.random.default_rng(3)
+    edit = np.full((80, 120, 3), 128, np.uint8)
+    edit[:, :60] = rng.integers(60, 200, size=(80, 60, 3))
+    target = LookTarget(edit, Alignment(np.eye(3), 1.0), (120, 80))
+    off_in_subject = edit.copy()
+    off_in_subject[:, :60, 0] = np.clip(
+        edit[:, :60, 0].astype(int) + 40, 0, 255
+    )
+    off_in_background = edit.copy()
+    off_in_background[:, 60:, 0] = 168
+    assert target.distance(off_in_subject) > target.distance(off_in_background)
+
+
+def test_the_result_does_not_depend_on_the_start() -> None:
+    """Any start leads to the same recipe, only the kept fields differ."""
+    truth = Recipe(film_simulation="ClassicChrome", shadows=1.0, color=-1)
+    target = target_for(truth)
+    plain_start = look_match.search(Recipe(), CAPS, fake_render, target)
+    odd_start = look_match.search(
+        Recipe(
+            film_simulation="Velvia",
+            shadows=-2.0,
+            highlights=3.0,
+            color=4,
+            wb_shift_r=-6,
+            exposure=1.0,
+            sharpness=-2,
+        ),
+        CAPS,
+        fake_render,
+        target,
+    )
+    assert replace(odd_start.recipe, sharpness=0) == plain_start.recipe
+    assert odd_start.recipe.sharpness == -2
+
+
+def test_both_white_balance_modes_are_tried() -> None:
+    """The search starts as shot and tries the camera's Auto as well."""
+    seen: set[str] = set()
+
+    def render(recipe: Recipe) -> np.ndarray:
+        seen.add(recipe.white_balance)
+        return fake_render(recipe)
+
+    match = look_match.search(Recipe(), CAPS, render, target_for(Recipe()))
+    assert seen == {"AsShot", "Auto"}
+    assert match.recipe.white_balance in seen

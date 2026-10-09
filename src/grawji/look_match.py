@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 from grawji.imaging.pixbufs import area_resize
+from grawji.recipe import Recipe
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from grawji.camera.capabilities import Capabilities
     from grawji.edit_align import Alignment
-    from grawji.recipe import Recipe
 
 # Renders a recipe of the open shot as an upright RGB array.
 Render = Callable[["Recipe"], "NDArray[np.uint8]"]
@@ -37,17 +37,56 @@ STAGE_RECHECK = "film simulation check"
 # Compare at this width: enough for the look, forgiving about detail.
 COMPARE_WIDTH = 96
 # A step only counts when it beats the camera's render-to-render noise.
-_MARGIN = 0.15
+_MARGIN = 0.03
+# How much the edit's overall statistics count next to the per-pixel
+# difference.
+_LOOK_WEIGHT = 0.4
+_LIGHT_QUANTILES = (5, 25, 50, 75, 95)
+_CHROMA_QUANTILES = (50, 90)
+# Where the edit shows detail counts more than its blurry background
+_DETAIL_FLOOR = 0.3
+_DETAIL_CAP = 3.0
+# Pixels in the usual skin range (Lab hue, chroma, lightness) count this
+# much extra.
+_SKIN_BONUS = 1.0
+_SKIN_HUE = (25.0, 60.0)
+_SKIN_CHROMA = (14.0, 40.0)
+_SKIN_LIGHT = (30.0, 85.0)
+# With skin priority, skin counts this much extra, and the overall
+# statistics are taken over the skin alone when the edit shows enough.
+_SKIN_PRIORITY_BONUS = 4.0
+_MIN_SKIN_SHARE = 0.02
+# How many steps at once the final polish tries per control.
+_POLISH_REACH = (1, 2)
 # Passes over all controls per step size, at most.
 # Could be varied depending on body as tests showed.
 _SWEEPS = 4
 # Step sizes from coarse to fine.
 _LEVELS = 3
+# How many of the leading film simulations get tuned in full.
+_CANDIDATES = 2
+# A further candidate whose look trails the best one by more than this
+# after the tone walk is dropped before its polish.
+_CANDIDATE_GAP = 1.0
+# The pairs of controls that stand in for each other, the only ones the
+# final polish moves together
+_PAIRS = (
+    ("exposure", "highlights"),
+    ("exposure", "shadows"),
+    ("highlights", "shadows"),
+    ("shadows", "color"),
+    ("highlights", "color"),
+    ("color", "wb_shift_r"),
+    ("color", "wb_shift_b"),
+    ("wb_shift_r", "wb_shift_b"),
+)
 # How often the tuned recipe may move to another film simulation.
 # todo: maybe only switching back is not enough, needs to be rechecked
 _RECHECKS = 2
 _STRENGTHS = ("Off", "Weak", "Strong")
 _DYNAMIC_RANGES = ("DR100", "DR200", "DR400")
+# The white balance modes a found recipe may use
+_WHITE_BALANCES = ("AsShot", "Auto")
 _MONO_SIMS = ("Acros", "AcrosR", "AcrosYe", "AcrosG")
 _MONOCHROME = ("Monochrome", "MonochromeR", "MonochromeYe", "MonochromeG")
 _NO_COLOR = (*_MONO_SIMS, *_MONOCHROME, "Sepia")
@@ -107,6 +146,14 @@ class _Numeric:
     steps: tuple[float, ...]
 
 
+@dataclass(frozen=True)
+class _Plan:
+    """Which step sizes a walk uses and how far each move may reach."""
+
+    levels: range
+    reach: tuple[int, ...] = (1,)
+
+
 class LookTarget:
     """An edit."""
 
@@ -115,6 +162,8 @@ class LookTarget:
         edit: NDArray[np.uint8],
         alignment: Alignment,
         frame_size: tuple[int, int],
+        *,
+        skin_priority: bool = False,
     ) -> None:
         """Prepare the edit.
 
@@ -122,6 +171,8 @@ class LookTarget:
             edit: The edit as RGB, the size the alignment was made for.
             alignment: Where the edit sits in the frame.
             frame_size: Width and height of every render to compare.
+            skin_priority: Let skin tones outweigh everything else, for
+                edits that treat faces and background differently.
         """
         height, width = edit.shape[:2]
         self._alignment = alignment
@@ -138,6 +189,13 @@ class LookTarget:
         self._lab = _lab_of_linear(linear)
         self._luminance = _mean_luminance(linear, self._mask)
         self._channels = linear[self._mask].mean(axis=0)
+        skin = _skin(self._lab) & self._mask
+        self._stats_mask = self._mask
+        if skin_priority and skin.sum() >= _MIN_SKIN_SHARE * self._mask.sum():
+            self._stats_mask = skin
+        self._stats = _look_stats(self._lab, self._stats_mask)
+        bonus = _SKIN_PRIORITY_BONUS if skin_priority else _SKIN_BONUS
+        self._weights = _subject_weights(edit, skin, self._mask, bonus)
 
     @property
     def overlap(self) -> float:
@@ -168,8 +226,12 @@ class LookTarget:
             own = view[self._mask].mean(axis=0)
             gains = self._channels / np.maximum(own, 1e-9)
             view = np.clip(view * gains, 0.0, 1.0)
-        delta = _lab_of_linear(view) - self._lab
-        return float(np.sqrt((delta**2).sum(axis=-1))[self._mask].mean())
+        seen = _lab_of_linear(view)
+        delta = seen - self._lab
+        differences = np.sqrt((delta**2).sum(axis=-1))
+        pixels = float((differences * self._weights)[self._mask].sum())
+        stats = _look_stats(seen, self._stats_mask) - self._stats
+        return pixels + _LOOK_WEIGHT * float(np.sqrt((stats**2).mean()))
 
     def distance(self, render: NDArray[np.uint8]) -> float:
         """Mean delta E between a render and the edit."""
@@ -204,6 +266,57 @@ def _lab_of_linear(linear: NDArray[np.float64]) -> NDArray[np.float64]:
             200 * (f[..., 1] - f[..., 2]),
         ],
         axis=-1,
+    )
+
+
+def _subject_weights(
+    edit: NDArray[np.uint8],
+    skin: NDArray[np.bool_],
+    mask: NDArray[np.bool_],
+    skin_bonus: float,
+) -> NDArray[np.float64]:
+    """How much each compared pixel counts, summing to one over the mask."""
+    gray = edit[..., :3].astype(np.float64) @ [0.299, 0.587, 0.114]
+    energy = np.zeros_like(gray)
+    energy[1:-1, 1:-1] = np.hypot(
+        gray[1:-1, 2:] - gray[1:-1, :-2], gray[2:, 1:-1] - gray[:-2, 1:-1]
+    )
+    height, width = mask.shape
+    detail = area_resize(energy[..., None], width, height)[..., 0]
+    mean = detail[mask].mean()
+    detail = np.clip(detail / mean if mean > 0 else 1.0, 0.0, _DETAIL_CAP)
+    weights = _DETAIL_FLOOR + (1 - _DETAIL_FLOOR) * detail / _DETAIL_CAP
+    weights = weights * (1 + skin_bonus * skin)
+    weights = np.where(mask, weights, 0.0)
+    return np.asarray(weights / weights.sum())
+
+
+def _skin(lab: NDArray[np.float64]) -> NDArray[np.bool_]:
+    """Pixels in the usual skin range of hue, chroma and lightness."""
+    hue = np.degrees(np.arctan2(lab[..., 2], lab[..., 1]))
+    chroma = np.hypot(lab[..., 1], lab[..., 2])
+    return np.asarray(
+        (hue >= _SKIN_HUE[0])
+        & (hue <= _SKIN_HUE[1])
+        & (chroma >= _SKIN_CHROMA[0])
+        & (chroma <= _SKIN_CHROMA[1])
+        & (lab[..., 0] >= _SKIN_LIGHT[0])
+        & (lab[..., 0] <= _SKIN_LIGHT[1])
+    )
+
+
+def _look_stats(
+    lab: NDArray[np.float64], mask: NDArray[np.bool_]
+) -> NDArray[np.float64]:
+    """Lightness and chroma percentiles plus the overall color cast."""
+    pixels = lab[mask]
+    chroma = np.hypot(pixels[:, 1], pixels[:, 2])
+    return np.concatenate(
+        [
+            np.percentile(pixels[:, 0], _LIGHT_QUANTILES),
+            np.percentile(chroma, _CHROMA_QUANTILES),
+            pixels[:, 1:].mean(axis=0),
+        ]
     )
 
 
@@ -252,8 +365,9 @@ def search(
     """The recipe whose render comes closest to the edit."""
     hooks = hooks or SearchHooks()
     progress, stage = hooks.progress, hooks.stage
-    base = replace(start, grain="Off")
+    base = _neutral(start)
     renders = _Renders(render, target, hooks.cancelled)
+    reported = [math.inf]
 
     def look(recipe: Recipe) -> float:
         return target.compare(renders(recipe), balance="brightness")
@@ -265,7 +379,9 @@ def search(
         return target.compare(renders(recipe))
 
     def better(recipe: Recipe) -> None:
-        if progress is not None:
+        score = plain(recipe)
+        if progress is not None and score < reported[0]:
+            reported[0] = score
             progress(recipe, renders.count)
 
     def enter(name: str) -> None:
@@ -273,17 +389,14 @@ def search(
             stage(name)
 
     enter(STAGE_FILM)
-
     start_distance = plain(base)
     # A shot's own white balance can be far from the edit's, and a color
     # simulation with the wrong cast must not lose to a neutral B&W one.
-    best, best_score = base, film(base)
-    for sim in capabilities.film_simulations:
-        trial = _with_sim(base, sim)
-        value = film(trial)
-        if value < best_score:
-            best, best_score = trial, value
-            better(best)
+    ranked = sorted(
+        (_with_sim(base, sim) for sim in capabilities.film_simulations),
+        key=film,
+    )
+    better(ranked[0])
 
     def tones_and_color(recipe: Recipe) -> list[_Numeric]:
         return [
@@ -292,52 +405,104 @@ def search(
             if control.name != "exposure"
         ]
 
-    enter(STAGE_LOOK)
-    best, _ = _walk(
-        best,
-        look,
-        tones_and_color,
-        lambda recipe: _choices(recipe, capabilities),
-        range(_LEVELS),
-        better,
-    )
-    enter(STAGE_FINE)
-    gain = target.gain(renders(best))
-    ev = best.exposure + math.log2(gain) if gain > 0 else best.exposure
-    best = replace(best, exposure=_exposure_step(ev))
-    better(best)
-
-    def polish(recipe: Recipe, choices: bool) -> tuple[Recipe, float]:
-        """Every control in fine steps on the plain distance, then pairs."""
-        recipe, score = _walk(
+    def polish(recipe: Recipe) -> tuple[Recipe, float]:
+        """Every control in fine steps on the plain distance."""
+        return _walk(
             recipe,
             plain,
             lambda r: _numerics(r, capabilities),
-            (lambda r: _choices(r, capabilities)) if choices else _no_choices,
-            range(_LEVELS - 1, _LEVELS),
+            lambda r: _choices(r, capabilities),
+            _Plan(range(_LEVELS - 1, _LEVELS), _POLISH_REACH),
             better,
         )
+
+    def pairs(recipe: Recipe, score: float) -> tuple[Recipe, float]:
+        """The final moves of two controls at once."""
         return _pair_walk(
             recipe, score, plain, _numerics(recipe, capabilities), better
         )
 
-    best, best_score = polish(best, choices=False)
+    def tune(candidate: Recipe, bar: float) -> tuple[Recipe, float] | None:
+        """One film simulation, from the look to the single-step polish."""
+        enter(STAGE_LOOK)
+        tuned, look_score = _walk(
+            candidate,
+            look,
+            tones_and_color,
+            lambda recipe: _choices(recipe, capabilities),
+            _Plan(range(_LEVELS)),
+            better,
+        )
+        bars.append(look_score)
+        if look_score > bar + _CANDIDATE_GAP:
+            return None
+        enter(STAGE_FINE)
+        gain = target.gain(renders(tuned))
+        ev = tuned.exposure + math.log2(gain) if gain > 0 else tuned.exposure
+        tuned = replace(tuned, exposure=_exposure_step(ev))
+        better(tuned)
+        return polish(tuned)
+
+    bars: list[float] = []
+    tuned = [
+        result
+        for candidate in ranked[:_CANDIDATES]
+        if (result := tune(candidate, min(bars, default=math.inf)))
+    ]
+    best, best_score = pairs(*min(tuned, key=lambda result: result[1]))
     enter(STAGE_RECHECK)
+    best, best_score = _recheck(
+        best,
+        best_score,
+        capabilities.film_simulations,
+        plain,
+        lambda rival: pairs(*polish(rival)),
+        better,
+    )
+    return Match(_kept(best, start), best_score, start_distance, renders.count)
+
+
+def _recheck(
+    best: Recipe,
+    best_score: float,
+    sims: tuple[str, ...],
+    score: Callable[[Recipe], float],
+    polish: Callable[[Recipe], tuple[Recipe, float]],
+    better: Callable[[Recipe], None],
+) -> tuple[Recipe, float]:
+    """Try the tuned recipe on every other film simulation."""
     for _round in range(_RECHECKS):
         rival, rival_score = best, best_score
-        for sim in capabilities.film_simulations:
+        for sim in sims:
             if sim == best.film_simulation:
                 continue
             trial = _with_sim(best, sim)
-            value = plain(trial)
+            value = score(trial)
             if value < rival_score - _MARGIN:
                 rival, rival_score = trial, value
         if rival is best:
             break
         better(rival)
-        best, best_score = polish(rival, choices=True)
-    found = replace(best, grain=start.grain, grain_size=start.grain_size)
-    return Match(found, best_score, start_distance, renders.count)
+        best, best_score = polish(rival)
+    return best, best_score
+
+
+def _neutral(start: Recipe) -> Recipe:
+    """Every control at its neutral value, whatever start holds."""
+    return Recipe(white_balance="AsShot", origin_body=start.origin_body)
+
+
+def _kept(found: Recipe, start: Recipe) -> Recipe:
+    """The found recipe with what the search leaves alone taken from start."""
+    return replace(
+        found,
+        grain=start.grain,
+        grain_size=start.grain_size,
+        sharpness=start.sharpness,
+        noise_reduction=start.noise_reduction,
+        color_space=start.color_space,
+        smooth_skin=start.smooth_skin,
+    )
 
 
 def _with(recipe: Recipe, name: str, value: object) -> Recipe:
@@ -360,12 +525,12 @@ def _walk(
     score: Callable[[Recipe], float],
     controls: Callable[[Recipe], list[_Numeric]],
     choices: Callable[[Recipe], list[tuple[str, tuple[str, ...]]]],
-    levels: range,
+    plan: _Plan,
     better: Callable[[Recipe], None],
 ) -> tuple[Recipe, float]:
     """Walk the controls step by step while a step helps."""
     best_score = score(best)
-    for level in levels:
+    for level in plan.levels:
         for _sweep in range(_SWEEPS):
             improved = False
             for name, values in choices(best):
@@ -380,7 +545,11 @@ def _walk(
                 moved = True
                 while moved:
                     moved = False
-                    for direction in (step, -step):
+                    for direction in (
+                        sign * step * times
+                        for times in plan.reach
+                        for sign in (1, -1)
+                    ):
                         value = _snap(
                             control, getattr(best, control.name) + direction
                         )
@@ -398,11 +567,6 @@ def _walk(
     return best, best_score
 
 
-def _no_choices(_recipe: Recipe) -> list[tuple[str, tuple[str, ...]]]:
-    """No choice controls, for walks over numbers only."""
-    return []
-
-
 def _pair_walk(
     best: Recipe,
     best_score: float,
@@ -416,7 +580,11 @@ def _pair_walk(
         if not improved:
             break
         improved = False
-        for first, second in itertools.combinations(controls, 2):
+        by_name = {control.name: control for control in controls}
+        for names in _PAIRS:
+            if not all(name in by_name for name in names):
+                continue
+            first, second = (by_name[name] for name in names)
             for sign_a, sign_b in itertools.product((1, -1), repeat=2):
                 a = _snap(
                     first,
@@ -441,7 +609,8 @@ def _choices(
 ) -> list[tuple[str, tuple[str, ...]]]:
     """The choice controls the body and the film simulation allow."""
     choices: list[tuple[str, tuple[str, ...]]] = [
-        ("dynamic_range", _DYNAMIC_RANGES)
+        ("white_balance", _WHITE_BALANCES),
+        ("dynamic_range", _DYNAMIC_RANGES),
     ]
     colorful = recipe.film_simulation not in _NO_COLOR
     if capabilities.has_color_chrome and colorful:
