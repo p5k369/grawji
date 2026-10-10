@@ -80,3 +80,17 @@ def test_the_time_reads_in_rough_minutes() -> None:
     assert describe(40) == "less than a minute left"
     assert describe(80) == "about 1 minute left"
     assert describe(250) == "about 4 minutes left"
+
+
+def test_a_third_candidate_lengthens_the_guess() -> None:
+    """Told of three simulations to tune, more renders lie ahead."""
+    two = SearchEstimate(CAPS, 0.0)
+    three = SearchEstimate(CAPS, 0.0)
+    three.plan(3)
+    for count in range(1, 21):
+        two.rendered(count * 0.5)
+        three.rendered(count * 0.5)
+    assert two.seconds_left is not None
+    assert three.seconds_left is not None
+    assert three.seconds_left > 1.3 * two.seconds_left
+    assert three.fraction < two.fraction

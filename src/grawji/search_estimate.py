@@ -10,9 +10,9 @@ from grawji import look_match
 if TYPE_CHECKING:
     from grawji.camera.capabilities import Capabilities
 
-# Renders the tuning typically takes per control the search moves.
-# (from test runs on the X100F, X-T3 and X-E5).
-_RENDERS_PER_CONTROL = 30
+# Renders tuning one film simulation typically takes per control the
+# search moves.
+_RENDERS_PER_CONTROL = 14
 # The controls every body has: tones, exposure, both shifts, color, white
 # balance and dynamic range.
 _BASE_CONTROLS = 8
@@ -26,9 +26,11 @@ _CLARITY_RENDERS = 10
 # Renders still ahead at the least, before and within the final check.
 _TUNING_FLOOR = 60
 _RECHECK_FLOOR = 10
-# The second film simulation takes a little longer than the first, the
-# final moves of two controls at once come on top of it.
-_SECOND_CANDIDATE = 1.2
+# The final moves of two controls at once, after the last simulation,
+# take about this share of tuning one.
+_PAIRS_SHARE = 0.2
+# Simulations tuned until the search says how many.
+_DEFAULT_CANDIDATES = 2
 # Renders measured before a time is guessed, and the recent renders of
 # each kind the pace is taken from.
 _MEASURED = 12
@@ -48,12 +50,11 @@ class SearchEstimate:
         self._last_stage = self._sims + _RECHECK_POLISH
         if capabilities.has_clarity:
             self._last_stage += _CLARITY_RENDERS
-        self._expected = (
-            self._sims
-            + 1
-            + _RENDERS_PER_CONTROL * _controls(capabilities)
-            + self._last_stage
+        self._per_candidate = float(
+            _RENDERS_PER_CONTROL * _controls(capabilities)
         )
+        self._candidates = _DEFAULT_CANDIDATES
+        self._expected = self._sims + 1 + self._tuning_left(0)
         self._looks = 0
         self._tuning_began = 0
         self._recheck = False
@@ -71,15 +72,23 @@ class SearchEstimate:
             if self._looks == 1:
                 self._tuning_began = self._done
             else:
-                first = self._done - self._tuning_began
-                self._expected = (
-                    self._done
-                    + round(_SECOND_CANDIDATE * first)
-                    + self._last_stage
-                )
+                tuned = self._looks - 1
+                self._per_candidate = (self._done - self._tuning_began) / tuned
+                self._expected = self._done + self._tuning_left(tuned)
         elif stage == look_match.STAGE_RECHECK and not self._recheck:
             self._recheck = True
             self._expected = self._done + self._last_stage
+
+    def plan(self, candidates: int) -> None:
+        """Note how many film simulations the search will tune."""
+        self._candidates = candidates
+        tuned = max(0, self._looks - 1)
+        self._expected = self._done + self._tuning_left(tuned)
+
+    def _tuning_left(self, tuned: int) -> int:
+        """The renders still ahead once this many simulations are tuned."""
+        left = max(0, self._candidates - tuned) + _PAIRS_SHARE
+        return round(self._per_candidate * left) + self._last_stage
 
     def rendered(self, now: float, *, clarity: bool = False) -> None:
         """Note one render finished at this monotonic time."""

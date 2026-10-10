@@ -315,3 +315,23 @@ def test_the_leader_before_white_balance_is_tuned_too() -> None:
         "Astia",
     ]
     assert len(look_match._leaders(sims[:2], lambda _r: 0.0)) == 2
+
+
+def test_the_search_says_how_many_simulations_it_tunes() -> None:
+    """The candidates hook hears the count before the tuning starts."""
+    heard: list[int] = []
+    stages: list[str] = []
+
+    def candidates(count: int) -> None:
+        heard.append(count)
+        assert look_match.STAGE_LOOK not in stages
+
+    look_match.search(
+        Recipe(),
+        CAPS,
+        fake_render,
+        target_for(Recipe(film_simulation="Velvia")),
+        SearchHooks(stage=stages.append, candidates=candidates),
+    )
+    assert len(heard) == 1
+    assert 2 <= heard[0] <= 3

@@ -118,6 +118,7 @@ class SearchHooks:
     progress: Progress | None = None
     stage: Stage | None = None
     cancelled: Callable[[], bool] | None = None
+    candidates: Callable[[int], None] | None = None
 
 
 class SearchCancelledError(Exception):
@@ -454,9 +455,12 @@ def search(
         return polish(tuned)
 
     bars: list[float] = []
+    leaders = _leaders(ranked, look)
+    if hooks.candidates is not None:
+        hooks.candidates(len(leaders))
     tuned = [
         result
-        for candidate in _leaders(ranked, look)
+        for candidate in leaders
         if (result := tune(candidate, min(bars, default=math.inf)))
     ]
     best, best_score = pairs(*min(tuned, key=lambda result: result[1]))

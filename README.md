@@ -22,22 +22,15 @@ The name is **g**(ui) + **rawji** (/dʒiː ˈrɔː dʒiː/).
 ## Features
 
 - **Live preview** through the camera's own conversion engine, with
-  histogram, clipping zebras, peek at the original, and split-compare.
-- **Recipes**: full parameter control, saved library with hotkeys,
-  community-text paste, FP1/FP2/FP3 exchange, try-them-all grid.
-- **Crop, straighten and per-image exposure**, with auto level, kept in
-  per-RAF sidecars.
-- **Export** single images or whole folders at full resolution, with
-  optional framing border and metadata.
-- **Cull and organize** in the filmstrip: filter, select, copy, move, trash.
-- **Experimental**: write recipes into the camera's custom banks over
-  USB. Verified on the X100F, X-T3 and X-E5. Bodies sharing their
-  write mechanism (X-Pro2, X-T2, X-T20, X-E3, X-T30 and the other
-  X-Processor 5 models) should work but are untested. Not possible yet
-  on the X-H1, the X-Processor 4 bodies from the X-Pro3 to the
-  X-T30 II, and the GFX models before the GFX100 II. You can help
-  enable your body: see
-  [docs/enable-bank-writing.md](docs/enable-bank-writing.md).
+  split compare, histogram and clipping zebras.
+- **Recipes**: a library with hotkeys, imported from photos, edited
+  exports, X RAW STUDIO files or community text.
+- **Crop, straighten and perspective**, kept per image.
+- **Browse and cull**: grid, stars, labels, filters and file operations.
+- **Export** single images or batches as JPEG, HEIF, TIFF or JPEG XL.
+- **Experimental**: write recipes into the camera's custom banks.
+
+All features: [docs/features.md](docs/features.md).
 
 ## Warranty disclaimer
 

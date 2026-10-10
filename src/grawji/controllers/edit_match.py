@@ -146,6 +146,7 @@ class EditMatchController:
                 progress=progress,
                 stage=stage,
                 cancelled=stop.is_set,
+                candidates=estimate.plan,
             ),
         )
 
