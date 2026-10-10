@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 # The frame is searched at this width, the edit at this long edge.
 _FRAME_WIDTH = 160
 _EDIT_EDGE = 200
-_ANGLES = np.arange(-6.0, 6.01, 1.5)
+_ANGLES = np.arange(-6.0, 6.01, 1.5, dtype=np.float64)
 # How wide the edit is in the frame: a quarter of it up to all of it.
 _SCALES = np.exp(np.linspace(math.log(0.25), 0.0, 22))
-_FINE_ANGLES = np.arange(-1.5, 1.51, 0.25)
+_FINE_ANGLES = np.arange(-1.5, 1.51, 0.25, dtype=np.float64)
 _FINE_SCALES = np.exp(np.linspace(-0.06, 0.06, 13))
 # Below this correlation the edit shows another shot, or nothing the
 # frame can be matched by.
@@ -295,7 +295,8 @@ def _masked_ncc(
     var_image = np.maximum(sum_image2 - sum_image**2 / count, 1e-9)
     var_tmpl = max(float((masked**2).sum() - sum_tmpl**2 / count), 1e-9)
     score = numerator / np.sqrt(var_image * var_tmpl)
-    return score[: image_h - tmpl_h + 1, : image_w - tmpl_w + 1]
+    valid = score[: image_h - tmpl_h + 1, : image_w - tmpl_w + 1]
+    return np.asarray(valid, dtype=np.float64)
 
 
 def _scaling(sx: float, sy: float) -> NDArray[np.float64]:
