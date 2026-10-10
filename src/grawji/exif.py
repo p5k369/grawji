@@ -19,14 +19,27 @@ def _ratio(raw: str) -> float | None:
         return None
 
 
+def _unknown(raw: str) -> bool:
+    """Whether a rational is EXIF's "unknown", 0/0 or a zero value."""
+    numerator, _, denominator = raw.partition("/")
+    try:
+        return float(denominator or 1) == 0 or float(numerator) == 0
+    except ValueError:
+        return False
+
+
 def _aperture(raw: str) -> str:
     """Format an f-number rational, e.g. "280/100" -> "f/2.8"."""
+    if _unknown(raw):
+        return ""
     value = _ratio(raw)
     return f"f/{value:g}" if value is not None else raw
 
 
 def _shutter(raw: str) -> str:
     """Format a shutter speed, e.g. "10/3400" -> "1/340 s"."""
+    if _unknown(raw):
+        return ""
     value = _ratio(raw)
     if value is None or value <= 0:
         return raw
@@ -37,6 +50,8 @@ def _shutter(raw: str) -> str:
 
 def format_focal(raw: str) -> str:
     """Format a focal length, e.g. "3500/100" -> "35 mm"."""
+    if _unknown(raw):
+        return ""
     value = _ratio(raw)
     return f"{value:g} mm" if value is not None else raw
 

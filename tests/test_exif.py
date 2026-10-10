@@ -43,6 +43,19 @@ def test_unparseable_rational_falls_back_to_raw():
     assert rows == [("Aperture", "weird")]
 
 
+def test_unknown_rationals_are_hidden():
+    """A manual lens's 0/0 aperture and other unknown values show no row."""
+    rows = format_exif(
+        {
+            "Exif.Photo.FNumber": "0/0",
+            "Exif.Photo.FocalLength": "0/1",
+            "Exif.Photo.ExposureTime": "0/0",
+            "Exif.Photo.ISOSpeedRatings": "160",
+        }
+    )
+    assert rows == [("ISO", "ISO 160")]
+
+
 def test_mode_names_the_exposure_program():
     """The program shows as a readable mode name."""
     rows = format_exif({"Exif.Photo.ExposureProgram": "3"})
