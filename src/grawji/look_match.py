@@ -33,6 +33,7 @@ STAGE_FILM = "film simulation"
 STAGE_LOOK = "tones and color"
 STAGE_FINE = "fine tuning"
 STAGE_RECHECK = "film simulation check"
+STAGE_CLARITY = "clarity"
 
 # Compare at this width: enough for the look, forgiving about detail.
 COMPARE_WIDTH = 96
@@ -126,13 +127,11 @@ class Match:
     Attributes:
         recipe: The closest recipe found.
         distance: Its mean color difference to the edit (delta E).
-        start_distance: The starting recipe's difference.
         renders: How many renders the camera made.
     """
 
     recipe: Recipe
     distance: float
-    start_distance: float
     renders: int
 
 
@@ -197,11 +196,6 @@ class LookTarget:
         bonus = _SKIN_PRIORITY_BONUS if skin_priority else _SKIN_BONUS
         self._weights = _subject_weights(edit, skin, self._mask, bonus)
 
-    @property
-    def overlap(self) -> float:
-        """The share of the edit the frame covers."""
-        return float(self._mask.mean())
-
     def view(self, render: NDArray[np.uint8]) -> NDArray[np.float64]:
         """A render as the edit shows it."""
         height, width = render.shape[:2]
@@ -232,15 +226,6 @@ class LookTarget:
         pixels = float((differences * self._weights)[self._mask].sum())
         stats = _look_stats(seen, self._stats_mask) - self._stats
         return pixels + _LOOK_WEIGHT * float(np.sqrt((stats**2).mean()))
-
-    def distance(self, render: NDArray[np.uint8]) -> float:
-        """Mean delta E between a render and the edit."""
-        return self.compare(self.view(render))
-
-
-def lab(rgb: NDArray[Any]) -> NDArray[np.float64]:
-    """sRGB, 0 to 255, to CIE Lab under D65."""
-    return _lab_of_linear(_linear(rgb))
 
 
 def _linear(rgb: NDArray[Any]) -> NDArray[np.float64]:
@@ -389,7 +374,6 @@ def search(
             stage(name)
 
     enter(STAGE_FILM)
-    start_distance = plain(base)
     # A shot's own white balance can be far from the edit's, and a color
     # simulation with the wrong cast must not lose to a neutral B&W one.
     ranked = sorted(
@@ -459,7 +443,56 @@ def search(
         lambda rival: pairs(*polish(rival)),
         better,
     )
-    return Match(_kept(best, start), best_score, start_distance, renders.count)
+    if capabilities.has_clarity:
+        # Clarity can turn a runner-up simulation into the closest one.
+        enter(STAGE_CLARITY)
+        finalists = [(best, best_score)] + [
+            result
+            for result in tuned
+            if result[0].film_simulation != best.film_simulation
+        ]
+        best, best_score = min(
+            (
+                _clarity(recipe, plain, capabilities, better)
+                for recipe, _score in finalists
+            ),
+            key=lambda result: result[1],
+        )
+    return Match(_kept(best, start), best_score, renders.count)
+
+
+def _clarity(
+    best: Recipe,
+    score: Callable[[Recipe], float],
+    capabilities: Capabilities,
+    better: Callable[[Recipe], None],
+) -> tuple[Recipe, float]:
+    """Clarity last, with one fine pass over the rest when it moved.
+
+    A clarity render takes the about three times as long, so the search
+    holds it at zero until everything else has settled. (tested with X-E5)
+    """
+
+    def clarity_only(recipe: Recipe) -> list[_Numeric]:
+        return [
+            control
+            for control in _numerics(recipe, capabilities, clarity=True)
+            if control.name == "clarity"
+        ]
+
+    best, best_score = _walk(
+        best, score, clarity_only, lambda _r: [], _Plan(range(_LEVELS)), better
+    )
+    if not best.clarity:
+        return best, best_score
+    return _walk(
+        best,
+        score,
+        lambda recipe: _numerics(recipe, capabilities, clarity=True),
+        lambda _r: [],
+        _Plan(range(_LEVELS - 1, _LEVELS)),
+        better,
+    )
 
 
 def _recheck(
@@ -620,7 +653,9 @@ def _choices(
     return choices
 
 
-def _numerics(recipe: Recipe, capabilities: Capabilities) -> list[_Numeric]:
+def _numerics(
+    recipe: Recipe, capabilities: Capabilities, *, clarity: bool = False
+) -> list[_Numeric]:
     """The numeric controls the body and the film simulation allow."""
     tone_steps = (1.0, 0.5) if capabilities.tone_half_step else (1.0,)
     low, high = capabilities.tone_min, capabilities.tone_max
@@ -633,7 +668,7 @@ def _numerics(recipe: Recipe, capabilities: Capabilities) -> list[_Numeric]:
     ]
     if recipe.film_simulation not in _NO_COLOR:
         controls.append(_Numeric("color", -4, 4, (2, 1)))
-    if capabilities.has_clarity:
+    if clarity and capabilities.has_clarity:
         controls.append(_Numeric("clarity", -5, 5, (2, 1)))
     toned = recipe.film_simulation in (*_MONO_SIMS, *_MONOCHROME)
     reach = capabilities.mono_max

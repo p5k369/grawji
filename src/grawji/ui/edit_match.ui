@@ -88,6 +88,12 @@
                 <property name="xalign">0</property>
               </object>
             </child>
+            <child>
+              <object class="GtkProgressBar" id="progress_bar">
+                <property name="visible">false</property>
+                <property name="show-text">true</property>
+              </object>
+            </child>
           </object>
         </property>
         <child type="bottom">

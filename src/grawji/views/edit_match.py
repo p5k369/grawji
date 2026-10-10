@@ -15,6 +15,7 @@ from gi.repository import Adw, Gtk
 
 from grawji import look_match
 from grawji.recipe_text import film_sim_label
+from grawji.search_estimate import describe
 from grawji.views.textures import texture_for_rgb
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ _STAGES = {
     look_match.STAGE_LOOK: "Tuning tones and color…",
     look_match.STAGE_FINE: "Fine tuning…",
     look_match.STAGE_RECHECK: "Checking the other film simulations…",
+    look_match.STAGE_CLARITY: "Trying clarity…",
 }
 # Mean delta E limits for the verdicts, closest first.
 _VERDICTS = (
@@ -70,6 +72,7 @@ class EditMatchDialog(Adw.Dialog):
     start_button = Gtk.Template.Child()
     apply_button = Gtk.Template.Child()
     skin_row = Gtk.Template.Child()
+    progress_bar = Gtk.Template.Child()
 
     def __init__(
         self,
@@ -116,6 +119,13 @@ class EditMatchDialog(Adw.Dialog):
             f" · {renders} renders"
         )
 
+    def set_estimate(self, fraction: float, seconds: float | None) -> None:
+        """Show how far the search is and the time it still needs."""
+        if self._cancel is None:
+            return
+        self.progress_bar.set_fraction(fraction)
+        self.progress_bar.set_text(describe(seconds) or " ")
+
     def finish(self, match: look_match.Match) -> None:
         """Show the result and offer to apply it."""
         self._cancel = None
@@ -140,6 +150,7 @@ class EditMatchDialog(Adw.Dialog):
         """Leave the running state."""
         self.spinner.set_spinning(False)
         self.spinner.set_visible(False)
+        self.progress_bar.set_visible(False)
         self.cancel_button.set_label("Close")
         self.skin_row.set_sensitive(True)
         self.start_button.set_label("Search Again")
@@ -153,6 +164,9 @@ class EditMatchDialog(Adw.Dialog):
         self.skin_row.set_sensitive(False)
         self.spinner.set_visible(True)
         self.spinner.set_spinning(True)
+        self.progress_bar.set_fraction(0.0)
+        self.progress_bar.set_text(" ")
+        self.progress_bar.set_visible(True)
         self.cancel_button.set_label("Cancel")
         self.detail_label.set_label("")
         self.status_label.set_label("Finding the edit in the shot…")

@@ -399,6 +399,11 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     dialog.start_button.emit("clicked")
     assert started == [False]
     assert not dialog.skin_row.get_sensitive()
+    assert dialog.progress_bar.get_visible()
+    dialog.set_cancel(lambda: None)
+    dialog.set_estimate(0.25, 150.0)
+    assert dialog.progress_bar.get_fraction() == 0.25
+    assert dialog.progress_bar.get_text() == "about 2 minutes left"
     dialog.show_view(pixels)
     dialog.set_stage(STAGE_LOOK)
     assert dialog.status_label.get_label() == "Tuning tones and color…"
@@ -406,11 +411,12 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     dialog.set_progress(found, 12)
     assert "Classic Chrome" in dialog.detail_label.get_label()
     assert not dialog.apply_button.get_visible()
-    dialog.finish(Match(found, 1.5, 9.0, 40))
+    dialog.finish(Match(found, 1.5, 40))
     assert dialog.status_label.get_label() == "Very close to your edit."
     assert dialog.apply_button.get_visible()
     assert dialog.start_button.get_label() == "Search Again"
     assert dialog.skin_row.get_sensitive()
+    assert not dialog.progress_bar.get_visible()
     dialog.apply_button.emit("clicked")
     assert applied == [found]
 

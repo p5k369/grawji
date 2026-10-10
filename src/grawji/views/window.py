@@ -1344,6 +1344,7 @@ class MainWindow(Adw.ApplicationWindow):
                     on_view=match_dialog.show_view,
                     on_progress=match_dialog.set_progress,
                     on_stage=match_dialog.set_stage,
+                    on_estimate=match_dialog.set_estimate,
                     on_done=match_dialog.finish,
                     on_error=failed,
                 ),

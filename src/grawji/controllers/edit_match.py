@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ from gi.repository import GdkPixbuf, GLib
 from grawji import edit_align, look_match, mainloop
 from grawji.imaging.pixbufs import crop_to_aspect, rgb_array, trim_letterbox
 from grawji.imaging.render import oriented_jpeg, scale_to_edge
+from grawji.search_estimate import SearchEstimate
 
 if TYPE_CHECKING:
     import numpy as np
@@ -54,6 +56,7 @@ class EditMatchCallbacks:
     on_view: Callable[[NDArray[np.uint8]], None]
     on_progress: Callable[[Recipe, int], None]
     on_stage: Callable[[str], None]
+    on_estimate: Callable[[float, float | None], None]
     on_done: Callable[[look_match.Match], None]
     on_error: Callable[[Exception], None]
 
@@ -104,6 +107,7 @@ class EditMatchController:
         size = (edit.shape[1], edit.shape[0])
         mainloop.call(callbacks.on_view, alignment.warp(frame, size))
         latest: dict[str, Any] = {}
+        estimate = SearchEstimate(request.capabilities, time.monotonic())
 
         def render(recipe: Recipe) -> NDArray[np.uint8]:
             jpeg = self._session.render_thumb(recipe)
@@ -111,6 +115,10 @@ class EditMatchController:
                 crop_to_aspect(oriented_jpeg(jpeg, request.orientation), ratio)
             )
             latest["recipe"], latest["pixels"] = recipe, pixels
+            estimate.rendered(time.monotonic(), clarity=recipe.clarity != 0)
+            mainloop.call(
+                callbacks.on_estimate, estimate.fraction, estimate.seconds_left
+            )
             return pixels
 
         def progress(recipe: Recipe, renders: int) -> None:
@@ -120,6 +128,7 @@ class EditMatchController:
                 mainloop.call(callbacks.on_view, view)
 
         def stage(name: str) -> None:
+            estimate.enter(name)
             mainloop.call(callbacks.on_stage, name)
 
         target = look_match.LookTarget(

@@ -62,7 +62,7 @@ def test_the_hidden_recipe_is_found() -> None:
     assert found.film_simulation == "ClassicChrome"
     assert found.exposure == pytest.approx(1 / 3)
     assert (found.wb_shift_r, found.shadows, found.color) == (3, 1.0, -1)
-    assert match.distance < 0.5 < match.start_distance
+    assert match.distance < 0.5
 
 
 def test_a_b_and_w_edit_finds_the_b_and_w_sim() -> None:
@@ -159,17 +159,13 @@ def test_a_render_of_another_size_is_refused() -> None:
     """A render that does not match the aligned frame is refused."""
     target = target_for(Recipe())
     with pytest.raises(ValueError, match="size"):
-        target.distance(np.zeros((10, 10, 3), np.uint8))
-
-
-def test_overlap_is_the_share_the_frame_covers() -> None:
-    """A crop inside the frame is covered completely."""
-    assert target_for(Recipe()).overlap == pytest.approx(1.0)
+        target.view(np.zeros((10, 10, 3), np.uint8))
 
 
 def test_lab_of_white_and_black() -> None:
     """White and black land on the ends of the Lab lightness axis."""
-    values = look_match.lab(np.array([[255, 255, 255], [0, 0, 0]]))
+    rgb = np.array([[255, 255, 255], [0, 0, 0]])
+    values = look_match._lab_of_linear(look_match._linear(rgb))
     np.testing.assert_allclose(values, [[100, 0, 0], [0, 0, 0]], atol=0.01)
 
 
@@ -230,7 +226,9 @@ def test_a_sharp_subject_outweighs_a_soft_background() -> None:
     )
     off_in_background = edit.copy()
     off_in_background[:, 60:, 0] = 168
-    assert target.distance(off_in_subject) > target.distance(off_in_background)
+    subject = target.compare(target.view(off_in_subject))
+    background = target.compare(target.view(off_in_background))
+    assert subject > background
 
 
 def test_the_result_does_not_depend_on_the_start() -> None:
@@ -267,3 +265,25 @@ def test_both_white_balance_modes_are_tried() -> None:
     match = look_match.search(Recipe(), CAPS, render, target_for(Recipe()))
     assert seen == {"AsShot", "Auto"}
     assert match.recipe.white_balance in seen
+
+
+def test_clarity_waits_for_the_last_stage() -> None:
+    """Slow clarity renders only come once everything else settled."""
+    caps = replace(CAPS, has_clarity=True)
+    stages: list[str] = []
+    clarity_stages: set[str] = set()
+
+    def render(recipe: Recipe) -> np.ndarray:
+        if recipe.clarity:
+            clarity_stages.add(stages[-1])
+        return fake_render(recipe)
+
+    look_match.search(
+        Recipe(),
+        caps,
+        render,
+        target_for(Recipe(film_simulation="Velvia")),
+        SearchHooks(stage=stages.append),
+    )
+    assert stages[-1] == look_match.STAGE_CLARITY
+    assert clarity_stages == {look_match.STAGE_CLARITY}
