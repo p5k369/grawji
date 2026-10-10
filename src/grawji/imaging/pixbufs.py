@@ -28,6 +28,15 @@ def pixel_rows(pixbuf: Any) -> NDArray[np.uint8]:
     return pixels[: height * stride].reshape(height, stride)
 
 
+def rgb_array(pixbuf: Any) -> NDArray[np.uint8]:
+    """A pixbuf's pixels as a height by width by 3 RGB array."""
+    width, height = pixbuf.get_width(), pixbuf.get_height()
+    channels = pixbuf.get_n_channels()
+    rows = pixel_rows(pixbuf)[:, : width * channels]
+    pixels = rows.reshape(height, width, channels)[..., :3]
+    return np.ascontiguousarray(pixels)
+
+
 # EXIF orientation.
 _R = GdkPixbuf.PixbufRotation
 _ORIENTATIONS = {
