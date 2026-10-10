@@ -92,6 +92,8 @@ _CAMERA_POLL_SECONDS = 3
 # Debounce a selection's load so fast scrubbing does not spawn a decode per
 # image passed over, the decode then runs off-thread and never blocks the UI.
 _LOAD_DELAY_MS = 50
+# The status while browsing without a camera on USB.
+_NO_CAMERA = "No camera connected, showing the in-camera JPEG."
 # Default side-panel width, used to restore it after a collapse.
 _DEFAULT_SIDEBAR_WIDTH = 240
 # Pane positions at or below this count as collapsed.
@@ -901,14 +903,16 @@ class MainWindow(Adw.ApplicationWindow):
         # the filmstrip animation stays smooth and the image appears as soon
         # as it is decoded.
         jpeg = self._camera_file_of(raf_path)
-        if jpeg is None:
+        if jpeg is not None:
+            self._worker.submit(self._session.close)
+        elif self._session.is_open or camera_info.detect_camera():
             self._worker.open(
                 raf_path,
                 on_done=partial(self._on_opened, generation),
                 on_error=self._on_quiet_error if quiet else self._on_error,
             )
         else:
-            self._worker.submit(self._session.close)
+            self._set_busy(busy=False, status=_NO_CAMERA)
         threading.Thread(
             target=self._decode_selection,
             args=(generation, raf_path, jpeg),
