@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0](https://github.com/p5k369/grawji/compare/v0.6.0...v0.7.0) (2026-10-10)
+
+
+### Features
+
+* **browse:** introducing marks for images ([#161](https://github.com/p5k369/grawji/issues/161)) ([04b941f](https://github.com/p5k369/grawji/commit/04b941f33b18f563c157e9a81cbba2067a1606f1))
+* **develop:** develop a RAW+JPEG shot from its camera JPEG ([#164](https://github.com/p5k369/grawji/issues/164)) ([4f2b5ae](https://github.com/p5k369/grawji/commit/4f2b5ae5005e67c14018e307add133990119f8b1))
+* **export:** resample every export at maximum quality ([#159](https://github.com/p5k369/grawji/issues/159)) ([e6bc4c4](https://github.com/p5k369/grawji/commit/e6bc4c48aef46654dcacf30eef6fd7707315c996))
+* **recipes:** find the recipe closest to an edited export ([#171](https://github.com/p5k369/grawji/issues/171)) ([e85f98f](https://github.com/p5k369/grawji/commit/e85f98f9dd3b21f5b5094cb7f5521e2662ed5a73))
+* **recipes:** import the recipe a photo was shot with ([#166](https://github.com/p5k369/grawji/issues/166)) ([9a921e8](https://github.com/p5k369/grawji/commit/9a921e86a3fcc9efaa57a439d680f6dfc634b36f))
+
+
+### Bug Fixes
+
+* **camera:** name a bank after the recipe dropped on it ([#165](https://github.com/p5k369/grawji/issues/165)) ([0ea9e15](https://github.com/p5k369/grawji/commit/0ea9e15c576644daca3fa5b0f7b9c7c1f2a5c78e))
+* **develop:** browse images without a camera ([#173](https://github.com/p5k369/grawji/issues/173)) ([bcc8a4f](https://github.com/p5k369/grawji/commit/bcc8a4fe9799b10f32e930dbed401eeb8598e976))
+* **ui:** show action icons in dark mode on GTK 4.14 ([#172](https://github.com/p5k369/grawji/issues/172)) ([f628d65](https://github.com/p5k369/grawji/commit/f628d650f24d19c5ff3cd6ddf74e8d9ad814ddf3))
+
+
+### Performance
+
+* **export:** warp 16-bit keystone exports through lsdetect ([#156](https://github.com/p5k369/grawji/issues/156)) ([d441239](https://github.com/p5k369/grawji/commit/d4412398f505a718f0ba30a8992703b60c349c7d))
+
 ## [0.6.0](https://github.com/p5k369/grawji/compare/v0.5.1...v0.6.0) (2026-09-27)
 
 
