@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from grawji.imaging.blur import gaussian
 from grawji.imaging.pixbufs import area_resize
 from grawji.recipe import Recipe
 
@@ -42,6 +43,9 @@ _MARGIN = 0.03
 # How much the edit's overall statistics count next to the per-pixel
 # difference.
 _LOOK_WEIGHT = 0.4
+# The likeness a result is judged by is taken on images softened by this
+# many compared pixels.
+_LIKENESS_SOFTEN = 1.5
 _LIGHT_QUANTILES = (5, 25, 50, 75, 95)
 _CHROMA_QUANTILES = (50, 90)
 # Where the edit shows detail counts more than its blurry background
@@ -186,6 +190,7 @@ class LookTarget:
         self._mask = share[..., 0] == _OPAQUE
         linear = _linear(area_resize(edit[..., :3], *self._small))
         self._lab = _lab_of_linear(linear)
+        self._soft_lab = _lab_of_linear(self._soften(linear))
         self._luminance = _mean_luminance(linear, self._mask)
         self._channels = linear[self._mask].mean(axis=0)
         skin = _skin(self._lab) & self._mask
@@ -193,6 +198,7 @@ class LookTarget:
         if skin_priority and skin.sum() >= _MIN_SKIN_SHARE * self._mask.sum():
             self._stats_mask = skin
         self._stats = _look_stats(self._lab, self._stats_mask)
+        self._soft_stats = _look_stats(self._soft_lab, self._stats_mask)
         bonus = _SKIN_PRIORITY_BONUS if skin_priority else _SKIN_BONUS
         self._weights = _subject_weights(edit, skin, self._mask, bonus)
 
@@ -220,11 +226,31 @@ class LookTarget:
             own = view[self._mask].mean(axis=0)
             gains = self._channels / np.maximum(own, 1e-9)
             view = np.clip(view * gains, 0.0, 1.0)
-        seen = _lab_of_linear(view)
-        delta = seen - self._lab
+        return self._distance(_lab_of_linear(view), self._lab, self._stats)
+
+    def likeness(self, view: NDArray[np.float64]) -> float:
+        """Mean delta E between a view and the edit, fine texture aside."""
+        seen = _lab_of_linear(self._soften(view))
+        return self._distance(seen, self._soft_lab, self._soft_stats)
+
+    def _soften(self, linear: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Blur within what the frame covers."""
+        inside = self._mask.astype(np.float64)[..., None]
+        weight = gaussian(inside, _LIKENESS_SOFTEN)
+        soft = gaussian(linear * inside, _LIKENESS_SOFTEN)
+        return np.asarray(soft / np.maximum(weight, 1e-9))
+
+    def _distance(
+        self,
+        seen: NDArray[np.float64],
+        wanted: NDArray[np.float64],
+        wanted_stats: NDArray[np.float64],
+    ) -> float:
+        """Weighted delta E plus the gap in the look's statistics."""
+        delta = seen - wanted
         differences = np.sqrt((delta**2).sum(axis=-1))
         pixels = float((differences * self._weights)[self._mask].sum())
-        stats = _look_stats(seen, self._stats_mask) - self._stats
+        stats = _look_stats(seen, self._stats_mask) - wanted_stats
         return pixels + _LOOK_WEIGHT * float(np.sqrt((stats**2).mean()))
 
 
@@ -458,7 +484,8 @@ def search(
             ),
             key=lambda result: result[1],
         )
-    return Match(_kept(best, start), best_score, renders.count)
+    likeness = target.likeness(renders(best))
+    return Match(_kept(best, start), likeness, renders.count)
 
 
 def _clarity(

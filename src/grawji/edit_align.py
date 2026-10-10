@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import lsdetect
 import numpy as np
 
+from grawji.imaging.blur import gaussian
 from grawji.imaging.pixbufs import area_resize
 
 if TYPE_CHECKING:
@@ -31,6 +32,18 @@ _BORDER_SHARE = 0.995
 # The share of each edge left out of the search.
 _MARGIN = 0.03
 _LUMA = np.array([0.299, 0.587, 0.114])
+# The placement is refined to a perspective warp on edge maps softened by
+# these radii.
+_REFINE_SIGMAS = (3.0, 1.5, 0.8)
+_REFINE_STEPS = 12
+# The parameter nudge the refinement measures its slopes with.
+_NUDGE = 1e-3
+_SETTLED = 1e-5
+# A refined placement is only taken when the edges agree this much better.
+_REFINE_GAIN = 0.005
+_REFINE_REACH = 0.05
+# A correlation needs at least two covered pixels.
+_MIN_COVERED = 2
 _OPAQUE = 255
 
 
@@ -86,10 +99,133 @@ def align(
     found = _align_inner(frame, inner)
     if found is None:
         return None
+    refined = refine(frame, inner, found)
     shift = np.eye(3)
     shift[0, 2] = left
     shift[1, 2] = top
-    return Alignment(shift @ found.matrix, found.score)
+    return Alignment(shift @ refined.matrix, refined.score)
+
+
+def refine(
+    frame: NDArray[np.uint8], edit: NDArray[np.uint8], alignment: Alignment
+) -> Alignment:
+    """The placement refined to a perspective warp, when that fits better."""
+    frame_gray = frame[..., :3].astype(np.float64) @ _LUMA / 255.0
+    edit_gray = edit[..., :3].astype(np.float64) @ _LUMA / 255.0
+    height, width = edit_gray.shape
+    grid = _pixel_grid(width, height)
+    normal = np.array([[2 / width, 0, -1], [0, 2 / height, -1], [0, 0, 1.0]])
+    unnormal = np.linalg.inv(normal)
+    matrix = alignment.matrix
+    for sigma in _REFINE_SIGMAS:
+        frame_edges = _soft_edges(frame_gray, sigma)
+        edit_edges = _soft_edges(edit_gray, sigma)
+        for _step in range(_REFINE_STEPS):
+            residual, inside = _residual(frame_edges, edit_edges, matrix, grid)
+            slopes = np.empty((residual.size, 8))
+            for k in range(8):
+                nudge = np.eye(3).ravel()
+                nudge[k] += _NUDGE
+                nudged = unnormal @ nudge.reshape(3, 3) @ normal @ matrix
+                moved, _ = _residual(frame_edges, edit_edges, nudged, grid)
+                slopes[:, k] = (moved - residual) / _NUDGE
+            delta = np.linalg.lstsq(
+                slopes[inside], -residual[inside], rcond=None
+            )[0]
+            step = np.eye(3).ravel()
+            step[:8] += delta
+            matrix = unnormal @ step.reshape(3, 3) @ normal @ matrix
+            if np.abs(delta).max() < _SETTLED:
+                break
+    before = _agreement(frame_gray, edit_gray, alignment.matrix, grid)
+    after = _agreement(frame_gray, edit_gray, matrix, grid)
+    reach = _REFINE_REACH * math.hypot(width, height)
+    if (
+        not np.isfinite(matrix).all()
+        or after < before + _REFINE_GAIN
+        or _corner_shift(alignment.matrix, matrix, width, height) > reach
+    ):
+        return alignment
+    return Alignment(matrix, alignment.score)
+
+
+def _pixel_grid(width: int, height: int) -> NDArray[np.float64]:
+    """Every pixel of an image as a column of homogeneous coordinates."""
+    ys, xs = np.mgrid[0:height, 0:width]
+    return np.stack([xs.ravel(), ys.ravel(), np.ones(width * height)]).astype(
+        np.float64
+    )
+
+
+def _soft_edges(
+    gray: NDArray[np.float64], sigma: float
+) -> NDArray[np.float64]:
+    """Gradient magnitude of a softened image."""
+    soft = gaussian(gray, sigma)
+    gx = np.zeros_like(soft)
+    gy = np.zeros_like(soft)
+    gx[:, 1:-1] = soft[:, 2:] - soft[:, :-2]
+    gy[1:-1] = soft[2:] - soft[:-2]
+    return np.asarray(np.hypot(gx, gy))
+
+
+def _seen(
+    frame: NDArray[np.float64],
+    matrix: NDArray[np.float64],
+    grid: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """The frame sampled at every edit pixel."""
+    points = np.linalg.inv(matrix) @ grid
+    return _sample(frame, points[0] / points[2], points[1] / points[2])
+
+
+def _residual(
+    frame_edges: NDArray[np.float64],
+    edit_edges: NDArray[np.float64],
+    matrix: NDArray[np.float64],
+    grid: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """How the normalized edge maps differ."""
+    values, inside = _seen(frame_edges, matrix, grid)
+    residual = np.zeros(values.size)
+    if inside.sum() < _MIN_COVERED:
+        return residual, inside
+    seen = values[inside]
+    wanted = edit_edges.ravel()[inside]
+    seen = (seen - seen.mean()) / (seen.std() + 1e-9)
+    wanted = (wanted - wanted.mean()) / (wanted.std() + 1e-9)
+    residual[inside] = seen - wanted
+    return residual, inside
+
+
+def _agreement(
+    frame: NDArray[np.float64],
+    edit: NDArray[np.float64],
+    matrix: NDArray[np.float64],
+    grid: NDArray[np.float64],
+) -> float:
+    """How well the fine edges agree under a placement."""
+    sigma = _REFINE_SIGMAS[-1]
+    values, inside = _seen(_soft_edges(frame, sigma), matrix, grid)
+    if inside.sum() < _MIN_COVERED:
+        return -1.0
+    wanted = _soft_edges(edit, sigma).ravel()[inside]
+    return float(np.corrcoef(values[inside], wanted)[0, 1])
+
+
+def _corner_shift(
+    before: NDArray[np.float64],
+    after: NDArray[np.float64],
+    width: int,
+    height: int,
+) -> float:
+    """How far the refinement moved the edit's corners."""
+    corners = np.array(
+        [[0, width, 0, width], [0, 0, height, height], [1, 1, 1, 1]],
+        dtype=np.float64,
+    )
+    moved = after @ np.linalg.inv(before) @ corners
+    return float(np.abs(moved[:2] / moved[2] - corners[:2]).max())
 
 
 def _align_inner(

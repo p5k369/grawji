@@ -8,6 +8,7 @@ import pytest
 from grawji import look_match
 from grawji.camera.capabilities import Capabilities
 from grawji.edit_align import Alignment
+from grawji.imaging.blur import gaussian
 from grawji.look_match import LookTarget, SearchCancelledError, SearchHooks
 from grawji.recipe import Recipe
 from tests.image_support import scene
@@ -287,3 +288,13 @@ def test_clarity_waits_for_the_last_stage() -> None:
     )
     assert stages[-1] == look_match.STAGE_CLARITY
     assert clarity_stages == {look_match.STAGE_CLARITY}
+
+
+def test_likeness_sets_texture_aside() -> None:
+    """A sharpened edit of the same look reads close, its colors match."""
+    render = fake_render(Recipe()).astype(np.float64)
+    detail = render - gaussian(render, 1.0)
+    edit = np.clip(render + 0.8 * detail, 0, 255).astype(np.uint8)
+    target = LookTarget(edit, Alignment(np.eye(3), 1.0), FRAME)
+    view = target.view(render.astype(np.uint8))
+    assert target.likeness(view) < 0.5 * target.compare(view)

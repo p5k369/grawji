@@ -40,7 +40,8 @@ def placement_error(truth: np.ndarray, found: Alignment) -> float:
     )
     points = np.vstack([corners, np.ones(4)])
     in_frame = np.linalg.inv(truth) @ points
-    return float(np.hypot(*(found.matrix @ in_frame - points)[:2]).max())
+    placed = found.matrix @ in_frame
+    return float(np.hypot(*(placed[:2] / placed[2] - points[:2])).max())
 
 
 def graded(edit: np.ndarray) -> np.ndarray:
@@ -58,6 +59,25 @@ def test_a_straightened_crop_is_found() -> None:
     found = edit_align.align(frame, edit)
     assert found is not None
     assert placement_error(truth, found) < TOLERANCE
+
+
+def keystone(strength: float) -> np.ndarray:
+    """Edit pixels to edit pixels for a perspective correction."""
+    center = np.eye(3)
+    center[:2, 2] = [-(EDIT[0] - 1) / 2, -(EDIT[1] - 1) / 2]
+    tilt = np.eye(3)
+    tilt[2, 1] = strength
+    return np.linalg.inv(center) @ tilt @ center
+
+
+def test_a_perspective_corrected_crop_is_placed_exactly() -> None:
+    """An edit with converging lines corrected lands on its pixels."""
+    frame = scene(FRAME, 4)
+    truth = keystone(0.0003) @ crop_matrix((240.0, 160.0), 1.3, 1.0)
+    edit = Alignment(truth, 1.0).warp(frame, EDIT)
+    found = edit_align.align(frame, edit)
+    assert found is not None
+    assert placement_error(truth, found) < 1.0
 
 
 def test_a_graded_quarter_turned_crop_is_found() -> None:
