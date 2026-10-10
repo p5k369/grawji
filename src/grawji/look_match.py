@@ -456,7 +456,7 @@ def search(
     bars: list[float] = []
     tuned = [
         result
-        for candidate in ranked[:_CANDIDATES]
+        for candidate in _leaders(ranked, look)
         if (result := tune(candidate, min(bars, default=math.inf)))
     ]
     best, best_score = pairs(*min(tuned, key=lambda result: result[1]))
@@ -520,6 +520,17 @@ def _clarity(
         _Plan(range(_LEVELS - 1, _LEVELS)),
         better,
     )
+
+
+def _leaders(
+    ranked: list[Recipe], score: Callable[[Recipe], float]
+) -> list[Recipe]:
+    """The leading simulations to tune."""
+    leaders = ranked[:_CANDIDATES]
+    own = min(ranked, key=score)
+    if own not in leaders:
+        leaders.append(own)
+    return leaders
 
 
 def _recheck(

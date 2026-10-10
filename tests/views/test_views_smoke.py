@@ -411,7 +411,7 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     dialog.set_progress(found, 12)
     assert "Classic Chrome" in dialog.detail_label.get_label()
     assert not dialog.apply_button.get_visible()
-    dialog.finish(Match(found, 1.5, 40))
+    dialog.finish(Match(found, 0.5, 40))
     assert dialog.status_label.get_label() == "Very close to your edit."
     assert dialog.apply_button.get_visible()
     assert dialog.start_button.get_label() == "Search Again"

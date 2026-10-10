@@ -37,11 +37,11 @@ _STAGES = {
     look_match.STAGE_RECHECK: "Checking the other film simulations…",
     look_match.STAGE_CLARITY: "Trying clarity…",
 }
-# Mean delta E limits for the verdicts, closest first.
+# Limits of the softened mean delta E for the verdicts, closest first.
 _VERDICTS = (
-    (2.0, "Very close to your edit."),
-    (4.0, "Close to your edit."),
-    (7.0, "Roughly your edit. Part of it is beyond what a recipe can do."),
+    (1.0, "Very close to your edit."),
+    (2.0, "Close to your edit."),
+    (4.0, "Roughly your edit. Part of it is beyond what a recipe can do."),
 )
 _FAR = (
     "Only part of your edit. Local work like vignettes or masks is beyond"

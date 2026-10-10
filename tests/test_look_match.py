@@ -298,3 +298,20 @@ def test_likeness_sets_texture_aside() -> None:
     target = LookTarget(edit, Alignment(np.eye(3), 1.0), FRAME)
     view = target.view(render.astype(np.uint8))
     assert target.likeness(view) < 0.5 * target.compare(view)
+
+
+def test_the_leader_before_white_balance_is_tuned_too() -> None:
+    """A simulation hidden by the white-balanced ranking still gets tuned."""
+    sims = [
+        Recipe(film_simulation=sim) for sim in ("Provia", "Velvia", "Astia")
+    ]
+    unbalanced = {"Provia": 3.0, "Velvia": 2.0, "Astia": 1.0}
+    leaders = look_match._leaders(
+        sims, lambda recipe: unbalanced[recipe.film_simulation]
+    )
+    assert [r.film_simulation for r in leaders] == [
+        "Provia",
+        "Velvia",
+        "Astia",
+    ]
+    assert len(look_match._leaders(sims[:2], lambda _r: 0.0)) == 2
