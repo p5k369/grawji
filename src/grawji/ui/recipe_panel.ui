@@ -9,6 +9,10 @@
         <attribute name="action">recipe.import-photo</attribute>
       </item>
       <item>
+        <attribute name="label">From an Edit…</attribute>
+        <attribute name="action">recipe.import-edit</attribute>
+      </item>
+      <item>
         <attribute name="label">From an X RAW Studio File…</attribute>
         <attribute name="action">recipe.import-fp</attribute>
       </item>

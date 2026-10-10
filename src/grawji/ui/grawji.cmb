@@ -3,7 +3,7 @@
 <!-- Created with Cambalache 1.0.3 -->
 <cambalache-project version="1.0.0" target_tk="gtk-4.0" depends="libadwaita-1">
   <ui filename="preview_view.ui" sha256="bd0666386118ef6e349033c34b049caa18899029dbe981d4205880a112945458"/>
-  <ui filename="recipe_panel.ui" sha256="78399b358c31f11bed4aff5b820c7f54cba88595b8dec9d503bdb0038849e447"/>
+  <ui filename="recipe_panel.ui" sha256="5bce1b5587fdf6892fcd912e68440fafc83d5a8b5a83ac342c80f89fd1b4dc74"/>
   <ui filename="grawji.ui" sha256="4cc567c1cfcfb18387940e650c39cdd8bce5a45e09bb0b6452e1df9d70bec127"/>
   <ui filename="batch_export.ui" sha256="a2179fe58eb83df67efeb1f81836592aadcbb6564009d891ecb6f0c076dfd5b3"/>
   <ui filename="preferences.ui" sha256="687ffc844addffe311afaa5eade062294ea924a4312a992e0f368859433dafa6"/>
@@ -15,4 +15,5 @@
   <ui filename="detail_badges.ui" sha256="480f1b6ce9fbe1d5456dc29e8da219d65c30afc42db9fce9d3c2da21b41046ae"/>
   <ui filename="export_badge.ui" sha256="159a910c8e77d396f92e3de623d9e57f5b4166406bb292aa3d71e68f2bce97a0"/>
   <ui filename="filter_popover.ui" sha256="6bd3802d9f5fe12b851fd94f3bec4486775e6ed4626f9f4e60f690abb33432f8"/>
+  <ui filename="edit_match.ui" sha256="48635763fe0d16519f93b6f3ed8d578eb30fe589cbe2f82b1e8f34468c46332a"/>
 </cambalache-project>
