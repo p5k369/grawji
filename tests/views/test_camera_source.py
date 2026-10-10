@@ -25,6 +25,12 @@ def _settle(seconds: float) -> None:
         time.sleep(0.01)
 
 
+def _plug_camera(window: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A camera on USB that the presence poll already knows."""
+    monkeypatch.setattr(camera_info, "detect_camera", lambda: "X-E5")
+    window._camera_seen = True
+
+
 def _pair(folder: Path) -> tuple[Path, Path]:
     """A RAF stand-in and a real little camera JPEG beside it."""
     from gi.repository import GdkPixbuf
@@ -57,9 +63,11 @@ def test_a_camera_file_opens_without_the_camera(
     assert window.preview_view.source_switch.get_visible()
     assert window.export_button.get_sensitive()
 
-    monkeypatch.setattr(camera_info, "detect_camera", lambda: "X-E5")
+    _plug_camera(window, monkeypatch)
     window._toggle_source()
     _settle(0.6)
+    window._refresh_camera_status()
+    _settle(0.2)
     assert opened == [str(raf)]
     assert sidecar.summary(raf).source is Source.RAW
     assert window._camera_file_of(raf) is None
@@ -102,7 +110,7 @@ def test_with_a_camera_a_raf_goes_to_it(
     window: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A camera on USB gets the selected RAF."""
-    monkeypatch.setattr(camera_info, "detect_camera", lambda: "X-E5")
+    _plug_camera(window, monkeypatch)
     raf = tmp_path / "DSCF0004.RAF"
     raf.write_bytes(b"not a real raf")
     opened: list[str] = []
@@ -112,4 +120,6 @@ def test_with_a_camera_a_raf_goes_to_it(
     _settle(0.3)
     window._filmstrip.select_path(str(raf))
     _settle(0.3)
+    window._refresh_camera_status()
+    _settle(0.2)
     assert opened == [str(raf)]
