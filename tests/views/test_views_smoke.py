@@ -437,6 +437,34 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     assert applied == [found]
 
 
+def test_the_edit_match_options_fold_away_during_a_search() -> None:
+    """The pictures get the options room once a search runs."""
+    import numpy as np
+
+    from grawji.look_match import Match
+    from grawji.recipe import Recipe
+    from grawji.views.edit_match import EditMatchDialog
+
+    dialog = EditMatchDialog(
+        on_apply=lambda _recipe: None,
+        on_start=lambda _skin, _texture, _budget: None,
+    )
+    assert dialog.options_revealer.get_reveal_child()
+    dialog.show_edit(np.zeros((20, 30, 3), np.uint8))
+    dialog.start_button.emit("clicked")
+    assert not dialog.options_revealer.get_reveal_child()
+    assert not dialog.options_button.get_visible()
+    dialog.set_cancel(lambda: None)
+    dialog.finish(Match(Recipe(), 0.5, 40))
+    assert dialog.options_button.get_visible()
+    assert not dialog.options_revealer.get_reveal_child()
+    dialog.options_button.set_active(True)
+    assert dialog.options_revealer.get_reveal_child()
+    dialog.start_button.emit("clicked")
+    assert not dialog.options_revealer.get_reveal_child()
+    assert not dialog.options_button.get_active()
+
+
 def test_closing_the_edit_match_dialog_cancels_the_search() -> None:
     """Closing a running search stops it, a finished one does not care."""
     from grawji.views.edit_match import EditMatchDialog

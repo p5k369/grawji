@@ -67,6 +67,10 @@
               </object>
             </child>
             <child>
+              <object class="GtkRevealer" id="options_revealer">
+                <property name="reveal-child">true</property>
+                <property name="transition-type">slide-up</property>
+                <property name="child">
               <object class="GtkListBox">
                 <property name="selection-mode">none</property>
                 <style>
@@ -111,6 +115,8 @@
                   </object>
                 </child>
               </object>
+                </property>
+              </object>
             </child>
             <child>
               <object class="GtkLabel" id="status_label">
@@ -137,6 +143,16 @@
             <child>
               <object class="GtkSpinner" id="spinner">
                 <property name="visible">false</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkToggleButton" id="options_button">
+                <property name="icon-name">emblem-system-symbolic</property>
+                <property name="tooltip-text">Show the options</property>
+                <property name="visible">false</property>
+                <style>
+                  <class name="flat"/>
+                </style>
               </object>
             </child>
             <child>

@@ -1386,7 +1386,7 @@ class MainWindow(Adw.ApplicationWindow):
             target=preview, name="grawji-edit-preview", daemon=True
         ).start()
         dialogs.fit_dialog(
-            match_dialog, self, width_fraction=0.6, height_fraction=0.5
+            match_dialog, self, width_fraction=0.85, height_fraction=0.85
         )
         match_dialog.present(self)
 

@@ -80,6 +80,8 @@ class EditMatchDialog(Adw.Dialog):
     texture_row = Gtk.Template.Child()
     budget_row = Gtk.Template.Child()
     budget_scale = Gtk.Template.Child()
+    options_revealer = Gtk.Template.Child()
+    options_button = Gtk.Template.Child()
     progress_bar = Gtk.Template.Child()
 
     def __init__(
@@ -98,6 +100,7 @@ class EditMatchDialog(Adw.Dialog):
         self.budget_scale.set_format_value_func(self._budget_text)
         self.budget_scale.set_value(NO_LIMIT if budget is None else budget)
         self.budget_scale.connect("value-changed", self._on_budget_dragged)
+        self.options_button.connect("toggled", self._on_options_toggled)
         self.cancel_button.connect("clicked", lambda *_a: self.close())
         self.start_button.connect("clicked", self._on_start_clicked)
         self.apply_button.connect("clicked", self._on_apply_clicked)
@@ -185,9 +188,14 @@ class EditMatchDialog(Adw.Dialog):
         self.skin_row.set_sensitive(True)
         self.texture_row.set_sensitive(True)
         self.budget_row.set_sensitive(True)
+        self.options_button.set_visible(again)
         self.start_button.set_label("Search Again")
         self.start_button.set_visible(again)
         self.start_button.set_sensitive(again)
+
+    def _on_options_toggled(self, button: Gtk.ToggleButton) -> None:
+        """Fold the options in or out after a search."""
+        self.options_revealer.set_reveal_child(button.get_active())
 
     def _on_start_clicked(self, *_args: Any) -> None:
         """Enter the running state and start a search."""
@@ -196,6 +204,9 @@ class EditMatchDialog(Adw.Dialog):
         self.skin_row.set_sensitive(False)
         self.texture_row.set_sensitive(False)
         self.budget_row.set_sensitive(False)
+        self.options_button.set_active(False)
+        self.options_button.set_visible(False)
+        self.options_revealer.set_reveal_child(False)
         self.spinner.set_visible(True)
         self.spinner.set_spinning(True)
         self.progress_bar.set_fraction(0.0)
