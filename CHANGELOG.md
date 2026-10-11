@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0](https://github.com/p5k369/grawji/compare/v0.6.0...v0.7.0) (2026-10-11)
+
+
+### Features
+
+* **browse:** introducing marks for images ([#161](https://github.com/p5k369/grawji/issues/161)) ([04b941f](https://github.com/p5k369/grawji/commit/04b941f33b18f563c157e9a81cbba2067a1606f1))
+* **develop:** develop a RAW+JPEG shot from its camera JPEG ([#164](https://github.com/p5k369/grawji/issues/164)) ([4f2b5ae](https://github.com/p5k369/grawji/commit/4f2b5ae5005e67c14018e307add133990119f8b1))
+* **export:** resample every export at maximum quality ([#159](https://github.com/p5k369/grawji/issues/159)) ([e6bc4c4](https://github.com/p5k369/grawji/commit/e6bc4c48aef46654dcacf30eef6fd7707315c996))
+* **recipes:** align edits by perspective, judge the match by its look ([#175](https://github.com/p5k369/grawji/issues/175)) ([e3ea08a](https://github.com/p5k369/grawji/commit/e3ea08a82a439f251ac0701ec52984804652b65c))
+* **recipes:** find the recipe closest to an edited export ([#171](https://github.com/p5k369/grawji/issues/171)) ([e85f98f](https://github.com/p5k369/grawji/commit/e85f98f9dd3b21f5b5094cb7f5521e2662ed5a73))
+* **recipes:** import the recipe a photo was shot with ([#166](https://github.com/p5k369/grawji/issues/166)) ([9a921e8](https://github.com/p5k369/grawji/commit/9a921e86a3fcc9efaa57a439d680f6dfc634b36f))
+* **recipes:** match an edit's texture on request ([e51517a](https://github.com/p5k369/grawji/commit/e51517a4d90aa6260e508eeae881231f3aa02e32))
+* **recipes:** undo and redo recipe edits ([e51517a](https://github.com/p5k369/grawji/commit/e51517a4d90aa6260e508eeae881231f3aa02e32))
+* **recipes:** undo and redo recipe edits ([#178](https://github.com/p5k369/grawji/issues/178)) ([e51517a](https://github.com/p5k369/grawji/commit/e51517a4d90aa6260e508eeae881231f3aa02e32))
+
+
+### Bug Fixes
+
+* **camera:** name a bank after the recipe dropped on it ([#165](https://github.com/p5k369/grawji/issues/165)) ([0ea9e15](https://github.com/p5k369/grawji/commit/0ea9e15c576644daca3fa5b0f7b9c7c1f2a5c78e))
+* **develop:** browse images without a camera ([#173](https://github.com/p5k369/grawji/issues/173)) ([bcc8a4f](https://github.com/p5k369/grawji/commit/bcc8a4fe9799b10f32e930dbed401eeb8598e976))
+* **info:** hide the aperture a manual lens leaves unknown ([#174](https://github.com/p5k369/grawji/issues/174)) ([987b63a](https://github.com/p5k369/grawji/commit/987b63aeec6918c4c04139ff68ac89191fd42989))
+* **recipes:** find the edit's look past misleading first steps ([e51517a](https://github.com/p5k369/grawji/commit/e51517a4d90aa6260e508eeae881231f3aa02e32))
+* **recipes:** tune every film simulation close behind the leader ([e51517a](https://github.com/p5k369/grawji/commit/e51517a4d90aa6260e508eeae881231f3aa02e32))
+* **recipes:** tune the film simulation white balancing hides ([#176](https://github.com/p5k369/grawji/issues/176)) ([70fb0db](https://github.com/p5k369/grawji/commit/70fb0db606b0bb6d0d832670493724f187b240f1))
+* **ui:** show action icons in dark mode on GTK 4.14 ([#172](https://github.com/p5k369/grawji/issues/172)) ([f628d65](https://github.com/p5k369/grawji/commit/f628d650f24d19c5ff3cd6ddf74e8d9ad814ddf3))
+
+
+### Performance
+
+* **export:** warp 16-bit keystone exports through lsdetect ([#156](https://github.com/p5k369/grawji/issues/156)) ([d441239](https://github.com/p5k369/grawji/commit/d4412398f505a718f0ba30a8992703b60c349c7d))
+
 ## [0.6.0](https://github.com/p5k369/grawji/compare/v0.5.1...v0.6.0) (2026-09-27)
 
 
