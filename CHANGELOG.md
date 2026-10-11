@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/p5k369/grawji/compare/v0.7.0...v0.7.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **recipes:** tell up front how long a recipe search takes ([#179](https://github.com/p5k369/grawji/issues/179)) ([77404fa](https://github.com/p5k369/grawji/commit/77404fa404b1a7d255749672ad0023e59a77e742))
+
 ## [0.7.0](https://github.com/p5k369/grawji/compare/v0.6.0...v0.7.0) (2026-10-11)
 
 
