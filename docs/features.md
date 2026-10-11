@@ -115,12 +115,10 @@ count as they are.
 The look is judged at a small size, where sharpness, noise reduction
 and grain are invisible, so those come back neutral. Switch on **Match
 the texture as well** and the search ends with a pass on full-size
-renders that settles them too. It takes a minute longer and only tells
-something from a full-size export.
+renders that settles them too.
 
 **Renders to spend** is how long the search may take. When they are
-used up it settles for the best it has, and the time shown counts down
-from the start instead of growing. The slider's top means no limit.
+used up it settles for the best it has.
 
 ## Browse, rate and organize
 
