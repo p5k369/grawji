@@ -59,16 +59,6 @@
                 </style>
               </object>
             </child>
-            <child>
-              <object class="GtkButton">
-                <property name="icon-name">edit-undo-symbolic</property>
-                <property name="tooltip-text">Reset to default</property>
-                <property name="action-name">win.reset</property>
-                <style>
-                  <class name="flat"/>
-                </style>
-              </object>
-            </child>
           </object>
         </property>
         <child>
@@ -91,6 +81,41 @@
     </child>
     <child>
       <object class="AdwPreferencesGroup" id="recipe_group">
+        <property name="header-suffix">
+          <object class="GtkBox">
+            <property name="spacing">2</property>
+            <child>
+              <object class="GtkButton">
+                <property name="icon-name">edit-undo-symbolic</property>
+                <property name="tooltip-text">Undo the last edit (Ctrl+Z)</property>
+                <property name="action-name">win.undo</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton">
+                <property name="icon-name">edit-redo-symbolic</property>
+                <property name="tooltip-text">Redo the undone edit (Ctrl+Shift+Z)</property>
+                <property name="action-name">win.redo</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton">
+                <property name="icon-name">edit-clear-all-symbolic</property>
+                <property name="tooltip-text">Reset to default (Ctrl+R)</property>
+                <property name="action-name">win.reset</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </property>
       </object>
     </child>
     <child>

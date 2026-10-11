@@ -18,6 +18,7 @@ from grawji import edit_align, look_match, mainloop
 from grawji.imaging.pixbufs import crop_to_aspect, rgb_array, trim_letterbox
 from grawji.imaging.render import oriented_jpeg, scale_to_edge
 from grawji.search_estimate import SearchEstimate
+from grawji.texture_match import TextureTarget
 
 if TYPE_CHECKING:
     import numpy as np
@@ -46,6 +47,7 @@ class EditMatchRequest:
     start: Recipe
     capabilities: Capabilities
     skin_priority: bool = False
+    texture: bool = False
 
 
 @dataclass
@@ -90,7 +92,8 @@ class EditMatchController:
         stop: threading.Event,
     ) -> look_match.Match:
         """The whole search, on the camera worker thread."""
-        edit = load_edit(request.edit_path)
+        pixbuf = load_edit(request.edit_path)
+        edit = small_edit(pixbuf)
         mainloop.call(callbacks.on_edit, edit)
         if not self._session.is_open:
             self._session.open(request.raf_path)
@@ -107,7 +110,14 @@ class EditMatchController:
         size = (edit.shape[1], edit.shape[0])
         mainloop.call(callbacks.on_view, alignment.warp(frame, size))
         latest: dict[str, Any] = {}
-        estimate = SearchEstimate(request.capabilities, time.monotonic())
+        estimate = SearchEstimate(
+            request.capabilities, time.monotonic(), texture=request.texture
+        )
+
+        def report() -> None:
+            mainloop.call(
+                callbacks.on_estimate, estimate.fraction, estimate.seconds_left
+            )
 
         def render(recipe: Recipe) -> NDArray[np.uint8]:
             jpeg = self._session.render_thumb(recipe)
@@ -116,9 +126,16 @@ class EditMatchController:
             )
             latest["recipe"], latest["pixels"] = recipe, pixels
             estimate.rendered(time.monotonic(), clarity=recipe.clarity != 0)
-            mainloop.call(
-                callbacks.on_estimate, estimate.fraction, estimate.seconds_left
+            report()
+            return pixels
+
+        def render_full(recipe: Recipe) -> NDArray[np.uint8]:
+            jpeg = self._session.render(recipe, full_resolution=True)
+            pixels = rgb_array(
+                crop_to_aspect(oriented_jpeg(jpeg, request.orientation), ratio)
             )
+            estimate.rendered(time.monotonic(), texture=True)
+            report()
             return pixels
 
         def progress(recipe: Recipe, renders: int) -> None:
@@ -131,12 +148,16 @@ class EditMatchController:
             estimate.enter(name)
             mainloop.call(callbacks.on_stage, name)
 
+        frame_size = (frame.shape[1], frame.shape[0])
         target = look_match.LookTarget(
-            edit,
-            alignment,
-            (frame.shape[1], frame.shape[0]),
-            skin_priority=request.skin_priority,
+            edit, alignment, frame_size, skin_priority=request.skin_priority
         )
+        texture = None
+        if request.texture:
+            texture = look_match.TextureSearch(
+                render_full,
+                TextureTarget(rgb_array(pixbuf), alignment, size, frame_size),
+            )
         return look_match.search(
             request.start,
             request.capabilities,
@@ -148,15 +169,25 @@ class EditMatchController:
                 cancelled=stop.is_set,
                 candidates=estimate.plan,
             ),
+            texture=texture,
         )
 
 
-def load_edit(path: str) -> NDArray[np.uint8]:
-    """The edited export, upright, at the comparison size."""
+def load_edit(path: str) -> Any:
+    """The edited export as an upright pixbuf at its full size."""
     try:
         pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
     except GLib.Error as exc:
         msg = "The picked file could not be read as an image."
         raise EditMatchError(msg) from exc
-    pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
+    return pixbuf.apply_embedded_orientation() or pixbuf
+
+
+def small_edit(pixbuf: Any) -> NDArray[np.uint8]:
+    """An edit at the size the look is aligned and compared at."""
     return rgb_array(scale_to_edge(pixbuf, EDIT_EDGE))
+
+
+def edit_preview(path: str) -> NDArray[np.uint8]:
+    """The edited export, upright, at the comparison size."""
+    return small_edit(load_edit(path))

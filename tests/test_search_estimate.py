@@ -1,5 +1,7 @@
 """Tests for the progress and time guess of a recipe-from-edit search."""
 
+import pytest
+
 from grawji import look_match
 from grawji.camera.capabilities import Capabilities
 from grawji.search_estimate import SearchEstimate, describe
@@ -94,3 +96,45 @@ def test_a_third_candidate_lengthens_the_guess() -> None:
     assert three.seconds_left is not None
     assert three.seconds_left > 1.3 * two.seconds_left
     assert three.fraction < two.fraction
+
+
+def test_the_texture_stage_is_planned_and_paced_apart() -> None:
+    """A texture search is counted from the start and timed on its own."""
+    plain = SearchEstimate(CAPS, 0.0)
+    textured = SearchEstimate(CAPS, 0.0, texture=True)
+    for count in range(1, 21):
+        plain.rendered(count * 0.5)
+        textured.rendered(count * 0.5)
+    assert textured.fraction < plain.fraction
+    plain_left = plain.seconds_left
+    textured_left = textured.seconds_left
+    assert plain_left is not None and textured_left is not None
+    assert textured_left > plain_left
+    now = 10.0
+    textured.enter(look_match.STAGE_TEXTURE)
+    before = textured.fraction
+    for _ in range(5):
+        now += 2.0
+        textured.rendered(now, texture=True)
+    assert textured.fraction > before
+    left = textured.seconds_left
+    assert left is not None
+    # 30 planned, 5 done, at the measured two seconds each.
+    assert 40 < left < 60
+
+
+def test_clarity_does_not_slow_the_texture_guess() -> None:
+    """A timed clarity render leaves the full-size guess at thumbnail pace."""
+    plain = SearchEstimate(CAPS, 0.0)
+    textured = SearchEstimate(CAPS, 0.0, texture=True)
+    for count in range(1, 21):
+        plain.rendered(count * 0.5)
+        textured.rendered(count * 0.5)
+    plain.rendered(11.5, clarity=True)
+    textured.rendered(11.5, clarity=True)
+    assert plain.seconds_left is not None
+    assert textured.seconds_left is not None
+    # The 30 planned full-size renders add three thumbnail paces each,
+    # not three clarity paces.
+    extra = textured.seconds_left - plain.seconds_left
+    assert extra == pytest.approx(30 * 1.5, abs=5)

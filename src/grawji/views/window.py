@@ -45,7 +45,7 @@ from grawji.controllers.edit_match import (
     EditMatchController,
     EditMatchError,
     EditMatchRequest,
-    load_edit,
+    edit_preview,
 )
 from grawji.controllers.exports import (
     BatchController,
@@ -380,6 +380,8 @@ class MainWindow(Adw.ApplicationWindow):
                 ("<Ctrl><Shift>c",),
             ),
             ("reset", self._reset_recipe, ("<Ctrl>r",)),
+            ("undo", self._undo_edit, ("<Ctrl>z",)),
+            ("redo", self._redo_edit, ("<Ctrl><Shift>z", "<Ctrl>y")),
             ("preferences", self._on_preferences, ("<Ctrl>comma",)),
             ("export-marked", self._export_marked, ()),
             ("export-shown", self._export_shown, ()),
@@ -412,6 +414,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.add_action(action)
             if app is not None and accels:
                 app.set_accels_for_action(f"win.{name}", list(accels))
+        self._on_history_changed(self.recipe_panel)
 
         grid = Gio.SimpleAction.new_stateful(
             "toggle-grid", None, GLib.Variant.new_boolean(False)
@@ -1049,6 +1052,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.recipe_panel.set_recipe(carry)
             self.recipe_panel.set_exposure(ev)
             self._image_ev = ev
+            self.recipe_panel.reset_history()
             self._render_preview()
             if self.preview_view.comparing:
                 self._render_baseline(self._generation)
@@ -1076,6 +1080,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.recipe_panel.set_active(saved, selection)
         self.recipe_panel.set_exposure(ev)
         self._image_ev = ev
+        self.recipe_panel.reset_history()
         if render_working:
             self._render_preview()
         # Comparing carries across images: refresh the baseline for this one.
@@ -1256,6 +1261,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Wire the recipe panel's settings and signals."""
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self.recipe_panel.connect("changed", self._on_recipe_changed)
+        self.recipe_panel.connect("history-changed", self._on_history_changed)
         self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
         self.recipe_panel.connect(
             "paste-recipe", lambda *_a: self._library.paste_text()
@@ -1333,7 +1339,7 @@ class MainWindow(Adw.ApplicationWindow):
                 f"The camera stopped the search: {error}", retry=True
             )
 
-        def run(skin_priority: bool) -> None:
+        def run(skin_priority: bool, texture: bool) -> None:
             cancel = self._edit_match.start(
                 EditMatchRequest(
                     raf_path=raf_path,
@@ -1342,6 +1348,7 @@ class MainWindow(Adw.ApplicationWindow):
                     start=start,
                     capabilities=capabilities,
                     skin_priority=skin_priority,
+                    texture=texture,
                 ),
                 EditMatchCallbacks(
                     on_edit=match_dialog.show_edit,
@@ -1364,7 +1371,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def preview() -> None:
             try:
-                pixels = load_edit(path)
+                pixels = edit_preview(path)
             except EditMatchError as error:
                 mainloop.call(match_dialog.fail, str(error))
                 return
@@ -1431,6 +1438,26 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.set_active(Recipe(), "Default")
         self.recipe_panel.set_exposure(exposure)
         self._render_if_open()
+
+    def _undo_edit(self) -> None:
+        """Take the last recipe edit back."""
+        if not self.recipe_panel.undo():
+            self.preview_view.set_status("Nothing to undo.")
+
+    def _redo_edit(self) -> None:
+        """Bring the last undone recipe edit back."""
+        if not self.recipe_panel.redo():
+            self.preview_view.set_status("Nothing to redo.")
+
+    def _on_history_changed(self, panel: Any) -> None:
+        """Enable undo and redo only while there is a step to take."""
+        for name, enabled in (
+            ("undo", panel.can_undo),
+            ("redo", panel.can_redo),
+        ):
+            action = self.lookup_action(name)
+            if action is not None:
+                action.set_enabled(enabled)
 
     def _render_if_open(self) -> None:
         """Re-render the preview if an image is open."""

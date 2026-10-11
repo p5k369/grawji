@@ -74,6 +74,9 @@ on the camera's render. `b` cycles the canvas background.
   export (see below), from X RAW STUDIO files (FP1, FP2, FP3) and from
   community recipe text in the clipboard, English or German.
 - **Share** as X RAW STUDIO files or as plain text (`Ctrl+Shift+C`).
+- **Undo and redo** every edit with `Ctrl+Z` and `Ctrl+Shift+Z`: a
+  slider drag is one step, applying a recipe is one step, and the
+  history starts over with each image.
 
 ### Custom banks on the camera
 
@@ -107,6 +110,12 @@ searches, with the real camera engine, for the recipe that comes
 closest to it.
 
 ![The recipe found for the edit](images/edit-match-done.webp)
+
+The look is judged at a small size, where sharpness, noise reduction
+and grain are invisible, so those come back neutral. Switch on **Match
+the texture as well** and the search ends with a pass on full-size
+renders that settles them too. It takes a minute longer and only tells
+something from a full-size export.
 
 ## Browse, rate and organize
 
@@ -161,5 +170,5 @@ image beside the RAF and apply to the preview and every export.
 `Ctrl+?` shows every shortcut. The ones used most: `Left`/`Right` (hold
 to glide through the folder), `g` grid, `c` crop, `h` histogram, `\`
 peek at the original, `Alt+1` to `Alt+5` stars, `x` reject, `e` mark for
-export, `1` to `9` recipe hotkeys, `Ctrl+S` save the recipe, `Ctrl+E`
-export.
+export, `1` to `9` recipe hotkeys, `Ctrl+Z` undo an edit, `Ctrl+S` save
+the recipe, `Ctrl+E` export.

@@ -79,6 +79,13 @@
                     <property name="active">true</property>
                   </object>
                 </child>
+                <child>
+                  <object class="AdwSwitchRow" id="texture_row">
+                    <property name="title">Match the texture as well</property>
+                    <property name="subtitle">Sharpness, noise reduction and grain from full-size renders. Slower, and needs a full-size export</property>
+                    <property name="active">false</property>
+                  </object>
+                </child>
               </object>
             </child>
             <child>

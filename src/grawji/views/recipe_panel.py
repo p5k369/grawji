@@ -25,6 +25,7 @@ from rawji.fuji_enums import (
 )
 
 from grawji.camera.capabilities import FILM_SIMULATIONS, Capabilities
+from grawji.edit_history import EditHistory, Snapshot
 from grawji.recipe import Recipe
 from grawji.settings import FROM_IMAGE, FROM_IMAGE_LABEL
 from grawji.views.widgets import MonoColorGrid, SliderRow, WBShiftGrid
@@ -81,6 +82,7 @@ class RecipePanel(Adw.PreferencesPage):
 
     __gsignals__: ClassVar[dict[str, Any]] = {
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "history-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "apply-recipe": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "paste-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "copy-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -107,6 +109,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._active_unsaved = False
         self._dr_ceiling: str | None = None
         self._active_label = FROM_IMAGE_LABEL
+        self._history = EditHistory()
         self.recipe_button.set_label(FROM_IMAGE_LABEL)
 
         self._apply_actions = Gio.SimpleActionGroup()
@@ -131,6 +134,7 @@ class RecipePanel(Adw.PreferencesPage):
         self._connect_signals()
         self._applied_recipe = self.get_recipe()
         self._update_status()
+        self.reset_history()
 
     def _build_rows(self) -> None:
         """Build every recipe control in the Fuji IQ-menu order."""
@@ -300,9 +304,9 @@ class RecipePanel(Adw.PreferencesPage):
     def _connect_signals(self) -> None:
         """Route every row's edits into the panel's changed signal."""
         for row in self._combo_rows:
-            row.connect("notify::selected", self._on_edited)
+            row.connect("notify::selected", self._on_picked)
         for slider in self._slider_rows:
-            slider.connect_changed(self._on_edited)
+            slider.connect_changed(self._on_dragged)
         self._wb_grid.connect_changed(self._on_wb_shift_changed)
         self.wb_row.connect("notify::selected", self._on_wb_mode_changed)
         self.grain_row.connect("notify::selected", self._on_grain_changed)
@@ -417,6 +421,8 @@ class RecipePanel(Adw.PreferencesPage):
             self._exposure_row.set_value(value)
         finally:
             self._suppress_signals = False
+        self._history.amend(self._snapshot())
+        self.emit("history-changed")
 
     def set_active(
         self, recipe: Recipe, label: str, *, unsaved: bool = False
@@ -428,6 +434,53 @@ class RecipePanel(Adw.PreferencesPage):
         self._applied_recipe = self.get_recipe()
         self._update_status()
         self.sync_combo(label)
+        self._history.push(self._snapshot())
+        self.emit("history-changed")
+
+    def reset_history(self) -> None:
+        """Start the undo history over from the current state."""
+        self._history.reset(self._snapshot())
+        self.emit("history-changed")
+
+    @property
+    def can_undo(self) -> bool:
+        """Whether an earlier state is there to go back to."""
+        return self._history.can_undo
+
+    @property
+    def can_redo(self) -> bool:
+        """Whether an undone state is there to go forward to."""
+        return self._history.can_redo
+
+    def undo(self) -> bool:
+        """Go back one step and report whether there was one."""
+        return self._restore(self._history.undo())
+
+    def redo(self) -> bool:
+        """Go forward one undone step and report whether there was one."""
+        return self._restore(self._history.redo())
+
+    def _snapshot(self) -> Snapshot:
+        """The panel's state as the history records it."""
+        return Snapshot(
+            recipe=self.get_recipe(),
+            applied=self._applied_recipe,
+            label=self._active_label,
+            unsaved=self._active_unsaved,
+        )
+
+    def _restore(self, state: Snapshot | None) -> bool:
+        """Show a history state again and tell listeners it changed."""
+        if state is None:
+            return False
+        self._active_label = state.label
+        self._active_unsaved = state.unsaved
+        self._applied_recipe = state.applied
+        self.set_recipe(state.recipe)
+        self.sync_combo("" if self.is_modified else state.label)
+        self.emit("history-changed")
+        self.emit("changed")
+        return True
 
     @property
     def active_label(self) -> str:
@@ -574,19 +627,29 @@ class RecipePanel(Adw.PreferencesPage):
         if name:
             self.emit("apply-recipe", name)
 
-    def _on_edited(self, *_args: object) -> None:
+    def _on_picked(self, *_args: object) -> None:
+        """Handle a combo choice, each one its own undo step."""
+        self._on_edited(merge=False)
+
+    def _on_dragged(self, *_args: object) -> None:
+        """Handle a slider move, a drag folding into one undo step."""
+        self._on_edited(merge=True)
+
+    def _on_edited(self, *, merge: bool) -> None:
         """Update the indicator and emit changed on a user edit."""
         if self._suppress_signals:
             return
         self._update_status()
         # A manual edit no longer matches a saved recipe.
         self.sync_combo("")
+        self._history.push(self._snapshot(), merge=merge)
+        self.emit("history-changed")
         self.emit("changed")
 
     def _on_wb_shift_changed(self, _red: int, _blue: int) -> None:
         """Handle a white-balance shift grid edit."""
         self._update_wb_shift_label()
-        self._on_edited()
+        self._on_edited(merge=True)
 
     def _update_wb_shift_label(self) -> None:
         """Show the grid marker's red/blue position next to the grid."""
@@ -615,7 +678,7 @@ class RecipePanel(Adw.PreferencesPage):
     def _on_mono_grid_changed(self, _wc: int, _mg: int) -> None:
         """Handle a Monochromatic Color grid edit."""
         self._update_mono_label()
-        self._on_edited()
+        self._on_edited(merge=True)
 
     def _update_mono_label(self) -> None:
         """Show the grid marker's warm-cool / magenta-green position."""

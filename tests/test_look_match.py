@@ -74,18 +74,102 @@ def test_a_b_and_w_edit_finds_the_b_and_w_sim() -> None:
     assert match.recipe.highlights == 2.0
 
 
-def test_grain_renders_off_and_comes_back() -> None:
-    """Grain is off while rendering and the start's grain is kept."""
+def test_grain_renders_off_and_the_texture_stays_neutral() -> None:
+    """Without a texture search the texture controls come back neutral."""
     seen: list[str] = []
 
     def render(recipe: Recipe) -> np.ndarray:
         seen.append(recipe.grain)
         return fake_render(recipe)
 
-    start = Recipe(grain="Strong", grain_size="Large")
+    start = Recipe(
+        grain="Strong",
+        grain_size="Large",
+        sharpness=-3,
+        noise_reduction=-4,
+        smooth_skin="Strong",
+        color_space="AdobeRGB",
+    )
     match = look_match.search(start, CAPS, render, target_for(Recipe()))
     assert set(seen) == {"Off"}
-    assert (match.recipe.grain, match.recipe.grain_size) == ("Strong", "Large")
+    found = match.recipe
+    assert (found.grain, found.grain_size) == ("Off", "Small")
+    assert (found.sharpness, found.noise_reduction) == (0, 0)
+    assert found.smooth_skin == "Off"
+    assert found.color_space == "AdobeRGB"
+
+
+class TextureEngine:
+    """A full-size camera whose texture is read straight off the render."""
+
+    def __init__(self) -> None:
+        """Count the renders."""
+        self.rendered: list[Recipe] = []
+
+    def render(self, recipe: Recipe) -> np.ndarray:
+        """A one-pixel render carrying the texture controls."""
+        self.rendered.append(recipe)
+        grain = {"Off": 0, "Weak": 1, "Strong": 2}[recipe.grain]
+        size = 1 if recipe.grain_size == "Large" else 0
+        return np.array(
+            [[[recipe.sharpness + 4, recipe.noise_reduction + 4, 0]]],
+            dtype=np.uint8,
+        ) + np.array([[[0, 0, grain * 2 + size]]], dtype=np.uint8)
+
+
+class TextureTruth:
+    """Scores a one-pixel render against the wanted texture."""
+
+    def __init__(self, sharpness: int, nr: int, grain: int) -> None:
+        """Remember the wanted values as the engine encodes them."""
+        self.wanted = np.array([sharpness + 4, nr + 4, grain], np.float64)
+
+    def compare(self, render: np.ndarray) -> float:
+        """The city-block distance to the wanted texture, scaled down."""
+        return (
+            float(np.abs(render[0, 0].astype(np.float64) - self.wanted).sum())
+            * 0.1
+        )
+
+
+def test_the_texture_stage_settles_the_texture_controls_last() -> None:
+    """With a texture search, sharpness, NR and grain are found at the end."""
+    truth = Recipe(film_simulation="ClassicChrome", shadows=1.0, color=-1)
+    engine = TextureEngine()
+    stages: list[str] = []
+    progress: list[tuple[Recipe, int]] = []
+    hooks = SearchHooks(
+        stage=stages.append, progress=lambda r, n: progress.append((r, n))
+    )
+    caps = replace(CAPS, has_grain_size=True)
+    # Sharpness +2, NR -3, grain Strong and Large (2 * 2 + 1).
+    texture = look_match.TextureSearch(engine.render, TextureTruth(2, -3, 5))
+    match = look_match.search(
+        Recipe(), caps, fake_render, target_for(truth), hooks, texture
+    )
+    found = match.recipe
+    assert stages[-1] == look_match.STAGE_TEXTURE
+    assert (found.sharpness, found.noise_reduction) == (2, -3)
+    assert (found.grain, found.grain_size) == ("Strong", "Large")
+    assert found.film_simulation == "ClassicChrome"
+    assert (found.shadows, found.color) == (1.0, -1)
+    assert engine.rendered
+    assert all(r.film_simulation == "ClassicChrome" for r in engine.rendered)
+    assert match.renders > len(engine.rendered)
+    assert progress[-1][0] == replace(found, color_space="sRGB")
+    assert match.renders - len(engine.rendered) < progress[-1][1]
+    assert progress[-1][1] <= match.renders
+
+
+def test_grain_size_is_only_tried_where_the_body_has_it() -> None:
+    """A body without grain size never renders Large."""
+    engine = TextureEngine()
+    texture = look_match.TextureSearch(engine.render, TextureTruth(0, 0, 5))
+    match = look_match.search(
+        Recipe(), CAPS, fake_render, target_for(Recipe()), texture=texture
+    )
+    assert all(r.grain_size == "Small" for r in engine.rendered)
+    assert match.recipe.grain == "Strong"
 
 
 def test_only_the_bodys_controls_are_tried() -> None:
@@ -251,8 +335,8 @@ def test_the_result_does_not_depend_on_the_start() -> None:
         fake_render,
         target,
     )
-    assert replace(odd_start.recipe, sharpness=0) == plain_start.recipe
-    assert odd_start.recipe.sharpness == -2
+    assert odd_start.recipe == plain_start.recipe
+    assert odd_start.recipe.sharpness == 0
 
 
 def test_both_white_balance_modes_are_tried() -> None:

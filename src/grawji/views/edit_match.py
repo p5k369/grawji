@@ -36,6 +36,7 @@ _STAGES = {
     look_match.STAGE_FINE: "Fine tuning…",
     look_match.STAGE_RECHECK: "Checking the other film simulations…",
     look_match.STAGE_CLARITY: "Trying clarity…",
+    look_match.STAGE_TEXTURE: "Matching the texture on full-size renders…",
 }
 # Limits of the softened mean delta E for the verdicts, closest first.
 _VERDICTS = (
@@ -72,12 +73,13 @@ class EditMatchDialog(Adw.Dialog):
     start_button = Gtk.Template.Child()
     apply_button = Gtk.Template.Child()
     skin_row = Gtk.Template.Child()
+    texture_row = Gtk.Template.Child()
     progress_bar = Gtk.Template.Child()
 
     def __init__(
         self,
         on_apply: Callable[[Recipe], None],
-        on_start: Callable[[bool], None],
+        on_start: Callable[[bool, bool], None],
     ) -> None:
         """Create the dialog."""
         super().__init__()
@@ -153,6 +155,7 @@ class EditMatchDialog(Adw.Dialog):
         self.progress_bar.set_visible(False)
         self.cancel_button.set_label("Close")
         self.skin_row.set_sensitive(True)
+        self.texture_row.set_sensitive(True)
         self.start_button.set_label("Search Again")
         self.start_button.set_visible(again)
         self.start_button.set_sensitive(again)
@@ -162,6 +165,7 @@ class EditMatchDialog(Adw.Dialog):
         self.start_button.set_visible(False)
         self.apply_button.set_visible(False)
         self.skin_row.set_sensitive(False)
+        self.texture_row.set_sensitive(False)
         self.spinner.set_visible(True)
         self.spinner.set_spinning(True)
         self.progress_bar.set_fraction(0.0)
@@ -170,7 +174,9 @@ class EditMatchDialog(Adw.Dialog):
         self.cancel_button.set_label("Cancel")
         self.detail_label.set_label("")
         self.status_label.set_label("Finding the edit in the shot…")
-        self._on_start(self.skin_row.get_active())
+        self._on_start(
+            self.skin_row.get_active(), self.texture_row.get_active()
+        )
 
     def _on_apply_clicked(self, *_args: Any) -> None:
         """Hand the found recipe on and close."""

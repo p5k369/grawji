@@ -35,6 +35,8 @@ _SHORTCUT_GROUPS = {
         ("Save recipe", "<Ctrl>S"),
         ("Copy recipe as text", "<Ctrl><Shift>C"),
         ("Paste recipe from clipboard", "<Ctrl><Shift>V"),
+        ("Undo the last edit", "<Ctrl>Z"),
+        ("Redo the undone edit", "<Ctrl><Shift>Z"),
         ("Reset to default", "<Ctrl>R"),
         ("Apply the recipe assigned to a number key (1 to 9)", "1"),
         ("Develop a RAW+JPEG shot from the RAW or the camera JPEG", "j"),

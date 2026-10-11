@@ -389,16 +389,22 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     from grawji.views.edit_match import EditMatchDialog
 
     applied: list[Recipe] = []
-    started: list[bool] = []
-    dialog = EditMatchDialog(on_apply=applied.append, on_start=started.append)
+    started: list[tuple[bool, bool]] = []
+    dialog = EditMatchDialog(
+        on_apply=applied.append,
+        on_start=lambda skin, texture: started.append((skin, texture)),
+    )
     pixels = np.zeros((20, 30, 3), np.uint8)
     assert not dialog.start_button.get_sensitive()
     dialog.show_edit(pixels)
     assert dialog.start_button.get_sensitive()
+    assert not dialog.texture_row.get_active()
     dialog.skin_row.set_active(False)
+    dialog.texture_row.set_active(True)
     dialog.start_button.emit("clicked")
-    assert started == [False]
+    assert started == [(False, True)]
     assert not dialog.skin_row.get_sensitive()
+    assert not dialog.texture_row.get_sensitive()
     assert dialog.progress_bar.get_visible()
     dialog.set_cancel(lambda: None)
     dialog.set_estimate(0.25, 150.0)
@@ -416,6 +422,7 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     assert dialog.apply_button.get_visible()
     assert dialog.start_button.get_label() == "Search Again"
     assert dialog.skin_row.get_sensitive()
+    assert dialog.texture_row.get_sensitive()
     assert not dialog.progress_bar.get_visible()
     dialog.apply_button.emit("clicked")
     assert applied == [found]
@@ -427,7 +434,7 @@ def test_closing_the_edit_match_dialog_cancels_the_search() -> None:
 
     stopped: list[bool] = []
     dialog = EditMatchDialog(
-        on_apply=lambda _recipe: None, on_start=lambda _skin: None
+        on_apply=lambda _recipe: None, on_start=lambda _skin, _texture: None
     )
     dialog.set_cancel(lambda: stopped.append(True))
     dialog.emit("closed")
@@ -550,3 +557,109 @@ def test_compare_guard_drops_stale_and_toggled_off(
     window._on_baseline_rendered(5, b"jpeg")
     assert ("baseline", b"jpeg") in calls
     assert ("compare", True) in calls
+
+
+def test_undo_takes_a_combo_pick_back_and_redo_restores_it() -> None:
+    """A combo choice is one undo step, and redo brings it back."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(film_simulation="Provia"), "Summer")
+    panel.reset_history()
+    assert not panel.can_undo
+    changes: list[str] = []
+    panel.connect("changed", lambda *_a: changes.append("changed"))
+    panel.film_row.set_selected(panel._film_sims.index("Velvia"))
+    assert panel.get_recipe().film_simulation == "Velvia"
+    assert panel.is_modified
+    assert panel.can_undo
+    assert panel.undo()
+    assert panel.get_recipe().film_simulation == "Provia"
+    assert not panel.is_modified
+    assert panel.recipe_button.get_label() == "—"
+    assert panel.can_redo
+    assert panel.redo()
+    assert panel.get_recipe().film_simulation == "Velvia"
+    assert not panel.redo()
+    # The pick, the undo and the redo each ask for a render.
+    assert changes == ["changed"] * 3
+
+
+def test_a_slider_drag_undoes_in_one_step() -> None:
+    """Every intermediate slider value folds into one undo entry."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(), "Base")
+    panel.reset_history()
+    for value in (1, 2, 3, 4):
+        panel._color_row.set_value(value)
+    assert panel.get_recipe().color == 4
+    assert panel.undo()
+    assert panel.get_recipe().color == 0
+    assert not panel.can_undo
+
+
+def test_undo_crosses_a_recipe_application() -> None:
+    """Applying a recipe is a step, so undo brings the edit before it back."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(), "Base")
+    panel.reset_history()
+    panel._sharpness_row.set_value(2)
+    panel.set_active(Recipe(film_simulation="Acros"), "Mono")
+    panel.set_exposure(1.0)
+    assert panel.active_label == "Mono"
+    assert panel.undo()
+    assert panel.get_recipe().sharpness == 2
+    assert panel.get_recipe().exposure == 0.0
+    assert panel.active_label == "Base"
+    assert panel.is_modified
+    assert panel.redo()
+    assert panel.active_label == "Mono"
+    assert panel.get_recipe().exposure == 1.0
+    assert not panel.is_modified
+
+
+def test_a_fresh_image_starts_the_history_over() -> None:
+    """Undo never reaches into the previous image's edits."""
+    from grawji.recipe import Recipe
+    from grawji.views.recipe_panel import RecipePanel
+
+    panel = RecipePanel()
+    pump()
+    panel.set_active(Recipe(), "Base")
+    panel._color_row.set_value(3)
+    panel.set_active(Recipe(), "From image")
+    panel.reset_history()
+    assert not panel.can_undo
+    assert not panel.can_redo
+    assert not panel.undo()
+
+
+def test_the_window_enables_undo_only_with_a_step_to_take(
+    window: Any,
+) -> None:
+    """The undo and redo actions follow the panel's history."""
+    from grawji.recipe import Recipe
+
+    undo = window.lookup_action("undo")
+    redo = window.lookup_action("redo")
+    assert undo is not None and redo is not None
+    window.recipe_panel.set_active(Recipe(), "Base")
+    window.recipe_panel.reset_history()
+    assert not undo.get_enabled()
+    assert not redo.get_enabled()
+    window.recipe_panel._color_row.set_value(1)
+    assert undo.get_enabled()
+    assert not redo.get_enabled()
+    undo.activate(None)
+    assert not undo.get_enabled()
+    assert redo.get_enabled()
