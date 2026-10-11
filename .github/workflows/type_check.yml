@@ -19,13 +19,11 @@ jobs:
         python-version: "3.11"
 
     - name: Install dependencies
-      # mypy resolves gi.*/rawji.* via ignore_missing_imports (see
-      # pyproject), so the native deps aren't needed here. pytest must be
-      # present for mypy to resolve the test imports.
       run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libcairo2-dev pkg-config
         python -m pip install --upgrade pip
-        pip install -e . --no-deps
-        pip install mypy pytest numpy lsdetect
+        pip install pre-commit
 
     - name: Analysing the code with mypy
-      run: python -m mypy src tests
+      run: pre-commit run --hook-stage pre-push mypy --all-files

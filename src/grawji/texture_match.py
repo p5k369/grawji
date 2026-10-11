@@ -201,7 +201,7 @@ class TextureTarget:
         columns, rows = width // WINDOW, height // WINDOW
         if not columns or not rows or self._frame_size is None:
             return []
-        inverse = np.linalg.inv(matrix)
+        inverse = np.asarray(np.linalg.inv(matrix), dtype=np.float64)
         small = _gray(
             area_resize(
                 edit[: rows * WINDOW, : columns * WINDOW],

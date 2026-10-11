@@ -40,7 +40,7 @@ test:
 lint:
 	$(VENV)/bin/ruff check src tests
 	$(VENV)/bin/ruff format --check src tests
-	$(PY) -m mypy src tests
+	$(VENV)/bin/pre-commit run --hook-stage pre-push mypy --all-files
 
 format:
 	$(VENV)/bin/ruff format src tests

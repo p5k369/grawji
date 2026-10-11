@@ -128,7 +128,7 @@ check_untyped_defs = true
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
-module = ["rawji.*", "usb.*", "cairo", "lensfunpy"]
+module = ["rawji.*", "usb.*", "lensfunpy"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
