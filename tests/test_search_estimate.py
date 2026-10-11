@@ -119,8 +119,8 @@ def test_the_texture_stage_is_planned_and_paced_apart() -> None:
     assert textured.fraction > before
     left = textured.seconds_left
     assert left is not None
-    # 30 planned, 5 done, at the measured two seconds each.
-    assert 40 < left < 60
+    # 20 planned, 5 done, at the measured two seconds each.
+    assert 20 < left < 40
 
 
 def test_clarity_does_not_slow_the_texture_guess() -> None:
@@ -134,7 +134,7 @@ def test_clarity_does_not_slow_the_texture_guess() -> None:
     textured.rendered(11.5, clarity=True)
     assert plain.seconds_left is not None
     assert textured.seconds_left is not None
-    # The 30 planned full-size renders add three thumbnail paces each,
-    # not three clarity paces.
+    # The 20 planned full-size renders add 4.5 thumbnail paces each,
+    # not 4.5 clarity paces.
     extra = textured.seconds_left - plain.seconds_left
-    assert extra == pytest.approx(30 * 1.5, abs=5)
+    assert extra == pytest.approx(20 * 0.5 * 4.5, abs=5)

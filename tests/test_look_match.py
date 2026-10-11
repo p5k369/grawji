@@ -161,6 +161,31 @@ def test_the_texture_stage_settles_the_texture_controls_last() -> None:
     assert progress[-1][1] <= match.renders
 
 
+# Grain codes as TextureEngine renders them, Off/Small to Strong/Large.
+_XE5_GRAIN = {0: 0.75, 1: 0.75, 2: 0.30, 3: 0.32, 4: 0.43, 5: 0.02}
+
+
+class GrainTable:
+    """Scores grain the way the X-E5 did for a strong, large grain edit."""
+
+    def compare(self, render: np.ndarray) -> float:
+        """The measured grain gap plus a small sharpness and NR gap."""
+        sharpness, nr, grain = (int(v) for v in render[0, 0])
+        return _XE5_GRAIN[grain] + 0.1 * (abs(sharpness - 4) + abs(nr - 4))
+
+
+def test_grain_strength_and_size_are_chosen_together() -> None:
+    """A strong large grain is found although its halves score worse."""
+    engine = TextureEngine()
+    texture = look_match.TextureSearch(engine.render, GrainTable())
+    caps = replace(CAPS, has_grain_size=True)
+    match = look_match.search(
+        Recipe(), caps, fake_render, target_for(Recipe()), texture=texture
+    )
+    assert (match.recipe.grain, match.recipe.grain_size) == ("Strong", "Large")
+    assert (match.recipe.sharpness, match.recipe.noise_reduction) == (0, 0)
+
+
 def test_grain_size_is_only_tried_where_the_body_has_it() -> None:
     """A body without grain size never renders Large."""
     engine = TextureEngine()
@@ -268,7 +293,9 @@ def test_stages_are_announced_in_order() -> None:
     assert stages[-1] == look_match.STAGE_RECHECK
     middle = stages[1:-1]
     assert middle[0] == look_match.STAGE_LOOK
-    assert 1 <= middle.count(look_match.STAGE_LOOK) <= look_match._CANDIDATES
+    assert (
+        1 <= middle.count(look_match.STAGE_LOOK) <= look_match._CANDIDATES[1]
+    )
     assert look_match.STAGE_FINE in middle
 
 
@@ -387,7 +414,8 @@ def test_likeness_sets_texture_aside() -> None:
 def test_the_leader_before_white_balance_is_tuned_too() -> None:
     """A simulation hidden by the white-balanced ranking still gets tuned."""
     sims = [
-        Recipe(film_simulation=sim) for sim in ("Provia", "Velvia", "Astia")
+        (score, Recipe(film_simulation=sim))
+        for score, sim in ((1.0, "Provia"), (2.0, "Velvia"), (3.0, "Astia"))
     ]
     unbalanced = {"Provia": 3.0, "Velvia": 2.0, "Astia": 1.0}
     leaders = look_match._leaders(
@@ -399,6 +427,36 @@ def test_the_leader_before_white_balance_is_tuned_too() -> None:
         "Astia",
     ]
     assert len(look_match._leaders(sims[:2], lambda _r: 0.0)) == 2
+
+
+def test_simulations_close_behind_the_leader_are_tuned_too() -> None:
+    """Every simulation within the slack is tuned, up to the most."""
+    ranked = [
+        (score, Recipe(film_simulation=sim))
+        for score, sim in (
+            (3.433, "Provia"),
+            (3.590, "RealaAce"),
+            (3.825, "ClassicChrome"),
+            (3.949, "ProNegStd"),
+            (4.153, "ProNegHi"),
+        )
+    ]
+    leaders = look_match._leaders(ranked, lambda _r: 0.0)
+    assert [r.film_simulation for r in leaders] == [
+        "Provia",
+        "RealaAce",
+        "ClassicChrome",
+    ]
+    crowded = [
+        (3.0 + 0.01 * n, Recipe(film_simulation=s))
+        for n, s in enumerate(
+            ("Provia", "Velvia", "Astia", "Eterna", "Sepia", "Acros")
+        )
+    ]
+    assert (
+        len(look_match._leaders(crowded, lambda _r: 0.0))
+        == look_match._CANDIDATES[1]
+    )
 
 
 def test_the_search_says_how_many_simulations_it_tunes() -> None:

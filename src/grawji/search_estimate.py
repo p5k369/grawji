@@ -25,9 +25,9 @@ _RECHECK_POLISH = 10
 _CLARITY_RENDERS = 10
 # What the texture stage takes, and how much slower its full-size
 # renders are than the thumbnails until one was timed.
-_TEXTURE_RENDERS = 30
-_TEXTURE_SLOWER = 3.0
-_TEXTURE_FLOOR = 4
+_TEXTURE_RENDERS = 20
+_TEXTURE_SLOWER = 4.5
+_TEXTURE_FLOOR = 8
 # Renders still ahead at the least, before and within the final check.
 _TUNING_FLOOR = 60
 _RECHECK_FLOOR = 10
@@ -98,6 +98,8 @@ class SearchEstimate:
         elif stage == look_match.STAGE_TEXTURE and not self._in_texture:
             self._in_texture = True
             self._expected = self._done + self._texture_ahead
+        if self._done >= _MEASURED:
+            self._seconds = self._guess(self._remaining())
 
     def plan(self, candidates: int) -> None:
         """Note how many film simulations the search will tune."""
