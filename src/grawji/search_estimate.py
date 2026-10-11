@@ -16,13 +16,14 @@ _RENDERS_PER_CONTROL = 14
 # The controls every body has: tones, exposure, both shifts, color, white
 # balance and dynamic range.
 _BASE_CONTROLS = 8
-# Half tone steps cost about one more control each for highlights and
-# shadows.
+# Half tone steps cost about one more control each for highlights and shadows.
 _HALF_STEP_CONTROLS = 2
 # What the final check adds to one render per film simulation, and what
 # trying clarity on the finalists takes.
 _RECHECK_POLISH = 10
 _CLARITY_RENDERS = 10
+# How much slower a clarity render is than a thumbnail until one was timed.
+_CLARITY_SLOWER = 3.0
 # What the texture stage takes, and how much slower its full-size
 # renders are than the thumbnails until one was timed.
 _TEXTURE_RENDERS = 20
@@ -50,7 +51,12 @@ class SearchEstimate:
     """Counts the camera's renders and guesses what is left."""
 
     def __init__(
-        self, capabilities: Capabilities, now: float, *, texture: bool = False
+        self,
+        capabilities: Capabilities,
+        now: float,
+        *,
+        texture: bool = False,
+        budget: int | None = None,
     ) -> None:
         """Start counting for a body at this monotonic time.
 
@@ -58,7 +64,14 @@ class SearchEstimate:
             capabilities: What the body offers.
             now: The time the search started.
             texture: Whether the search ends with the texture stage.
+            budget: The thumbnail renders the search may make at most.
         """
+        self._budget = budget
+        self._closing_ahead = (
+            round((1.0 - look_match.TUNING_SHARE) * budget)
+            if budget is not None and capabilities.has_clarity
+            else 0
+        )
         self._sims = len(capabilities.film_simulations)
         self._last_stage = self._sims + _RECHECK_POLISH
         if capabilities.has_clarity:
@@ -71,6 +84,8 @@ class SearchEstimate:
         )
         self._candidates = _DEFAULT_CANDIDATES
         self._expected = self._sims + 1 + self._tuning_left(0)
+        if budget is not None:
+            self._expected = max(budget, self._sims) + self._texture_ahead
         self._looks = 0
         self._tuning_began = 0
         self._recheck = False
@@ -84,6 +99,12 @@ class SearchEstimate:
 
     def enter(self, stage: str) -> None:
         """Note a new stage and correct the guess with what it tells."""
+        if self._budget is not None:
+            if stage == look_match.STAGE_TEXTURE:
+                self._in_texture = True
+            if self._done >= _MEASURED:
+                self._seconds = self._guess(self._remaining())
+            return
         if stage == look_match.STAGE_LOOK:
             self._looks += 1
             if self._looks == 1:
@@ -104,6 +125,8 @@ class SearchEstimate:
     def plan(self, candidates: int) -> None:
         """Note how many film simulations the search will tune."""
         self._candidates = candidates
+        if self._budget is not None:
+            return
         tuned = max(0, self._looks - 1)
         self._expected = self._done + self._tuning_left(tuned)
 
@@ -160,6 +183,20 @@ class SearchEstimate:
             texture_pace = sum(self._texture) / len(self._texture)
         else:
             texture_pace = plain * _TEXTURE_SLOWER
+        if self._budget is not None:
+            clarity = (
+                sum(self._clarity) / len(self._clarity)
+                if self._clarity
+                else plain * _CLARITY_SLOWER
+            )
+            texture_part = min(self._texture_ahead, remaining)
+            closing_part = min(self._closing_ahead, remaining - texture_part)
+            plain_part = remaining - texture_part - closing_part
+            return (
+                plain * plain_part
+                + clarity * closing_part
+                + texture_pace * texture_part
+            )
         if self._in_texture:
             return texture_pace * remaining
         ahead = min(self._texture_ahead, remaining)
@@ -167,6 +204,8 @@ class SearchEstimate:
 
     def _remaining(self) -> int:
         """The renders still ahead."""
+        if self._budget is not None:
+            return max(self._expected - self._done, 1)
         if self._in_texture:
             floor = _TEXTURE_FLOOR
         elif self._recheck:

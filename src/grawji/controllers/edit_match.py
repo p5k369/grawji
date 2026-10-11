@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import threading
 import time
 from collections.abc import Callable
@@ -15,6 +16,7 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, GLib
 
 from grawji import edit_align, look_match, mainloop
+from grawji.imaging import colorspace, imagemeta
 from grawji.imaging.pixbufs import crop_to_aspect, rgb_array, trim_letterbox
 from grawji.imaging.render import oriented_jpeg, scale_to_edge
 from grawji.search_estimate import SearchEstimate
@@ -31,6 +33,8 @@ if TYPE_CHECKING:
 
 # The edit is aligned and compared at this long edge.
 EDIT_EDGE = 384
+# Thumbnail renders a search may make before it closes with what it has.
+RENDER_BUDGET = 900
 
 
 class EditMatchError(Exception):
@@ -48,6 +52,7 @@ class EditMatchRequest:
     capabilities: Capabilities
     skin_priority: bool = False
     texture: bool = False
+    budget: int | None = RENDER_BUDGET
 
 
 @dataclass
@@ -92,8 +97,8 @@ class EditMatchController:
         stop: threading.Event,
     ) -> look_match.Match:
         """The whole search, on the camera worker thread."""
-        pixbuf = load_edit(request.edit_path)
-        edit = small_edit(pixbuf)
+        pixbuf, space = load_edit(request.edit_path)
+        edit = small_edit(pixbuf, space)
         mainloop.call(callbacks.on_edit, edit)
         if not self._session.is_open:
             self._session.open(request.raf_path)
@@ -111,7 +116,10 @@ class EditMatchController:
         mainloop.call(callbacks.on_view, alignment.warp(frame, size))
         latest: dict[str, Any] = {}
         estimate = SearchEstimate(
-            request.capabilities, time.monotonic(), texture=request.texture
+            request.capabilities,
+            time.monotonic(),
+            texture=request.texture,
+            budget=request.budget,
         )
 
         def report() -> None:
@@ -168,26 +176,40 @@ class EditMatchController:
                 stage=stage,
                 cancelled=stop.is_set,
                 candidates=estimate.plan,
+                budget=request.budget,
             ),
             texture=texture,
         )
 
 
-def load_edit(path: str) -> Any:
-    """The edited export as an upright pixbuf at its full size."""
+def load_edit(path: str) -> tuple[Any, str]:
+    """The edited export as an upright full-size pixbuf, and its space."""
     try:
         pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
     except GLib.Error as exc:
         msg = "The picked file could not be read as an image."
         raise EditMatchError(msg) from exc
-    return pixbuf.apply_embedded_orientation() or pixbuf
+    icc = pixbuf.get_option("icc-profile")
+    space = colorspace.space_of(
+        base64.b64decode(icc) if icc else None,
+        imagemeta.exif_interop_index(path),
+    )
+    return (pixbuf.apply_embedded_orientation() or pixbuf), space
 
 
-def small_edit(pixbuf: Any) -> NDArray[np.uint8]:
-    """An edit at the size the look is aligned and compared at."""
-    return rgb_array(scale_to_edge(pixbuf, EDIT_EDGE))
+def small_edit(pixbuf: Any, space: str = colorspace.SRGB) -> NDArray[np.uint8]:
+    """An edit at the size the look is compared at.
+
+    The look is judged in sRGB, as the camera renders its thumbnails,
+    so an AdobeRGB edit is brought over here. The full-size pixels the
+    texture stage looks at stay as they are: it measures gray detail,
+    which the space hardly touches.
+    """
+    return colorspace.to_srgb(
+        rgb_array(scale_to_edge(pixbuf, EDIT_EDGE)), space
+    )
 
 
 def edit_preview(path: str) -> NDArray[np.uint8]:
     """The edited export, upright, at the comparison size."""
-    return small_edit(load_edit(path))
+    return small_edit(*load_edit(path))

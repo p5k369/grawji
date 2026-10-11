@@ -14,6 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 from grawji import look_match
+from grawji.controllers.edit_match import RENDER_BUDGET
 from grawji.recipe_text import film_sim_label
 from grawji.search_estimate import describe
 from grawji.views.textures import texture_for_rgb
@@ -48,6 +49,9 @@ _FAR = (
     "Only part of your edit. Local work like vignettes or masks is beyond"
     " what a recipe can do."
 )
+# The budget slider moves in steps of this many renders
+BUDGET_STEP = 100
+NO_LIMIT = 1600
 
 
 def verdict(distance: float) -> str:
@@ -74,12 +78,15 @@ class EditMatchDialog(Adw.Dialog):
     apply_button = Gtk.Template.Child()
     skin_row = Gtk.Template.Child()
     texture_row = Gtk.Template.Child()
+    budget_row = Gtk.Template.Child()
+    budget_scale = Gtk.Template.Child()
     progress_bar = Gtk.Template.Child()
 
     def __init__(
         self,
         on_apply: Callable[[Recipe], None],
-        on_start: Callable[[bool, bool], None],
+        on_start: Callable[[bool, bool, int | None], None],
+        budget: int | None = RENDER_BUDGET,
     ) -> None:
         """Create the dialog."""
         super().__init__()
@@ -87,10 +94,31 @@ class EditMatchDialog(Adw.Dialog):
         self._on_start = on_start
         self._cancel: Callable[[], None] | None = None
         self._found: Recipe | None = None
+        self.budget_scale.add_mark(RENDER_BUDGET, Gtk.PositionType.BOTTOM)
+        self.budget_scale.set_format_value_func(self._budget_text)
+        self.budget_scale.set_value(NO_LIMIT if budget is None else budget)
+        self.budget_scale.connect("value-changed", self._on_budget_dragged)
         self.cancel_button.connect("clicked", lambda *_a: self.close())
         self.start_button.connect("clicked", self._on_start_clicked)
         self.apply_button.connect("clicked", self._on_apply_clicked)
         self.connect("closed", self._on_closed)
+
+    @property
+    def budget(self) -> int | None:
+        """The renders the next search may spend."""
+        value = round(self.budget_scale.get_value())
+        return None if value >= NO_LIMIT else value
+
+    @staticmethod
+    def _budget_text(_scale: Gtk.Scale, value: float) -> str:
+        """The slider's value in words."""
+        return "No limit" if value >= NO_LIMIT else f"{round(value)}"
+
+    def _on_budget_dragged(self, scale: Gtk.Scale) -> None:
+        """Snap the slider to whole steps."""
+        snapped = round(scale.get_value() / BUDGET_STEP) * BUDGET_STEP
+        if snapped != scale.get_value():
+            scale.set_value(snapped)
 
     def set_cancel(self, cancel: Callable[[], None]) -> None:
         """What stops the search when the dialog closes early."""
@@ -156,6 +184,7 @@ class EditMatchDialog(Adw.Dialog):
         self.cancel_button.set_label("Close")
         self.skin_row.set_sensitive(True)
         self.texture_row.set_sensitive(True)
+        self.budget_row.set_sensitive(True)
         self.start_button.set_label("Search Again")
         self.start_button.set_visible(again)
         self.start_button.set_sensitive(again)
@@ -166,6 +195,7 @@ class EditMatchDialog(Adw.Dialog):
         self.apply_button.set_visible(False)
         self.skin_row.set_sensitive(False)
         self.texture_row.set_sensitive(False)
+        self.budget_row.set_sensitive(False)
         self.spinner.set_visible(True)
         self.spinner.set_spinning(True)
         self.progress_bar.set_fraction(0.0)
@@ -175,7 +205,9 @@ class EditMatchDialog(Adw.Dialog):
         self.detail_label.set_label("")
         self.status_label.set_label("Finding the edit in the shot…")
         self._on_start(
-            self.skin_row.get_active(), self.texture_row.get_active()
+            self.skin_row.get_active(),
+            self.texture_row.get_active(),
+            self.budget,
         )
 
     def _on_apply_clicked(self, *_args: Any) -> None:

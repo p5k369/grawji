@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import itertools
 import math
 from collections.abc import Callable
@@ -128,10 +129,64 @@ class SearchHooks:
     stage: Stage | None = None
     cancelled: Callable[[], bool] | None = None
     candidates: Callable[[int], None] | None = None
+    budget: int | None = None
 
 
 class SearchCancelledError(Exception):
     """The search was stopped before it finished."""
+
+
+class SearchBudgetError(Exception):
+    """The search used up the renders it was given."""
+
+
+# The share of a budget the leaders' tuning may spend, the rest being
+# kept for the closing stages, the recheck and clarity above all.
+TUNING_SHARE = 0.7
+
+
+class _Budget:
+    """How the renders a search may spend are shared out."""
+
+    def __init__(self, total: int | None, spent: int) -> None:
+        self._total = total
+        self._spent = spent
+
+    def tuning(self, index: int, count: int) -> int | None:
+        """The limit while tuning this one of so many leaders."""
+        if self._total is None:
+            return None
+        left = max(self._total - self._spent, 0)
+        return self._spent + round(left * TUNING_SHARE * (index + 1) / count)
+
+    def closing(self) -> int | None:
+        """The limit for the closing stages."""
+        if self._total is None:
+            return None
+        return max(self._total, self._spent)
+
+
+class _Fallback:
+    """The best recipe so far, to close with when the renders run out."""
+
+    def __init__(self) -> None:
+        self.best: tuple[Recipe, float] | None = None
+
+    def note(self, recipe: Recipe, score: float) -> None:
+        """Remember a recipe when it is the closest yet."""
+        if self.best is None or score < self.best[1]:
+            self.best = (recipe, score)
+
+    def closing(
+        self, phase: Callable[[], tuple[Recipe, float]]
+    ) -> tuple[Recipe, float]:
+        """A phase's result, or the best so far once the renders ran out."""
+        try:
+            return phase()
+        except SearchBudgetError:
+            if self.best is None:
+                raise
+            return self.best
 
 
 class TextureScorer(Protocol):
@@ -377,6 +432,7 @@ class _Renders:
         self._target = target
         self._cancelled = cancelled
         self._views: dict[str, NDArray[np.float64]] = {}
+        self.limit: int | None = None
 
     @property
     def count(self) -> int:
@@ -388,6 +444,8 @@ class _Renders:
         if key not in self._views:
             if self._cancelled is not None and self._cancelled():
                 raise SearchCancelledError
+            if self.limit is not None and len(self._views) >= self.limit:
+                raise SearchBudgetError
             self._views[key] = self._target.view(self._render(recipe))
         return self._views[key]
 
@@ -406,6 +464,7 @@ def search(
     base = _neutral(start)
     renders = _Renders(render, target, hooks.cancelled)
     reported = [math.inf]
+    fallback = _Fallback()
 
     def look(recipe: Recipe) -> float:
         return target.compare(renders(recipe), balance="brightness")
@@ -418,13 +477,12 @@ def search(
 
     def better(recipe: Recipe) -> None:
         score = plain(recipe)
+        fallback.note(recipe, score)
         if progress is not None and score < reported[0]:
             reported[0] = score
             progress(recipe, renders.count)
 
-    def enter(name: str) -> None:
-        if stage is not None:
-            stage(name)
+    enter = stage or _no_stage
 
     enter(STAGE_FILM)
     # A shot's own white balance can be far from the edit's, and a color
@@ -439,27 +497,13 @@ def search(
         key=lambda item: item[0],
     )
     better(ranked[0][1])
+    budget = _Budget(hooks.budget, renders.count)
 
-    def tones_and_color(recipe: Recipe) -> list[_Numeric]:
-        return [
-            control
-            for control in _numerics(recipe, capabilities)
-            if control.name != "exposure"
-        ]
-
-    def polish(recipe: Recipe) -> tuple[Recipe, float]:
-        """Every control in fine steps on the plain distance."""
-        return _walk(
-            recipe,
-            plain,
-            lambda r: _numerics(r, capabilities),
-            lambda r: _choices(r, capabilities),
-            _Plan(range(_LEVELS - 1, _LEVELS), _POLISH_REACH),
-            better,
-        )
+    polish = functools.partial(
+        _polish, score=plain, capabilities=capabilities, better=better
+    )
 
     def pairs(recipe: Recipe, score: float) -> tuple[Recipe, float]:
-        """The final moves of two controls at once."""
         return _pair_walk(
             recipe, score, plain, _numerics(recipe, capabilities), better
         )
@@ -470,7 +514,7 @@ def search(
         tuned, look_score = _walk(
             candidate,
             look,
-            tones_and_color,
+            lambda recipe: _tones_and_color(recipe, capabilities),
             lambda recipe: _choices(recipe, capabilities),
             _Plan(range(_LEVELS)),
             better,
@@ -489,35 +533,31 @@ def search(
     leaders = _leaders(ranked, look)
     if hooks.candidates is not None:
         hooks.candidates(len(leaders))
-    tuned = [
-        result
-        for candidate in leaders
-        if (result := tune(candidate, min(bars, default=math.inf)))
-    ]
-    best, best_score = pairs(*min(tuned, key=lambda result: result[1]))
+    tuned: list[tuple[Recipe, float]] = []
+
+    def tune_all() -> tuple[Recipe, float]:
+        tuned.extend(_tuned(leaders, tune, bars, renders, budget))
+        return pairs(*min(tuned, key=lambda result: result[1]))
+
+    best, best_score = fallback.closing(tune_all)
     enter(STAGE_RECHECK)
-    best, best_score = _recheck(
-        best,
-        best_score,
-        capabilities.film_simulations,
-        plain,
-        lambda rival: pairs(*polish(rival)),
-        better,
+    best, best_score = fallback.closing(
+        lambda: _recheck(
+            best,
+            best_score,
+            capabilities.film_simulations,
+            plain,
+            lambda rival: pairs(*polish(rival)),
+            better,
+        )
     )
     if capabilities.has_clarity:
         # Clarity can turn a runner-up simulation into the closest one.
         enter(STAGE_CLARITY)
-        finalists = [(best, best_score)] + [
-            result
-            for result in tuned
-            if result[0].film_simulation != best.film_simulation
-        ]
-        best, best_score = min(
-            (
-                _clarity(recipe, plain, capabilities, better)
-                for recipe, _score in finalists
-            ),
-            key=lambda result: result[1],
+        best, best_score = fallback.closing(
+            lambda: _clarified(
+                (best, best_score), tuned, capabilities, plain, better
+            )
         )
     likeness = target.likeness(renders(best))
     best, count = _textured(
@@ -613,6 +653,83 @@ def _texture_numerics() -> list[_Numeric]:
         _Numeric("sharpness", -4, 4, (2, 1)),
         _Numeric("noise_reduction", -4, 4, (2, 1)),
     ]
+
+
+def _tuned(
+    leaders: list[Recipe],
+    tune: Callable[[Recipe, float], tuple[Recipe, float] | None],
+    bars: list[float],
+    renders: _Renders,
+    budget: _Budget,
+) -> list[tuple[Recipe, float]]:
+    """Every leader tuned within its share of the renders."""
+    tuned = []
+    for index, candidate in enumerate(leaders):
+        renders.limit = budget.tuning(index, len(leaders))
+        try:
+            result = tune(candidate, min(bars, default=math.inf))
+        except SearchBudgetError:
+            continue
+        if result is not None:
+            tuned.append(result)
+    renders.limit = budget.closing()
+    if not tuned:
+        raise SearchBudgetError
+    return tuned
+
+
+def _no_stage(_name: str) -> None:
+    """Where no one follows the stages."""
+
+
+def _tones_and_color(
+    recipe: Recipe, capabilities: Capabilities
+) -> list[_Numeric]:
+    """The look controls but exposure, which the brightness gain sets."""
+    return [
+        control
+        for control in _numerics(recipe, capabilities)
+        if control.name != "exposure"
+    ]
+
+
+def _polish(
+    recipe: Recipe,
+    score: Callable[[Recipe], float],
+    capabilities: Capabilities,
+    better: Callable[[Recipe], None],
+) -> tuple[Recipe, float]:
+    """Every control in fine steps on the plain distance."""
+    return _walk(
+        recipe,
+        score,
+        lambda r: _numerics(r, capabilities),
+        lambda r: _choices(r, capabilities),
+        _Plan(range(_LEVELS - 1, _LEVELS), _POLISH_REACH),
+        better,
+    )
+
+
+def _clarified(
+    best: tuple[Recipe, float],
+    tuned: list[tuple[Recipe, float]],
+    capabilities: Capabilities,
+    score: Callable[[Recipe], float],
+    better: Callable[[Recipe], None],
+) -> tuple[Recipe, float]:
+    """The best of the finalists once each has tried clarity."""
+    finalists = [best] + [
+        result
+        for result in tuned
+        if result[0].film_simulation != best[0].film_simulation
+    ]
+    return min(
+        (
+            _clarity(recipe, score, capabilities, better)
+            for recipe, _score in finalists
+        ),
+        key=lambda result: result[1],
+    )
 
 
 def _clarity(
@@ -730,6 +847,21 @@ def _walk(
     better: Callable[[Recipe], None],
 ) -> tuple[Recipe, float]:
     """Walk the controls step by step while a step helps."""
+    try:
+        return _walked(best, score, controls, choices, plan, better)
+    except SearchBudgetError:
+        return best, score(best)
+
+
+def _walked(
+    best: Recipe,
+    score: Callable[[Recipe], float],
+    controls: Callable[[Recipe], list[_Numeric]],
+    choices: Callable[[Recipe], list[tuple[str, tuple[str, ...]]]],
+    plan: _Plan,
+    better: Callable[[Recipe], None],
+) -> tuple[Recipe, float]:
+    """The walk itself."""
     best_score = score(best)
     for level in plan.levels:
         for _sweep in range(_SWEEPS):

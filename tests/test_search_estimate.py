@@ -1,5 +1,7 @@
 """Tests for the progress and time guess of a recipe-from-edit search."""
 
+from dataclasses import replace
+
 import pytest
 
 from grawji import look_match
@@ -138,3 +140,38 @@ def test_clarity_does_not_slow_the_texture_guess() -> None:
     # not 4.5 clarity paces.
     extra = textured.seconds_left - plain.seconds_left
     assert extra == pytest.approx(20 * 0.5 * 4.5, abs=5)
+
+
+def test_a_budget_counts_down_and_never_grows() -> None:
+    """With a budget the time left only shrinks, whatever the stages do."""
+    estimate = SearchEstimate(CAPS, 0.0, budget=100)
+    lefts: list[float] = []
+    for count in range(1, 61):
+        estimate.rendered(count * 0.5)
+        if count == 20:
+            estimate.enter(look_match.STAGE_LOOK)
+            estimate.plan(4)
+        if count == 40:
+            estimate.enter(look_match.STAGE_RECHECK)
+        if estimate.seconds_left is not None:
+            lefts.append(estimate.seconds_left)
+    assert lefts == sorted(lefts, reverse=True)
+    assert estimate.fraction == pytest.approx(0.6)
+    assert lefts[-1] == pytest.approx(40 * 0.5)
+
+
+def test_a_budget_prices_the_closing_share_at_clarity_pace() -> None:
+    """The reserved closing renders count as slow clarity renders early."""
+    estimate = SearchEstimate(replace(CAPS, has_clarity=True), 0.0, budget=100)
+    lefts: list[float] = []
+    for count in range(1, 61):
+        estimate.rendered(count * 0.5)
+        if estimate.seconds_left is not None:
+            lefts.append(estimate.seconds_left)
+    assert lefts == sorted(lefts, reverse=True)
+    # 40 renders ahead: 10 at thumbnail pace, 30 closing ones at 3 times it.
+    assert lefts[-1] == pytest.approx(10 * 0.5 + 30 * 1.5)
+    estimate.enter(look_match.STAGE_CLARITY)
+    estimate.rendered(30.0 + 1.5, clarity=True)
+    assert estimate.seconds_left is not None
+    assert estimate.seconds_left <= lefts[-1]

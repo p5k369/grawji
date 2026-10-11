@@ -1339,7 +1339,10 @@ class MainWindow(Adw.ApplicationWindow):
                 f"The camera stopped the search: {error}", retry=True
             )
 
-        def run(skin_priority: bool, texture: bool) -> None:
+        def run(
+            skin_priority: bool, texture: bool, budget: int | None
+        ) -> None:
+            self._settings.edit_match_budget = budget or 0
             cancel = self._edit_match.start(
                 EditMatchRequest(
                     raf_path=raf_path,
@@ -1349,6 +1352,7 @@ class MainWindow(Adw.ApplicationWindow):
                     capabilities=capabilities,
                     skin_priority=skin_priority,
                     texture=texture,
+                    budget=budget,
                 ),
                 EditMatchCallbacks(
                     on_edit=match_dialog.show_edit,
@@ -1367,6 +1371,7 @@ class MainWindow(Adw.ApplicationWindow):
                 partial(self._apply_edit_recipe, recipe, title)
             ),
             on_start=run,
+            budget=self._settings.edit_match_budget or None,
         )
 
         def preview() -> None:

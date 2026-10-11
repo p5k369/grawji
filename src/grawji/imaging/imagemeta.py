@@ -120,6 +120,16 @@ def exif_orientation(path: str) -> int:
     return value if 1 <= value <= 8 else 1  # noqa: PLR2004
 
 
+def exif_interop_index(path: str) -> str | None:
+    """Read a file's EXIF interoperability index."""
+    meta = GExiv2.Metadata()
+    try:
+        meta.open_path(path)
+        return meta.try_get_tag_string("Exif.Iop.InteroperabilityIndex")
+    except GLib.Error:
+        return None
+
+
 def camera_model(path: str) -> str | None:
     """Read the camera model from a file's EXIF, or None."""
     meta = GExiv2.Metadata()

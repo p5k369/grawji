@@ -389,22 +389,31 @@ def test_the_edit_match_dialog_follows_a_search() -> None:
     from grawji.views.edit_match import EditMatchDialog
 
     applied: list[Recipe] = []
-    started: list[tuple[bool, bool]] = []
+    started: list[tuple[bool, bool, int | None]] = []
     dialog = EditMatchDialog(
         on_apply=applied.append,
-        on_start=lambda skin, texture: started.append((skin, texture)),
+        on_start=lambda skin, texture, budget: started.append(
+            (skin, texture, budget)
+        ),
     )
     pixels = np.zeros((20, 30, 3), np.uint8)
     assert not dialog.start_button.get_sensitive()
     dialog.show_edit(pixels)
     assert dialog.start_button.get_sensitive()
     assert not dialog.texture_row.get_active()
+    assert dialog.budget == 900
+    dialog.budget_scale.set_value(1234)
+    assert dialog.budget == 1200
+    dialog.budget_scale.set_value(1600)
+    assert dialog.budget is None
+    dialog.budget_scale.set_value(600)
     dialog.skin_row.set_active(False)
     dialog.texture_row.set_active(True)
     dialog.start_button.emit("clicked")
-    assert started == [(False, True)]
+    assert started == [(False, True, 600)]
     assert not dialog.skin_row.get_sensitive()
     assert not dialog.texture_row.get_sensitive()
+    assert not dialog.budget_row.get_sensitive()
     assert dialog.progress_bar.get_visible()
     dialog.set_cancel(lambda: None)
     dialog.set_estimate(0.25, 150.0)
@@ -434,8 +443,11 @@ def test_closing_the_edit_match_dialog_cancels_the_search() -> None:
 
     stopped: list[bool] = []
     dialog = EditMatchDialog(
-        on_apply=lambda _recipe: None, on_start=lambda _skin, _texture: None
+        on_apply=lambda _recipe: None,
+        on_start=lambda _skin, _texture, _budget: None,
+        budget=None,
     )
+    assert dialog.budget is None
     dialog.set_cancel(lambda: stopped.append(True))
     dialog.emit("closed")
     assert stopped == [True]

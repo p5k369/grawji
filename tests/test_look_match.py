@@ -484,3 +484,46 @@ def test_the_search_says_how_many_simulations_it_tunes() -> None:
     )
     assert len(heard) == 1
     assert 2 <= heard[0] <= 3
+
+
+def test_a_budget_closes_the_search_with_the_best_so_far() -> None:
+    """Out of renders, the search returns what it has, never more."""
+    truth = Recipe(film_simulation="ClassicChrome", shadows=1.0, color=-1)
+    seen: list[Recipe] = []
+
+    def render(recipe: Recipe) -> np.ndarray:
+        seen.append(recipe)
+        return fake_render(recipe)
+
+    hooks = SearchHooks(budget=40)
+    match = look_match.search(Recipe(), CAPS, render, target_for(truth), hooks)
+    assert len(seen) <= 40
+    assert match.renders == len(seen)
+    assert match.recipe.film_simulation == "ClassicChrome"
+    full = look_match.search(Recipe(), CAPS, fake_render, target_for(truth))
+    assert match.distance >= full.distance
+    tiny = look_match.search(
+        Recipe(), CAPS, fake_render, target_for(truth), SearchHooks(budget=1)
+    )
+    assert tiny.recipe.film_simulation == "ClassicChrome"
+
+
+def test_a_budget_is_shared_among_the_leaders() -> None:
+    """Every leader gets tuned at least coarsely, none hogs the budget."""
+    truth = Recipe(film_simulation="ClassicChrome", shadows=1.0, color=-1)
+    seen: list[Recipe] = []
+
+    def render(recipe: Recipe) -> np.ndarray:
+        seen.append(recipe)
+        return fake_render(recipe)
+
+    look_match.search(
+        Recipe(), CAPS, render, target_for(truth), SearchHooks(budget=120)
+    )
+    tuned_sims = {
+        r.film_simulation
+        for r in seen
+        if (r.shadows, r.color, r.wb_shift_r) != (0.0, 0, 0)
+    }
+    assert len(tuned_sims) >= 2
+    assert len(seen) <= 120

@@ -97,6 +97,8 @@ class Settings:
             exported JPEG's EXIF user comment.
         export_format: Output format for exports, one of
             imaging.export.FORMATS.
+        edit_match_budget: Renders a recipe-from-edit search may make
+            before it settles for the best it has.
     """
 
     open_recipe: str = FROM_IMAGE
@@ -133,6 +135,7 @@ class Settings:
     export_copyright: str = ""
     export_provenance: bool = True
     export_write_marks: bool = True
+    edit_match_budget: int = 900
     export_format: str = "jpeg"
 
     def to_dict(self) -> dict[str, object]:

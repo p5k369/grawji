@@ -107,7 +107,8 @@ side. Click one to apply it.
 Edited a shot in darktable, Lightroom or anything else and want that
 look straight out of the camera? Pick the edited export and grawji
 searches, with the real camera engine, for the recipe that comes
-closest to it.
+closest to it. An export in AdobeRGB is read as such, so its colors
+count as they are.
 
 ![The recipe found for the edit](images/edit-match-done.webp)
 
@@ -116,6 +117,10 @@ and grain are invisible, so those come back neutral. Switch on **Match
 the texture as well** and the search ends with a pass on full-size
 renders that settles them too. It takes a minute longer and only tells
 something from a full-size export.
+
+**Renders to spend** is how long the search may take. When they are
+used up it settles for the best it has, and the time shown counts down
+from the start instead of growing. The slider's top means no limit.
 
 ## Browse, rate and organize
 
