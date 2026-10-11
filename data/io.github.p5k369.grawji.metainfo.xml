@@ -49,6 +49,23 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.0" date="2026-10-11">
+      <description>
+        <p>Version 0.7.0 brings image marks, smarter recipe matching, and better exports.</p>
+        <ul>
+          <li>Mark images while browsing.</li>
+          <li>Develop a RAW+JPEG shot from its camera JPEG, and browse images even without a camera connected.</li>
+          <li>Import the recipe a photo was shot with, or find the recipe closest to an edited export.</li>
+          <li>Recipe matching now aligns edits by perspective, judges the result by its look, sees past misleading first steps, and picks film simulations more accurately, including ones obscured by white balance.</li>
+          <li>Match an edit's texture on request.</li>
+          <li>Undo and redo recipe edits.</li>
+          <li>Name a camera bank after the recipe you drop on it.</li>
+          <li>Every export is resampled at maximum quality, and 16-bit keystone-corrected exports are warped correctly.</li>
+          <li>The aperture is hidden when a manual lens does not report it.</li>
+          <li>Action icons show correctly in dark mode on GTK 4.14.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-09-27">
       <description>
         <p>Version 0.6.0 adds new export formats, a folder grid view, and smoother previews.</p>
