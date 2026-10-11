@@ -446,7 +446,14 @@ def test_simulations_close_behind_the_leader_are_tuned_too() -> None:
         "Provia",
         "RealaAce",
         "ClassicChrome",
+        "ProNegStd",
     ]
+    far = [
+        (3.0, Recipe(film_simulation="Provia")),
+        (3.5, Recipe(film_simulation="Velvia")),
+        (4.0, Recipe(film_simulation="Astia")),
+    ]
+    assert len(look_match._leaders(far, lambda _r: 0.0)) == 2
     crowded = [
         (3.0 + 0.01 * n, Recipe(film_simulation=s))
         for n, s in enumerate(

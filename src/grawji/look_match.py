@@ -75,7 +75,7 @@ _LEVELS = 3
 # and the most, and how far a neutral render may trail the leader's,
 # as a share of it, to count as leading.
 _CANDIDATES = (2, 4)
-_LEADER_SLACK = 0.15
+_LEADER_SLACK = 0.3
 # A further candidate whose look trails the best one by more than this
 # after the tone walk is dropped before its polish.
 _CANDIDATE_GAP = 1.0
