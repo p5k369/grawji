@@ -253,7 +253,7 @@ def _resize(metadata: Any, size: tuple[int, int] | None) -> None:
     width, height = size
     metadata.try_set_tag_long("Exif.Photo.PixelXDimension", width)
     metadata.try_set_tag_long("Exif.Photo.PixelYDimension", height)
-    metadata.erase_exif_thumbnail()
+    metadata.try_erase_exif_thumbnail()
 
 
 def copy_exif(
