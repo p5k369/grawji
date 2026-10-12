@@ -93,8 +93,10 @@
             dependencies = [
               lsdetect
               python.pkgs.numpy
+              python.pkgs.pillow
               python.pkgs.pygobject3
               python.pkgs.pyusb
+              python.pkgs.rawpy
               rawji
             ];
 

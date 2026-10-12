@@ -41,12 +41,15 @@ def _rfc_date() -> str:
 
 
 DEBIAN_NAMES = {
+    "pillow": "python3-pil",
     "pygobject": "python3-gi",
     "numpy": "python3-numpy",
     "pyusb": "python3-usb",
+    "rawpy": None,
     "rawji": None,
     "lsdetect": None,
 }
+VENDORED_WHEELS = ("lsdetect", "rawpy")
 
 EXTRA_DEPENDS = [
     "python3-gi-cairo",
@@ -141,8 +144,8 @@ def _install_rawji(source: Path, site: Path) -> None:
     )
 
 
-def _install_lsdetect(site: Path) -> None:
-    """Vendor lsdetect, a compiled wheel that is not in apt."""
+def _vendor_wheel(name: str, site: Path) -> None:
+    """Vendor a compiled wheel that is not in apt."""
     with tempfile.TemporaryDirectory() as scratch:
         target = Path(scratch)
         subprocess.run(  # noqa: S603
@@ -154,7 +157,7 @@ def _install_lsdetect(site: Path) -> None:
                 "--target",
                 str(target),
                 "--no-deps",
-                "lsdetect",
+                name,
             ],
             check=True,
         )
@@ -172,7 +175,7 @@ def _install_lsdetect(site: Path) -> None:
                 shutil.copy2(item, site / item.name)
             vendored = True
         if not vendored:
-            raise SystemExit("pip installed no lsdetect files to vendor")
+            raise SystemExit(f"pip installed no {name} files to vendor")
 
 
 def _write_docs(tree: Path, version: str) -> None:
@@ -213,7 +216,8 @@ def stage(tree: Path, rawji: str | None) -> None:
     shutil.copytree(ROOT / "src" / "grawji", site / "grawji", ignore=ignore)
     with tempfile.TemporaryDirectory() as scratch:
         _install_rawji(_rawji_source(rawji, Path(scratch)), site)
-    _install_lsdetect(site)
+    for name in VENDORED_WHEELS:
+        _vendor_wheel(name, site)
 
     binary = tree / "usr" / "bin"
     binary.mkdir(parents=True)

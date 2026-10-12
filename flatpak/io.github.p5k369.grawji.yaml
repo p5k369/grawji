@@ -120,6 +120,25 @@ modules:
         url: https://files.pythonhosted.org/packages/cf/95/d3f629adb6958d67bb4936bcfe6ddfdca5fda145b49db09bc78dfd0cfe0b/lsdetect-0.4.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
         sha256: 009547c1211c2edbd82c5ba6f145a33268ee89c4f4b7669601376a2183695088
 
+  - name: python3-pillow
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-deps --prefix=${FLATPAK_DEST} pillow-*.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/f7/62/de5bdd77d935331f4f802edc11e4d82950f642caad6cb2f949837b8560e2/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+        sha256: 0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3
+
+  # rawpy bundles libraw, the runtime has none.
+  - name: python3-rawpy
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-deps --prefix=${FLATPAK_DEST} rawpy-*.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/7e/b6/a9b33ed24bc438797bda9bd5a5eb2fa28d0fe1d2214c57372b267bc933c2/rawpy-0.27.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+        sha256: 6ea34295b96ff1a14f451c42bb6a1bf533340c3f0a71cc1f29173174713b58b8
+
   - name: python3-rawji
     buildsystem: simple
     build-commands:

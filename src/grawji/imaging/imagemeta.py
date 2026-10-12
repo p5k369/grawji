@@ -26,6 +26,10 @@ _TAG_HEIGHT = 0x0101
 _TYPE_SHORT = 3
 _TYPE_LONG = 4
 _SHORT_MAX = 0xFFFF
+# A white balance triple has one level per color.
+_WB_CHANNELS = 3
+# Exif.Fujifilm.WhiteBalance raw value of the Auto mode.
+_WB_AUTO_CODE = "0"
 # The Windows and Adobe percentages that go with one to five stars.
 _RATING_PERCENT = {1: 1, 2: 25, 3: 50, 4: 75, 5: 99}
 
@@ -128,6 +132,64 @@ def exif_interop_index(path: str) -> str | None:
         return meta.try_get_tag_string("Exif.Iop.InteroperabilityIndex")
     except GLib.Error:
         return None
+
+
+def fuji_auto_wb_levels(path: str) -> tuple[int, int, int] | None:
+    """The plain auto white balance levels of an Auto WB shot."""
+    metadata = GExiv2.Metadata()
+    try:
+        metadata.open_path(path)
+    except GLib.Error:
+        return None
+    # The raw value: 0 is Auto in Fuji's makernote, every preset is
+    # another code (GExiv2's interpreted string would read "Auto").
+    mode = metadata.try_get_tag_string("Exif.Fujifilm.WhiteBalance") or ""
+    if mode.strip() != _WB_AUTO_CODE:
+        return None
+    levels = _rationals(metadata, "Exif.Fujifilm.WB_GRBLevelsAuto")
+    if len(levels) < _WB_CHANNELS or min(levels[:_WB_CHANNELS]) <= 0:
+        return None
+    g, r, b = (round(v) for v in levels[:_WB_CHANNELS])
+    return g, r, b
+
+
+def fuji_lens_tables(
+    path: str,
+) -> tuple[list[float], list[float], list[float]] | None:
+    """A RAF's lens correction tables.
+
+    Returns the GeometricDistortionParams, ChromaticAberrationParams
+    and VignettingParams values in that order, each as the tag's
+    rationals converted to floats, when the file carries all three.
+    """
+    metadata = GExiv2.Metadata()
+    try:
+        metadata.open_path(path)
+    except GLib.Error:
+        return None
+    tables = [
+        _rationals(metadata, f"Exif.Fujifilm.{name}")
+        for name in (
+            "GeometricDistortionParams",
+            "ChromaticAberrationParams",
+            "VignettingParams",
+        )
+    ]
+    if not all(tables):
+        return None
+    return tables[0], tables[1], tables[2]
+
+
+def _rationals(metadata: Any, tag: str) -> list[float]:
+    """A tag's rational values."""
+    if not metadata.has_tag(tag):
+        return []
+    text = metadata.try_get_tag_string(tag) or ""
+    values = []
+    for item in text.split():
+        numerator, _, denominator = item.partition("/")
+        values.append(float(numerator) / float(denominator or 1))
+    return values
 
 
 def camera_model(path: str) -> str | None:
