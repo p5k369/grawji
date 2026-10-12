@@ -57,11 +57,10 @@ repos:
       - id: mypy
         additional_dependencies:
           - "numpy<2.5"
-          - lsdetect
+          - lsdetect>=0.4
           - pytest
           - pycairo
           - pillow
-          - opencv-python-headless
           - rawpy
         args: [src, tests]
         pass_filenames: false

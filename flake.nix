@@ -46,17 +46,17 @@
 
           lsdetect = python.pkgs.buildPythonPackage {
             pname = "lsdetect";
-            version = "0.1.0";
+            version = "0.4.0";
             format = "wheel";
             src = python.pkgs.fetchPypi {
               pname = "lsdetect";
-              version = "0.1.0";
+              version = "0.4.0";
               format = "wheel";
               dist = "cp311";
               python = "cp311";
               abi = "abi3";
               platform = "manylinux_2_17_x86_64.manylinux2014_x86_64";
-              hash = "sha256-xyy0i4CpbohAC1dIi14x7wBzP4qSbkdT36OMfWW++to=";
+              hash = "sha256-AJVHwSEcLtvYLFum8UWjMmjuicT0t2aWATdqIYNpUIg=";
             };
             pythonImportsCheck = [ "lsdetect" ];
           };

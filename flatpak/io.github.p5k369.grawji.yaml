@@ -117,8 +117,8 @@ modules:
       - pip3 install --no-deps --prefix=${FLATPAK_DEST} lsdetect-*.whl
     sources:
       - type: file
-        url: https://files.pythonhosted.org/packages/4e/3a/2b499293a3f72d528094aec7203dfe0af60df3ebbe898d68f77bb43762ff/lsdetect-0.3.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-        sha256: 8ccfed5cabc6b15525730933e48ef6dffdde9746d3c64acc3cc2b06f156ec529
+        url: https://files.pythonhosted.org/packages/cf/95/d3f629adb6958d67bb4936bcfe6ddfdca5fda145b49db09bc78dfd0cfe0b/lsdetect-0.4.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: 009547c1211c2edbd82c5ba6f145a33268ee89c4f4b7669601376a2183695088
 
   - name: python3-rawji
     buildsystem: simple
