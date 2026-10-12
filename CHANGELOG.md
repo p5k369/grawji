@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/p5k369/grawji/compare/v0.7.1...v0.8.0) (2026-10-12)
+
+
+### Features
+
+* **transplant:** develop foreign RAFs through the connected body ([#184](https://github.com/p5k369/grawji/issues/184)) ([7cd98fe](https://github.com/p5k369/grawji/commit/7cd98fe46b48ee0112b784b12019fbfd78a77838))
+
 ## [0.7.1](https://github.com/p5k369/grawji/compare/v0.7.0...v0.7.1) (2026-10-11)
 
 

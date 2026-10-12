@@ -49,6 +49,14 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.0" date="2026-10-12">
+      <description>
+        <p>Version 0.8.0 brings a new way to use your camera as a RAW converter.</p>
+        <ul>
+          <li>Develop RAF files from other Fujifilm cameras by processing them through the body you have connected over USB</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-10-11">
       <description>
         <p>This release makes recipe searches more predictable.</p>
