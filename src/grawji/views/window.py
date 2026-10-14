@@ -53,6 +53,7 @@ from grawji.controllers.exports import (
 )
 from grawji.controllers.fileops import FileOpsController
 from grawji.controllers.marks import MarksController
+from grawji.hover_preview import HoverActions, HoverPreview, RenderCache
 from grawji.imaging import imagemeta
 from grawji.imaging.pixbufs import trim_letterbox
 from grawji.imaging.render import (
@@ -195,6 +196,16 @@ _UI = (
 )
 
 
+def _timeout_once(delay_ms: int, callback: Callable[[], None]) -> int:
+    """Run callback once on the main loop after delay_ms; return the id."""
+
+    def fire() -> bool:
+        callback()
+        return GLib.SOURCE_REMOVE
+
+    return int(GLib.timeout_add(delay_ms, fire))
+
+
 @Gtk.Template(string=_UI)
 class MainWindow(Adw.ApplicationWindow):
     """grawji main window: browse RAFs, tune recipe, preview, export."""
@@ -244,7 +255,7 @@ class MainWindow(Adw.ApplicationWindow):
         # the value they were issued under and ignore themselves if a newer
         # selection has superseded them (fast filmstrip scrubbing).
         self._generation = 0
-        self._preview_seq = 0
+        self._init_preview_state()
 
         self._settings = load_settings(settings_path())
         self._apply_color_scheme()
@@ -870,6 +881,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._nav.update()
         self._flush_pending_exposure()
         self._generation += 1
+        self._hover.reset()
         self._raf_path = Path(raf_path)
         self._show_current_marks()
         self._show_current_source()
@@ -1261,6 +1273,7 @@ class MainWindow(Adw.ApplicationWindow):
         """Wire the recipe panel's settings and signals."""
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self.recipe_panel.connect("changed", self._on_recipe_changed)
+        self.recipe_panel.connect("film-sim-hover", self._on_film_sim_hover)
         self.recipe_panel.connect("history-changed", self._on_history_changed)
         self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
         self.recipe_panel.connect(
@@ -1497,19 +1510,37 @@ class MainWindow(Adw.ApplicationWindow):
             self._persist_exposure()
 
     def _render_preview(self) -> None:
-        """Queue a fast (non-full-resolution) preview render."""
+        """Queue a fast (non-full-resolution) preview render.
+
+        A recipe already rendered for this image - a film simulation just
+        previewed by hovering it, an undone edit - comes from the cache
+        without a camera round trip.
+        """
+        recipe = self.recipe_panel.get_recipe()
+        cached = self._preview_cache.get(recipe)
+        if cached is not None:
+            self._on_preview(self._generation, recipe, cached)
+            return
         self._set_busy(busy=True, status="Rendering preview…")
         self._worker.render(
-            self.recipe_panel.get_recipe(),
+            recipe,
             full_resolution=False,
-            on_done=partial(self._on_preview, self._generation),
+            on_done=partial(self._on_preview, self._generation, recipe),
             on_error=self._on_error,
         )
 
-    def _on_preview(self, generation: int, jpeg: bytes) -> None:
+    def _on_preview(
+        self, generation: int, recipe: Recipe, jpeg: bytes
+    ) -> None:
         """Decode a finished preview render off-thread, then show it."""
         if generation != self._generation:
             return  # a newer selection has superseded this render
+        self._preview_cache.put(recipe, jpeg)
+        if self._hover.active:
+            # A hovered film simulation owns the screen; the cache hands
+            # this result back when the list closes.
+            self.preview_view.set_spinner(active=self._hover_rendering)
+            return
         self._preview_seq += 1
         threading.Thread(
             target=self._decode_preview,
@@ -1543,6 +1574,108 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview_view.show_pixbuf(pixbuf)
         self._set_busy(busy=False, status="Ready.")
         return GLib.SOURCE_REMOVE
+
+    def _init_preview_state(self) -> None:
+        """Set up preview bookkeeping, the cache and the hover preview.
+
+        The cache holds previews of the open image by recipe and is shared
+        by normal renders and film simulation hover previews.
+        """
+        self._preview_seq = 0
+        self._preview_cache = RenderCache()
+        self._hover_rendering = False
+        self._hover = HoverPreview(
+            HoverActions(
+                schedule=_timeout_once,
+                cancel=GLib.source_remove,
+                render=self._render_hover,
+                show_hover=self._show_hover,
+                show_current=lambda jpeg, recipe: self._on_preview(
+                    self._generation, recipe, jpeg
+                ),
+                snapshot=lambda: self.preview_view.source_pixbuf,
+                restore=self._restore_preview,
+                # Debounced, so it merges with the render a pick schedules.
+                render_current=self._schedule_render,
+            ),
+            self._preview_cache,
+        )
+
+    def _on_film_sim_hover(self, _panel: Any, sim: str) -> None:
+        """Preview the hovered film simulation; "" ends the preview."""
+        current = self.recipe_panel.get_recipe()
+        if not sim:
+            self._hover.end(current)
+            return
+        if not self._session.is_open:
+            return
+        self._hover.hover(replace(current, film_simulation=sim), current)
+
+    def _render_hover(self, recipe: Recipe) -> None:
+        """Queue the camera render of a hovered film simulation.
+
+        Hover renders coalesce among themselves only, so they never
+        replace a queued render of an actual edit.
+        """
+        self._hover_rendering = True
+        self._set_busy(
+            busy=True, status=f"Previewing {recipe.film_simulation}…"
+        )
+        self._worker.render(
+            recipe,
+            full_resolution=False,
+            coalesce_key="hover",
+            on_done=partial(self._on_hover_rendered, self._generation, recipe),
+            on_error=partial(self._on_hover_failed, self._generation),
+        )
+
+    def _on_hover_rendered(
+        self, generation: int, recipe: Recipe, jpeg: bytes
+    ) -> None:
+        """Hand a finished hover render to the hover controller."""
+        if generation != self._generation:
+            return
+        self._hover_rendering = False
+        self._hover.rendered(recipe, jpeg)
+        if not self._hover.wants(recipe):
+            self.preview_view.set_spinner(active=False)
+
+    def _on_hover_failed(self, generation: int, exc: Exception) -> None:
+        """Report a failed hover render like any other camera error."""
+        if generation != self._generation:
+            return
+        self._hover_rendering = False
+        self._on_error(exc)
+
+    def _show_hover(self, jpeg: bytes, recipe: Recipe) -> None:
+        """Decode a hover preview off-thread, then show it if still wanted."""
+        generation = self._generation
+
+        def decode() -> None:
+            try:
+                pixbuf = oriented_pixbuf(jpeg)
+            except GLib.Error:
+                return
+            mainloop.call(show, pixbuf)
+
+        def show(pixbuf: Any) -> bool:
+            if generation == self._generation and self._hover.wants(recipe):
+                self.preview_view.show_pixbuf(pixbuf)
+                self._set_busy(
+                    busy=False,
+                    status=f"Previewing {recipe.film_simulation}. "
+                    "Click it to apply.",
+                )
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(
+            target=decode, name="grawji-hover-decode", daemon=True
+        ).start()
+
+    def _restore_preview(self, pixbuf: Any) -> None:
+        """Put back the picture that was on screen before hovering."""
+        self.preview_view.show_pixbuf(pixbuf)
+        self._set_busy(busy=self._hover_rendering, status="Ready.")
 
     def _render_recipe_thumb(
         self, recipe: Recipe, on_done: Callable[[bytes | None], None]

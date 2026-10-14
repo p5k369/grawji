@@ -396,6 +396,11 @@ class PreviewView(Gtk.Box):
             self._crop_editor.conform()
         self._redisplay()
 
+    @property
+    def source_pixbuf(self) -> Any | None:
+        """The oriented pixbuf on display, before crop, border and zebras."""
+        return self._oriented_pixbuf
+
     def pixbuf_from_jpeg(self, jpeg: bytes) -> Any:
         """Decode JPEG bytes and bake the current geometry into them."""
         return bake_pixbuf(oriented_pixbuf(jpeg), self._crop)

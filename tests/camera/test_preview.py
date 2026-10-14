@@ -107,6 +107,48 @@ def test_render_coalesces_pending_render():
     assert finished == [b"JPEG:Acros"]
 
 
+def test_renders_only_coalesce_within_their_key():
+    """A hover render replaces a hover render, never a pending edit render."""
+    sess = FakeSession()
+    sess.gate = threading.Event()
+    done = threading.Event()
+    edit_done = []
+
+    worker = CameraWorker(sess)
+    worker.start()
+
+    worker.render(Recipe(film_simulation="Provia"), full_resolution=False)
+    assert sess.render_started.wait(timeout=5)
+
+    worker.render(
+        Recipe(film_simulation="Astia"),
+        full_resolution=False,
+        on_done=edit_done.append,
+    )
+    worker.render(
+        Recipe(film_simulation="Velvia"),
+        full_resolution=False,
+        coalesce_key="hover",
+    )
+    worker.render(
+        Recipe(film_simulation="Eterna"),
+        full_resolution=False,
+        coalesce_key="hover",
+        on_done=notify(done),
+    )
+
+    sess.gate.set()
+    assert done.wait(timeout=5)
+    worker.stop()
+
+    assert sess.rendered == [
+        ("Provia", False),
+        ("Astia", False),
+        ("Eterna", False),
+    ]
+    assert edit_done == [b"JPEG:Astia"]
+
+
 def test_open_coalesces_pending_open():
     """An open queued behind a not-yet-started open replaces it."""
     sess = FakeSession()

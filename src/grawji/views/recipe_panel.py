@@ -45,6 +45,10 @@ _WB_TEMP_STEP = 50
 # Below this, an exposure value counts as zero EV (avoids "-0.0 EV").
 _EV_EPSILON = 1e-9
 
+# Fallback when the film list's popover cannot be found: the hover ends
+# this long after the pointer leaves the last row.
+_HOVER_LEAVE_MS = 300
+
 _UI = (
     resources.files("grawji")
     .joinpath("ui", "recipe_panel.ui")
@@ -58,6 +62,19 @@ def _nearest_kelvin_index(kelvin: int) -> int:
         range(len(_WB_KELVIN_PRESETS)),
         key=lambda i: abs(_WB_KELVIN_PRESETS[i] - kelvin),
     )
+
+
+def _descendant_popover(widget: Gtk.Widget) -> Gtk.Popover | None:
+    """The first Gtk.Popover inside widget, e.g. an Adw.ComboRow's list."""
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, Gtk.Popover):
+            return child
+        found = _descendant_popover(child)
+        if found is not None:
+            return found
+        child = child.get_next_sibling()
+    return None
 
 
 def _tone_fmt(step: float) -> Callable[[float], str]:
@@ -76,12 +93,17 @@ class RecipePanel(Adw.PreferencesPage):
     recipe (or source) the controls came from, showing "(modified)" once
     they diverge. It emits "changed" on any user edit and "apply-recipe"
     with a name chosen from the folder-nested recipe picker.
+
+    While the film simulation list is open it emits "film-sim-hover" with
+    the simulation under the pointer, and once with "" when the list
+    closes, so the window can preview a simulation before it is picked.
     """
 
     __gtype_name__ = "GrawjiRecipePanel"
 
     __gsignals__: ClassVar[dict[str, Any]] = {
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "film-sim-hover": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "history-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "apply-recipe": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "paste-recipe": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -132,6 +154,7 @@ class RecipePanel(Adw.PreferencesPage):
 
         self._build_rows()
         self._connect_signals()
+        self._install_film_hover()
         self._applied_recipe = self.get_recipe()
         self._update_status()
         self.reset_history()
@@ -313,6 +336,101 @@ class RecipePanel(Adw.PreferencesPage):
         self.film_row.connect("notify::selected", self._update_mono_visibility)
         self.dr_row.connect("notify::selected", self._update_dr_note)
         self._mono_grid.connect_changed(self._on_mono_grid_changed)
+
+    def _install_film_hover(self) -> None:
+        """Report the film simulation under the pointer in the open list.
+
+        A custom list factory rebuilds libadwaita's own popup row (label
+        plus checkmark on the selected entry) with a motion controller.
+        The list closing ends the hover; if the row's popover cannot be
+        found, the pointer leaving the rows does instead.
+        """
+        self._hovered_sim: str | None = None
+        self._hover_leave_id = 0
+        self._film_items: set[Gtk.ListItem] = set()
+        factory = Gtk.SignalListItemFactory()
+        factory.connect("setup", self._on_film_item_setup)
+        factory.connect("bind", self._on_film_item_bind)
+        factory.connect("unbind", self._on_film_item_unbind)
+        self.film_row.set_list_factory(factory)
+        self.film_row.connect("notify::selected", self._update_film_checks)
+        self._film_popover = _descendant_popover(self.film_row)
+        if self._film_popover is not None:
+            self._film_popover.connect(
+                "closed", lambda *_a: self._end_film_hover()
+            )
+
+    def _on_film_item_setup(self, _factory: Any, item: Any) -> None:
+        """Build one popup row: label, checkmark, hover tracking."""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        label = Gtk.Label(xalign=0, hexpand=True)
+        check = Gtk.Image(
+            icon_name="object-select-symbolic",
+            accessible_role=Gtk.AccessibleRole.PRESENTATION,
+        )
+        box.append(label)
+        box.append(check)
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", lambda *_a: self._on_film_item_entered(item))
+        motion.connect("leave", lambda *_a: self._on_film_item_left())
+        box.add_controller(motion)
+        item.set_child(box)
+
+    def _on_film_item_bind(self, _factory: Any, item: Any) -> None:
+        """Show a simulation's name and whether it is the selected one."""
+        item.get_child().get_first_child().set_label(
+            item.get_item().get_string()
+        )
+        self._film_items.add(item)
+        self._update_film_check(item)
+
+    def _on_film_item_unbind(self, _factory: Any, item: Any) -> None:
+        """Stop tracking a recycled popup row."""
+        self._film_items.discard(item)
+
+    def _update_film_checks(self, *_args: object) -> None:
+        """Move the checkmark to the newly selected simulation."""
+        for item in self._film_items:
+            self._update_film_check(item)
+
+    def _update_film_check(self, item: Any) -> None:
+        """Show the checkmark only on the selected simulation's row."""
+        selected = item.get_position() == self.film_row.get_selected()
+        # Opacity, not visibility, so every row keeps the same width.
+        item.get_child().get_last_child().set_opacity(1.0 if selected else 0.0)
+
+    def _on_film_item_entered(self, item: Any) -> None:
+        """Announce the simulation the pointer moved onto."""
+        if self._hover_leave_id:
+            GLib.source_remove(self._hover_leave_id)
+            self._hover_leave_id = 0
+        bound = item.get_item()
+        if bound is None:
+            return
+        sim = bound.get_string()
+        if sim != self._hovered_sim:
+            self._hovered_sim = sim
+            self.emit("film-sim-hover", sim)
+
+    def _on_film_item_left(self) -> None:
+        """Without a popover to watch, leaving the rows ends the hover."""
+        if self._film_popover is not None or self._hover_leave_id:
+            return
+        self._hover_leave_id = GLib.timeout_add(
+            _HOVER_LEAVE_MS, self._on_hover_leave_timeout
+        )
+
+    def _on_hover_leave_timeout(self) -> bool:
+        """End a hover once the pointer stayed off the rows."""
+        self._hover_leave_id = 0
+        self._end_film_hover()
+        return GLib.SOURCE_REMOVE
+
+    def _end_film_hover(self) -> None:
+        """Announce that no simulation is being previewed any more."""
+        if self._hovered_sim is not None:
+            self._hovered_sim = None
+            self.emit("film-sim-hover", "")
 
     def set_dr_ceiling(self, ceiling: str | None) -> None:
         """Set the shot's dynamic-range ceiling and refresh the DR note."""

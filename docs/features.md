@@ -30,6 +30,10 @@ RAF, and renders follow as you move a control.
   half steps, color, sharpness, noise reduction, clarity and the two
   axes of monochrome toning. Only what the connected body supports is
   offered.
+- **Hover to preview film simulations**: with the film simulation list
+  open, rest the pointer on an entry to see the image rendered with it.
+  Closing the list without picking puts the previous picture back, and
+  picking a simulation you already previewed shows it at once.
 - **Exposure per image**, kept apart from the recipe, so one recipe
   fits a whole folder while each frame keeps its own brightness.
 - **Hold to peek** at the in-camera original (`\` or hold the eye

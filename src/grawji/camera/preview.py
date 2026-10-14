@@ -94,8 +94,15 @@ class CameraWorker:
         file_type: str = "jpeg",
         on_done: OnDone | None = None,
         on_error: OnError | None = None,
+        coalesce_key: str = "render",
     ) -> None:
-        """Queue a render; coalesces with a not-yet-started render."""
+        """Queue a render; coalesces with a not-yet-started render.
+
+        Only renders queued under the same coalesce_key replace each
+        other. Speculative renders (film simulation hover previews) use
+        their own key so they can never swallow the render of an edit,
+        whose on_done would then never fire.
+        """
         self._submit(
             lambda: self._session.render(
                 recipe,
@@ -104,7 +111,7 @@ class CameraWorker:
             ),
             on_done,
             on_error,
-            coalesce_key="render",
+            coalesce_key=coalesce_key,
         )
 
     def render_thumb(
