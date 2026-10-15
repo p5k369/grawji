@@ -7,6 +7,7 @@ from grawji.camera.camera_info import (
     is_camera_disconnected,
     is_camera_stuck,
     is_foreign_raf,
+    is_lost_reply,
 )
 
 
@@ -53,6 +54,33 @@ def test_stuck_on_timeout():
 def test_stuck_on_device_busy():
     """PTP 0x2019 (Device_Busy) after a conversion means a wedged body."""
     assert is_camera_stuck(RuntimeError("PTP error 0x2019")) is True
+
+
+LOST_READ = OSError("USB read failed: [Errno 110] Operation timed out")
+
+
+def test_stuck_on_a_lost_reply():
+    """A reply still lost after reconnecting means a wedged body."""
+    assert is_camera_stuck(LOST_READ) is True
+
+
+def test_lost_reply_on_timed_out_transfers():
+    """A bulk read or write that timed out is a lost reply."""
+    assert is_lost_reply(LOST_READ) is True
+    assert is_lost_reply(
+        OSError("USB write failed: [Errno 110] Operation timed out")
+    )
+
+
+def test_lost_reply_not_on_other_errors():
+    """Unplugging, PTP refusals and conversion timeouts are not."""
+    assert not is_lost_reply(
+        OSError("USB read failed: [Errno 19] No such device")
+    )
+    assert not is_lost_reply(RuntimeError("GetObject failed: 0x200F"))
+    assert not is_lost_reply(
+        TimeoutError("Conversion timeout after 30 seconds")
+    )
 
 
 def test_not_stuck_on_other_errors():

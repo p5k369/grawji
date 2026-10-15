@@ -1765,7 +1765,9 @@ class MainWindow(Adw.ApplicationWindow):
                 "The camera stopped responding during conversion and "
                 "appears to be stuck. Turn it off and on again - if it "
                 "will not turn off, briefly remove the battery - then "
-                "reconnect and try the image again."
+                "reconnect and try the image again. If this keeps "
+                "happening and the camera is connected through a USB hub "
+                "or dock, plug it straight into the computer."
             )
         elif camera_info.is_camera_disconnected(exc):
             message = "Camera disconnected"

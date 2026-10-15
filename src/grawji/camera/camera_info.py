@@ -73,11 +73,31 @@ def detect_camera() -> str | None:
 def is_camera_stuck(exc: Exception) -> bool:
     """Whether exc signals a hung camera (timed-out or busy conversion).
 
-    A conversion that never returns (TimeoutError) or a follow-up call
-    rejected with PTP 0x2019 (Device_Busy) both mean the body is wedged
-    and needs a power cycle - retrying from here cannot recover it.
+    A conversion that never returns (TimeoutError), a follow-up call
+    rejected with PTP 0x2019 (Device_Busy) or a reply still lost after the
+    session reconnected all mean the body is wedged and needs a power
+    cycle - retrying from here cannot recover it.
     """
-    return isinstance(exc, TimeoutError) or _ptp_code_in(exc, _DEVICE_BUSY)
+    return (
+        isinstance(exc, TimeoutError)
+        or _ptp_code_in(exc, _DEVICE_BUSY)
+        or is_lost_reply(exc)
+    )
+
+
+def is_lost_reply(exc: Exception) -> bool:
+    """Whether exc is a USB transfer the camera never completed.
+
+    rawji reports a bulk read or write that timed out as "USB read
+    failed: ... timed out". The camera may still have acted on the
+    command, and rawji does not match replies to requests, so the session
+    must not be used again. Seen on cameras behind chained USB hubs.
+    """
+    text = str(exc)
+    return (
+        text.startswith(("USB read failed", "USB write failed"))
+        and "timed out" in text
+    )
 
 
 def is_camera_disconnected(exc: Exception) -> bool:

@@ -13,12 +13,13 @@ read-modify-write (RMW) profile strategy:
 from __future__ import annotations
 
 import contextlib
+import logging
 import struct
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import rawji
 import usb.core
@@ -45,8 +46,10 @@ from rawji.fuji_profile import (
     encode_tone_value,
 )
 
-from grawji.camera import camera_backup, camera_info
+from grawji.camera import camera_backup, camera_info, conversion
 from grawji.recipe import Recipe
+
+_log = logging.getLogger(__name__)
 
 # rawji parameter name -> byte offset in the native profile, derived from
 # rawji's layout (PROFILE_PARAMS_OFFSET + index * 4).
@@ -531,10 +534,13 @@ class CameraSession:
                 camera, base = self._open_attempt(raf_path)
             except ForeignRafError:
                 raise
-            except Exception:
+            except Exception as exc:
                 # A wedged USB interface (failed claim, bulk-write
                 # timeout) often recovers with one device reset.
                 # Opening is safe to retry - no conversion is in flight yet.
+                _log.warning(
+                    "opening the RAF failed (%s); resetting USB, retrying", exc
+                )
                 self._usb_reset()
                 camera, base = self._open_attempt(raf_path)
             self._camera = camera
@@ -542,12 +548,17 @@ class CameraSession:
             self._raf_path = Path(raf_path)
 
     def _open_attempt(self, raf_path: str | Path) -> tuple[Any, bytes]:
-        """Run one connect / send_raf / get_profile sequence."""
+        """Run one connect / send_raf / get_profile sequence.
+
+        Objects still on the camera from an earlier session (an upload or
+        a result whose reply was lost) are deleted before the upload.
+        """
         camera = self._camera_factory()
         try:
             if not camera.connect():
                 raise CameraError("could not connect to camera")
             self._model = self._read_model(camera) or self._model
+            conversion.clear_leftovers(camera, keep_upload=False)
             camera.send_raf(str(raf_path))
             base: bytes = camera.get_profile()
         except Exception as e:
@@ -599,17 +610,17 @@ class CameraSession:
             profile = apply_file_type(
                 apply_recipe(self._base_profile, recipe), file_type
             )
-            self._camera.set_profile(profile)
-            self._camera.trigger_conversion(full_resolution=full_resolution)
-            return cast("bytes", self._camera.wait_for_result(self._timeout))
+            return self._convert_locked(
+                profile, full_resolution=full_resolution, thumbnail=False
+            )
 
     def render_thumb(self, recipe: Recipe) -> bytes:
         """Apply a recipe and render a small preview thumbnail.
 
         Renders the camera's fast preview but downloads only its
         thumbnail. On the X-E5 that is a 640x480 letterboxed JPEG of ~40 KB in
-        ~12 ms, against a 4 MB preview. rawji falls back to the full
-        preview download on bodies where GetThumb is refused.
+        ~12 ms, against a 4 MB preview. Bodies that refuse GetThumb get the
+        full preview download instead.
 
         Raises:
             SessionStateError: If no RAF is open.
@@ -618,12 +629,52 @@ class CameraSession:
             if self._camera is None or self._base_profile is None:
                 raise SessionStateError("no RAF open; call open() first")
             profile = apply_recipe(self._base_profile, recipe)
-            self._camera.set_profile(profile)
-            self._camera.trigger_conversion(full_resolution=False)
-            return cast(
-                "bytes",
-                self._camera.wait_for_result(self._timeout, thumbnail=True),
+            return self._convert_locked(
+                profile, full_resolution=False, thumbnail=True
             )
+
+    def _convert_locked(
+        self, profile: bytes, *, full_resolution: bool, thumbnail: bool
+    ) -> bytes:
+        """Convert with a profile, reconnecting once after a lost reply.
+
+        rawji does not match replies to requests, so once the camera drops
+        one, every later command on the session would read a stale answer.
+        The session is closed instead and a fresh one, with the RAF sent
+        again, gets one more try. Caller holds the lock.
+        """
+        for last_try in (False, True):
+            try:
+                return self._convert_once(
+                    profile,
+                    full_resolution=full_resolution,
+                    thumbnail=thumbnail,
+                )
+            except Exception as exc:
+                if not camera_info.is_lost_reply(exc):
+                    raise
+                raf_path = self._raf_path
+                self._close_locked()
+                if last_try or raf_path is None:
+                    raise
+                _log.warning("camera dropped a reply (%s); reconnecting", exc)
+            self._camera, self._base_profile = self._open_attempt(raf_path)
+            self._raf_path = raf_path
+        raise AssertionError("unreachable")
+
+    def _convert_once(
+        self, profile: bytes, *, full_resolution: bool, thumbnail: bool
+    ) -> bytes:
+        """Clear leftovers, set the profile, convert and fetch the result."""
+        camera = self._camera
+        if camera is None:
+            raise SessionStateError("no RAF open; call open() first")
+        kept = conversion.clear_leftovers(camera, keep_upload=True)
+        camera.set_profile(profile)
+        camera.trigger_conversion(full_resolution=full_resolution)
+        return conversion.wait_for_result(
+            camera, self._timeout, thumbnail=thumbnail, ignore=kept
+        )
 
     def transfer_bank_recipes(
         self,

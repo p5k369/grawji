@@ -18,6 +18,14 @@ from grawji.camera.core import (
     shot_dynamic_range,
 )
 from grawji.recipe import Recipe
+from tests.ptp_support import (
+    DELETE_OBJECT,
+    GET_OBJECT,
+    GET_THUMB,
+    JPEG_FORMAT,
+    UPLOAD_FORMAT,
+    PtpCamera,
+)
 
 VELVIA_BYTE = 2
 ACROS_BYTE = 12
@@ -48,17 +56,25 @@ def _u32(profile, offset):
     return struct.unpack("<I", profile[offset : offset + 4])[0]
 
 
-class FakeCamera:
-    """A stand-in for rawji.FujiCamera that records the call sequence."""
+class FakeCamera(PtpCamera):
+    """A stand-in for rawji.FujiCamera that records the call sequence.
+
+    Each conversion lists a JPEG result (with a thumbnail) that the
+    session collects over the PTP operations of PtpCamera.
+    """
 
     def __init__(self, *, connect_ok=True, fail_on=None, profile=None):
         """Configure connect success, a method to fail on, and a profile."""
+        super().__init__()
         self.calls = []
         self._connect_ok = connect_ok
         self._fail_on = fail_on  # method name that should raise 0x2002
         self._profile = profile if profile is not None else bytes(608)
         self.set_profiles = []
         self.last_full_resolution = None
+        self.objects_at_upload = None
+        self.lost_reply_in = None  # method whose reply never comes
+        self._next_handle = 0x10
 
     def _maybe_fail(self, name):
         """Raise a 0x2002-style error if this method is the failure point."""
@@ -70,9 +86,15 @@ class FakeCamera:
         self.calls.append("connect")
         return self._connect_ok
 
+    def _maybe_lose_reply(self, name):
+        """Time out like a reply lost on a flaky USB link."""
+        if self.lost_reply_in == name:
+            raise OSError("USB read failed: [Errno 110] Operation timed out")
+
     def send_raf(self, filepath):
         """Record the RAF upload and maybe fail."""
         self.calls.append(("send_raf", filepath))
+        self.objects_at_upload = dict(self.objects)
         self._maybe_fail("send_raf")
 
     def get_profile(self):
@@ -86,19 +108,24 @@ class FakeCamera:
         self.calls.append("set_profile")
         self.set_profiles.append(profile)
 
-    def trigger_conversion(self, full_resolution=True):
-        """Record the trigger and the requested resolution."""
-        self.calls.append(("trigger_conversion", full_resolution))
-        self.last_full_resolution = full_resolution
-
     no_result = False
 
-    def wait_for_result(self, timeout=30, thumbnail=False):
-        """Record the wait and return placeholder JPEG bytes."""
-        self.calls.append(("wait_for_result", timeout, thumbnail))
-        if self.no_result:
-            raise TimeoutError(f"Conversion timeout after {timeout} seconds")
-        return b"THUMB" if thumbnail else b"JPEG"
+    def trigger_conversion(self, full_resolution=True):
+        """Record the trigger; list a result unless no_result is set."""
+        self.calls.append(("trigger_conversion", full_resolution))
+        self.last_full_resolution = full_resolution
+        self._maybe_lose_reply("trigger_conversion")
+        if not self.no_result:
+            self.add_object(JPEG_FORMAT, b"JPEG", thumb=b"THUMB")
+
+    def add_object(self, fmt, data, *, thumb=None):
+        """List a new object; returns its handle."""
+        handle = self._next_handle
+        self._next_handle += 1
+        self.objects[handle] = [fmt, data]
+        if thumb is not None:
+            self.thumbs[handle] = thumb
+        return handle
 
     def disconnect(self):
         """Record the disconnect."""
@@ -109,9 +136,12 @@ def session_for(camera):
     """Build a CameraSession whose factory always returns ``camera``.
 
     The USB-reset recovery hook is stubbed out so a failure-path test can
-    never reset real hardware on the developer's machine.
+    never reset real hardware on the developer's machine. The fake lists
+    its result at once, so a zero timeout only cuts the no-result wait.
     """
-    return CameraSession(camera_factory=lambda: camera, usb_reset=lambda: None)
+    return CameraSession(
+        camera_factory=lambda: camera, usb_reset=lambda: None, timeout=0
+    )
 
 
 def test_film_simulation_byte_known():
@@ -567,7 +597,8 @@ def test_render_thumb_requests_the_thumbnail():
     thumb = session.render_thumb(Recipe())
     assert thumb == b"THUMB"
     assert camera.last_full_resolution is False
-    assert ("wait_for_result", 30, True) in camera.calls
+    assert camera.count(GET_THUMB) == 1
+    assert camera.count(GET_OBJECT) == 0
 
 
 def test_render_uses_the_full_download():
@@ -576,7 +607,8 @@ def test_render_uses_the_full_download():
     session = session_for(camera)
     session.open("/tmp/shot.RAF")
     assert session.render(Recipe(), full_resolution=False) == b"JPEG"
-    assert ("wait_for_result", 30, False) in camera.calls
+    assert camera.count(GET_THUMB) == 0
+    assert camera.count(GET_OBJECT) == 1
 
 
 def test_render_thumb_without_open_raises():
@@ -587,13 +619,88 @@ def test_render_thumb_without_open_raises():
 
 
 def test_render_thumb_times_out_without_a_result():
-    """A rawji conversion timeout propagates to the caller."""
+    """A conversion timeout propagates to the caller."""
     camera = FakeCamera(profile=bytes(FULL_PROFILE))
     camera.no_result = True
     session = session_for(camera)
     session.open("/tmp/shot.RAF")
     with pytest.raises(TimeoutError):
         session.render_thumb(Recipe())
+
+
+def test_render_skips_the_listed_upload():
+    """A listed RAF upload is never downloaded as the render (0x200F)."""
+    camera = FakeCamera()
+    session = session_for(camera)
+    session.open("/tmp/shot.RAF")
+    upload = camera.add_object(UPLOAD_FORMAT, b"RAF")
+    assert session.render(Recipe(), full_resolution=False) == b"JPEG"
+    assert (GET_OBJECT, upload) not in camera.ops
+    assert upload in camera.objects
+
+
+def test_render_never_returns_a_stale_result():
+    """A result left by an earlier lost reply is deleted, not returned."""
+    camera = FakeCamera()
+    session = session_for(camera)
+    session.open("/tmp/shot.RAF")
+    stale = camera.add_object(JPEG_FORMAT, b"STALE")
+    assert session.render(Recipe(), full_resolution=False) == b"JPEG"
+    assert (DELETE_OBJECT, stale) in camera.ops
+    assert camera.objects == {}
+
+
+def test_open_deletes_orphans_before_the_upload():
+    """Objects left from an earlier session are gone before send_raf."""
+    camera = FakeCamera()
+    camera.add_object(UPLOAD_FORMAT, b"OLD RAF")
+    camera.add_object(JPEG_FORMAT, b"OLD JPEG")
+    session_for(camera).open("/tmp/shot.RAF")
+    assert camera.objects_at_upload == {}
+
+
+def test_lost_reply_reconnects_and_renders():
+    """A dropped reply costs a fresh session and RAF upload, not an error."""
+    flaky, fresh = FakeCamera(), FakeCamera()
+    flaky.lost_reply_in = "trigger_conversion"
+    cameras = [flaky, fresh]
+    session = CameraSession(
+        camera_factory=lambda: cameras.pop(0), usb_reset=lambda: None
+    )
+    session.open("/tmp/shot.RAF")
+    assert session.render(Recipe(), full_resolution=False) == b"JPEG"
+    assert "disconnect" in flaky.calls
+    assert ("send_raf", "/tmp/shot.RAF") in fresh.calls
+    assert session.is_open
+    assert session.raf_path.name == "shot.RAF"
+
+
+def test_reply_lost_again_closes_the_session():
+    """A second lost reply is raised, leaving no poisoned session open."""
+    cameras = [FakeCamera(), FakeCamera()]
+    for camera in cameras:
+        camera.lost_reply_in = "trigger_conversion"
+    pool = list(cameras)
+    session = CameraSession(
+        camera_factory=lambda: pool.pop(0), usb_reset=lambda: None
+    )
+    session.open("/tmp/shot.RAF")
+    with pytest.raises(OSError, match="timed out"):
+        session.render(Recipe(), full_resolution=False)
+    assert not session.is_open
+    assert all("disconnect" in camera.calls for camera in cameras)
+
+
+def test_other_render_errors_keep_the_session():
+    """A PTP refusal is raised as before, without reconnecting."""
+    camera = FakeCamera()
+    camera.no_result = True
+    session = session_for(camera)
+    session.open("/tmp/shot.RAF")
+    with pytest.raises(TimeoutError):
+        session.render(Recipe(), full_resolution=False)
+    assert session.is_open
+    assert camera.calls.count("connect") == 1
 
 
 def _profile_with_dr(percent: int) -> bytes:
