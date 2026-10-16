@@ -106,6 +106,12 @@
               </object>
             </child>
             <child>
+              <object class="AdwSwitchRow" id="recipe_per_image_row">
+                <property name="title">Give each image its own recipe</property>
+                <property name="subtitle">Open every image with the recipe it was shot with, and keep its edits apart</property>
+              </object>
+            </child>
+            <child>
               <object class="AdwSwitchRow" id="auto_reconnect_row">
                 <property name="title">Reconnect when a camera appears</property>
                 <property name="subtitle">Reopen the current image automatically on connect</property>

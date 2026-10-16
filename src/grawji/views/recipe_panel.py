@@ -460,6 +460,23 @@ class RecipePanel(Adw.PreferencesPage):
         """Go forward one undone step and report whether there was one."""
         return self._restore(self._history.redo())
 
+    def snapshot(self) -> Snapshot:
+        """The recipe state to show again later with restore."""
+        return self._snapshot()
+
+    def restore(self, state: Snapshot) -> None:
+        """Show a snapshot again, e.g. on returning to an edited image.
+
+        Unlike undo it emits nothing: the caller renders and starts the
+        history over.
+        """
+        self._active_label = state.label
+        self._active_unsaved = state.unsaved
+        self._applied_recipe = state.applied
+        self.set_recipe(state.recipe)
+        self._update_status()
+        self.sync_combo("" if self.is_modified else state.label)
+
     def _snapshot(self) -> Snapshot:
         """The panel's state as the history records it."""
         return Snapshot(

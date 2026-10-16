@@ -53,6 +53,7 @@ from grawji.controllers.exports import (
 )
 from grawji.controllers.fileops import FileOpsController
 from grawji.controllers.marks import MarksController
+from grawji.edit_history import Snapshot
 from grawji.imaging import imagemeta
 from grawji.imaging.pixbufs import trim_letterbox
 from grawji.imaging.render import (
@@ -240,10 +241,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._render_pending_id = self._load_pending_id = 0
         self._error_showing = False
         self._close_confirmed = self._camera_seen = False
-        # Bumped on every image selection. Async open/preview callbacks carry
-        # the value they were issued under and ignore themselves if a newer
-        # selection has superseded them (fast filmstrip scrubbing).
-        self._generation = 0
+        self._init_selection_state()
         self._preview_seq = 0
 
         self._settings = load_settings(settings_path())
@@ -856,6 +854,18 @@ class MainWindow(Adw.ApplicationWindow):
         self._save_settings()
         self.preview_view.set_status("Select an image from the filmstrip.")
 
+    def _init_selection_state(self) -> None:
+        """Start with no image selected and no recipe edits remembered."""
+        # Bumped on every image selection. Async open/preview callbacks carry
+        # the value they were issued under and ignore themselves if a newer
+        # selection has superseded them (fast filmstrip scrubbing).
+        self._generation = 0
+        # With recipe_per_image: the recipe edits per image, kept for the
+        # session so returning to an image shows them again.
+        self._image_recipes: dict[str, Snapshot] = {}
+        # The image whose recipe the panel shows, once it has opened.
+        self._panel_image: str | None = None
+
     def _on_raf_selected(self, raf_path: str, *, quiet: bool = False) -> None:
         """React to the click instantly; load the RAF on the next idle tick.
 
@@ -869,6 +879,7 @@ class MainWindow(Adw.ApplicationWindow):
         """
         self._nav.update()
         self._flush_pending_exposure()
+        self._remember_image_recipe()
         self._generation += 1
         self._raf_path = Path(raf_path)
         self._show_current_marks()
@@ -1013,12 +1024,20 @@ class MainWindow(Adw.ApplicationWindow):
             self._navigator.queue_draw()
 
     def _on_opened(self, generation: int, _result: object) -> None:
-        """Show the first preview, applying the sticky recipe selection."""
+        """Show the first preview with the recipe the image opens with.
+
+        By default the recipe carries over: unsaved edits follow along,
+        else the sticky picker selection applies. With recipe_per_image
+        the image gets its own recipe ("From image"), or the edits it was
+        left with earlier in the session.
+        """
         if generation != self._generation:
             return  # a newer selection has superseded this open
+        self._panel_image = str(self._raf_path)
+        per_image = self._settings.recipe_per_image
         carry = (
             self.recipe_panel.get_recipe()
-            if self.recipe_panel.needs_save
+            if not per_image and self.recipe_panel.needs_save
             else None
         )
         profile = self._session.profile
@@ -1057,14 +1076,19 @@ class MainWindow(Adw.ApplicationWindow):
             if self.preview_view.comparing:
                 self._render_baseline(self._generation)
             return
-        selection = self._settings.open_recipe
+        remembered = (
+            self._image_recipes.get(self._panel_image) if per_image else None
+        )
+        selection = FROM_IMAGE if per_image else self._settings.open_recipe
         saved = (
             None
             if selection == FROM_IMAGE
             else self._recipe_library.get(selection)
         )
         from_image = selection == FROM_IMAGE or saved is None
-        if profile is not None and from_image:
+        if remembered is not None:
+            self.recipe_panel.restore(remembered)
+        elif profile is not None and from_image:
             self.recipe_panel.set_active(shot_recipe, FROM_IMAGE_LABEL)
             # The loaded recipe is the image's own, so the embedded JPEG
             # already shown is exactly what a render would produce - skip the
@@ -1086,6 +1110,21 @@ class MainWindow(Adw.ApplicationWindow):
         # Comparing carries across images: refresh the baseline for this one.
         if self.preview_view.comparing:
             self._render_baseline(self._generation)
+
+    def _remember_image_recipe(self) -> None:
+        """Keep the recipe edits of the image being left, for its return.
+
+        Only with recipe_per_image. An image left on its own unedited
+        recipe is forgotten, so it opens "From image" like any other.
+        """
+        path, self._panel_image = self._panel_image, None
+        if path is None or not self._settings.recipe_per_image:
+            return
+        panel = self.recipe_panel
+        if panel.active_label == FROM_IMAGE_LABEL and not panel.needs_save:
+            self._image_recipes.pop(path, None)
+        else:
+            self._image_recipes[path] = panel.snapshot()
 
     def _notify_unverified(self, model: str | None) -> None:
         """Toast once per session when the body is not in the table.
@@ -1866,6 +1905,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_settings_changed(self) -> None:
         """Persist settings and apply any that affect the live UI."""
+        if not self._settings.recipe_per_image:
+            self._image_recipes.clear()
         self._apply_pair_source()
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self._filmstrip.set_glide_speed(self._settings.nav_glide_speed)

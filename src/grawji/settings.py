@@ -36,6 +36,10 @@ class Settings:
         open_recipe: The sticky recipe selection applied to each opened
             image. FROM_IMAGE loads each image's own in-camera recipe.
             Any other value is a saved recipe name applied to every image.
+        recipe_per_image: Open every image with its own recipe ("From
+            image") and keep the edits or recipe picked for an image with
+            it for the session. Off, the recipe carries over: unsaved
+            edits follow to the next image and open_recipe applies.
         sidebar_width: Width of the left side panel in pixels; drag the
             pane handle to 0 to collapse it (remembered across runs).
         canvas_background: Preview background CSS class ("" = themed).
@@ -102,6 +106,7 @@ class Settings:
     """
 
     open_recipe: str = FROM_IMAGE
+    recipe_per_image: bool = False
     sidebar_width: int = 240
     canvas_background: str = ""
     last_folder: str = ""
