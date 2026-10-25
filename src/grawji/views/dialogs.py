@@ -1,4 +1,4 @@
-"""Small informational dialogs: keyboard shortcuts and About."""
+"""Small informational dialogs."""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def present_about(parent: Gtk.Widget) -> None:
     """Show the About dialog."""
     about = Adw.AboutDialog(
         application_name="grawji",
-        application_icon="camera-photo-symbolic",
+        application_icon="io.github.p5k369.grawji",
         version=app_version(),
         website="https://github.com/p5k369/grawji",
         issue_url="https://github.com/p5k369/grawji/issues",

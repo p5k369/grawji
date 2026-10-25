@@ -240,6 +240,10 @@ def stage(tree: Path, rawji: str | None) -> None:
         (share / "applications", f"{APP_ID}.desktop"),
         (share / "metainfo", f"{APP_ID}.metainfo.xml"),
         (share / "icons/hicolor/scalable/apps", f"{APP_ID}.svg"),
+        (
+            share / "icons/hicolor/symbolic/apps",
+            f"{APP_ID}-symbolic.svg",
+        ),
     ):
         target.mkdir(parents=True, exist_ok=True)
         shutil.copy(DATA / name, target / name)

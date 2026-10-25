@@ -220,6 +220,8 @@ modules:
         ${FLATPAK_DEST}/share/metainfo/io.github.p5k369.grawji.metainfo.xml
       - install -Dm644 data/io.github.p5k369.grawji.svg
         ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.p5k369.grawji.svg
+      - install -Dm644 data/io.github.p5k369.grawji-symbolic.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/io.github.p5k369.grawji-symbolic.svg
     sources:
       - type: dir
         path: ..
