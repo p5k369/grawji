@@ -4,7 +4,7 @@
 <cambalache-project version="1.0.0" target_tk="gtk-4.0" depends="libadwaita-1">
   <ui filename="preview_view.ui" sha256="bd0666386118ef6e349033c34b049caa18899029dbe981d4205880a112945458"/>
   <ui filename="recipe_panel.ui" sha256="23b424bac0d383e93161561d2a10332a31d1ff9d48404616a685800a2ce2ffc9"/>
-  <ui filename="grawji.ui" sha256="4cc567c1cfcfb18387940e650c39cdd8bce5a45e09bb0b6452e1df9d70bec127"/>
+  <ui filename="grawji.ui" sha256="bc22cfc5dd47c3fccbd08eac3bed166ba4d263b91c50a191778972d27007b3cb"/>
   <ui filename="batch_export.ui" sha256="a2179fe58eb83df67efeb1f81836592aadcbb6564009d891ecb6f0c076dfd5b3"/>
   <ui filename="preferences.ui" sha256="6cfecdc8b2f0a37852eb9becd218b5e9ea1e3490afad948283bcb75708b96881"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>

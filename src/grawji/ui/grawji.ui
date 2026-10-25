@@ -33,10 +33,12 @@
       <item>
         <attribute name="label">Show Histogram</attribute>
         <attribute name="action">win.toggle-histogram</attribute>
+        <attribute name="accel">h</attribute>
       </item>
       <item>
         <attribute name="label">Show Marks Bar</attribute>
         <attribute name="action">win.toggle-marks-bar</attribute>
+        <attribute name="accel">m</attribute>
       </item>
     </section>
     <section>
@@ -69,6 +71,71 @@
     </section>
   </menu>
   <template class="MainWindow" parent="AdwApplicationWindow">
+    <child>
+      <object class="GtkShortcutController">
+        <property name="propagation-phase">bubble</property>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">b</property>
+            <property name="action">action(win.cycle-background)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">backslash</property>
+            <property name="action">action(win.toggle-peek)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">c</property>
+            <property name="action">action(win.toggle-crop)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">e</property>
+            <property name="action">action(win.toggle-export)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">x</property>
+            <property name="action">action(win.toggle-reject)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">g</property>
+            <property name="action">action(win.toggle-grid)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">h</property>
+            <property name="action">action(win.toggle-histogram)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">m</property>
+            <property name="action">action(win.toggle-marks-bar)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">j</property>
+            <property name="action">action(win.toggle-source)</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcut">
+            <property name="trigger">Escape</property>
+            <property name="action">action(win.cancel-selection)</property>
+          </object>
+        </child>
+      </object>
+    </child>
     <property name="default-width">1360</property>
     <property name="default-height">880</property>
     <property name="content">
