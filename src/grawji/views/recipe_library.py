@@ -48,6 +48,9 @@ class RecipeLibraryController:
         load_bank_names: (
             Callable[[Callable[[str | None, list[str]], None]], None] | None
         ) = None,
+        carrier_for: Callable[[str], str | None] | None = None,
+        set_carrier: Callable[[str, str | None], str | None] | None = None,
+        current_raf: Callable[[], str | None] | None = None,
         run_transfer: Callable[..., None] | None = None,
         render_thumb: (
             Callable[[Recipe, Callable[[bytes | None], None]], None] | None
@@ -72,6 +75,9 @@ class RecipeLibraryController:
             get_model: Returns the connected body's model, used to tag a
                 saved recipe's origin and drive the camera-bank pane.
             load_bank_names: Reads current bank names off the main thread.
+            carrier_for: Returns the carrier file registered for a body.
+            set_carrier: Registers a body's carrier, returning a refusal.
+            current_raf: Returns the RAF open in the main window.
             run_transfer: Performs the USB bank transfer off the main thread.
             render_thumb: Renders a recipe against the open RAF and calls
                 back with a small thumbnail JPEG. Does nothing when no
@@ -88,6 +94,9 @@ class RecipeLibraryController:
         self.get_capabilities = get_capabilities
         self.get_model = get_model
         self.load_bank_names = load_bank_names
+        self.carrier_for = carrier_for
+        self.set_carrier = set_carrier
+        self.current_raf = current_raf
         self._run_transfer = run_transfer
         self._render_thumb = render_thumb
         self._manager: RecipeManagerDialog | None = None

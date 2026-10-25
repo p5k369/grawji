@@ -73,6 +73,7 @@ from grawji.settings import (
     save_settings,
     settings_path,
 )
+from grawji.transplant import opener
 from grawji.views import dialogs
 from grawji.views.edit_match import EditMatchDialog
 from grawji.views.filmstrip import FilmStrip
@@ -221,11 +222,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     _marks: MarksController
     _mark_actions: list[Gio.SimpleAction]
+    _exif_rows: list[Any]
+    _exif_pairs: list[tuple[str, str]]
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, the composite widgets and the controllers."""
         super().__init__(**kwargs)
-        self._session = CameraSession()
+        self._session = CameraSession(
+            open_foreign=opener.from_settings(lambda: self._settings)
+        )
         self._worker = CameraWorker(self._session, dispatch=mainloop.call)
         self._worker.start()
         self.connect("close-request", self._on_close_request)
@@ -236,7 +241,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._shot_ev: float | None = None
         self._current_folder: str | None = None
         self._notified_models: set[str] = set()
-        self._exif_rows: list[Any] = []
+        self._exif_rows, self._exif_pairs = [], []
         self._render_pending_id = self._load_pending_id = 0
         self._error_showing = False
         self._close_confirmed = self._camera_seen = False
@@ -310,6 +315,11 @@ class MainWindow(Adw.ApplicationWindow):
             get_capabilities=self._current_capabilities,
             get_model=camera_info.detect_camera,
             load_bank_names=self._camera_ops.load_bank_names,
+            carrier_for=self._carrier_for,
+            set_carrier=self._set_carrier,
+            current_raf=lambda: (
+                str(self._raf_path) if self._raf_path is not None else None
+            ),
             run_transfer=self._camera_ops.run_bank_transfer,
             render_thumb=self._render_recipe_thumb,
             on_closed=self._on_recipe_manager_closed,
@@ -1023,13 +1033,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
         profile = self._session.profile
         if profile is not None:
-            # The RAF is provably from the connected body (a foreign one
-            # fails with 0x2002), so its EXIF model identifies the camera.
-            model = (
-                imagemeta.camera_model(str(self._raf_path))
-                if self._raf_path is not None
-                else None
-            ) or self._session.model
+            model = self._rendering_model()
+            self._populate_exif_rows(
+                self._exif_pairs + self._developed_by_row()
+            )
             self.recipe_panel.apply_capabilities(
                 capabilities_for(profile, model=model)
             )
@@ -1721,6 +1728,8 @@ class MainWindow(Adw.ApplicationWindow):
         for row in self._exif_rows:
             self.exif_group.remove(row)
         self._exif_rows = []
+        if not any(label == "Developed by" for label, _value in rows):
+            self._exif_pairs = list(rows)
         for label, value in rows:
             row = Adw.ActionRow(title=label, subtitle=value)
             self.exif_group.add(row)
@@ -1757,6 +1766,11 @@ class MainWindow(Adw.ApplicationWindow):
             message = "Camera error"
             detail = (
                 "This RAF was shot by a different camera body. Fuji "
+                "cameras only convert their own RAFs. The connected body "
+                "can develop it through a carrier, registered in the "
+                "Recipe Manager's camera pane."
+                if self._session.model
+                else "This RAF was shot by a different camera body. Fuji "
                 "cameras only convert their own RAFs."
             )
         elif camera_info.is_camera_stuck(exc):
@@ -1796,15 +1810,48 @@ class MainWindow(Adw.ApplicationWindow):
     def _current_capabilities(self) -> Capabilities:
         """Capabilities of the connected body for recipe compatibility."""
         profile = self._session.profile
-        model = self._session.model or camera_info.detect_camera()
         if profile is not None:
-            raf_model = (
-                imagemeta.camera_model(str(self._raf_path))
-                if self._raf_path is not None
-                else None
-            )
-            return capabilities_for(profile, model=raf_model or model)
+            return capabilities_for(profile, model=self._rendering_model())
+        model = self._session.model or camera_info.detect_camera()
         return capabilities_for_model(model)
+
+    def _carrier_for(self, model: str) -> str | None:
+        """The carrier file registered for a body, as the pane shows it."""
+        carrier = opener.carrier_for(self._settings, model)
+        return str(carrier) if carrier is not None else None
+
+    def _set_carrier(self, model: str, path: str | None) -> str | None:
+        """Register (or forget) a body's carrier."""
+        key = opener.normalize_model(model)
+        if path is None:
+            for registered in list(self._settings.carriers):
+                if opener.normalize_model(registered) == key:
+                    del self._settings.carriers[registered]
+            self._save_settings()
+            return None
+        problem = opener.check_carrier(path, model)
+        if problem is not None:
+            return problem
+        self._settings.carriers[model] = path
+        self._save_settings()
+        return None
+
+    def _developed_by_row(self) -> list[tuple[str, str]]:
+        """The info row naming the body that develops a foreign RAF."""
+        if self._session.foreign is None or not self._session.model:
+            return []
+        return [("Developed by", self._session.model)]
+
+    def _rendering_model(self) -> str | None:
+        """The body whose engine develops the open RAF."""
+        if self._session.foreign is not None:
+            return self._session.model
+        raf_model = (
+            imagemeta.camera_model(str(self._raf_path))
+            if self._raf_path is not None
+            else None
+        )
+        return raf_model or self._session.model
 
     def _refresh_camera_status(self) -> bool:
         """Update the header subtitle with the connected camera, if any."""

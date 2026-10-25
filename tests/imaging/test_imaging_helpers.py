@@ -176,3 +176,32 @@ def _solid(width: int, height: int, value: int = 150):
     )
     pixbuf.fill((value << 24) | (value << 16) | (value << 8) | 0xFF)
     return pixbuf
+
+
+def test_with_exif_of_copies_the_metadata_upright(tmp_path):
+    """A re-encoded JPEG gets the source's EXIF with a normal orientation."""
+    from grawji.imaging import imagemeta
+
+    source = tmp_path / "source.jpg"
+    GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 8, 6).savev(
+        str(source), "jpeg", [], []
+    )
+    meta = GExiv2.Metadata()
+    meta.open_path(str(source))
+    meta.try_set_tag_string("Exif.Image.Model", "X100F")
+    meta.try_set_orientation(GExiv2.Orientation.ROT_90)
+    meta.save_file(str(source))
+    bare = tmp_path / "bare.jpg"
+    GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 6, 8).savev(
+        str(bare), "jpeg", [], []
+    )
+
+    out = imagemeta.with_exif_of(
+        bare.read_bytes(), source.read_bytes(), (6, 8)
+    )
+
+    check = GExiv2.Metadata()
+    check.open_buf(out)
+    assert check.try_get_tag_string("Exif.Image.Model") == "X100F"
+    assert check.try_get_orientation() == GExiv2.Orientation.NORMAL
+    assert check.try_get_tag_long("Exif.Photo.PixelXDimension") == 6

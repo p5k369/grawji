@@ -153,6 +153,26 @@ def fuji_auto_wb_levels(path: str) -> tuple[int, int, int] | None:
     return g, r, b
 
 
+def fuji_dynamic_range(path: str) -> int | None:
+    """The DR class a RAF was shot at."""
+    metadata = GExiv2.Metadata()
+    try:
+        metadata.open_path(path)
+    except GLib.Error:
+        return None
+    for tag in (
+        "Exif.Fujifilm.DevelopmentDynamicRange",
+        "Exif.Fujifilm.AutoDynamicRange",
+    ):
+        text = (
+            metadata.try_get_tag_string(tag) if metadata.has_tag(tag) else ""
+        ) or ""
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if digits:
+            return int(digits)
+    return None
+
+
 def fuji_lens_tables(
     path: str,
 ) -> tuple[list[float], list[float], list[float]] | None:
@@ -175,7 +195,7 @@ def fuji_lens_tables(
             "VignettingParams",
         )
     ]
-    if not all(tables):
+    if not tables[0] or not tables[2]:
         return None
     return tables[0], tables[1], tables[2]
 
@@ -274,6 +294,20 @@ def copy_exif(
         metadata.save_file(dest_path)
     except GLib.Error:
         pass
+
+
+def with_exif_of(
+    jpeg: bytes, source_jpeg: bytes, size: tuple[int, int] | None = None
+) -> bytes:
+    """The JPEG bytes carrying the source JPEG's metadata."""
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp.write(jpeg)
+        tmp_path = tmp.name
+    try:
+        copy_exif(source_jpeg, tmp_path, size=size, xmp=False)
+        return Path(tmp_path).read_bytes()
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 def _patch_ifd0_size(tiff: bytes, size: tuple[int, int] | None) -> bytes:

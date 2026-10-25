@@ -341,3 +341,42 @@ def test_develop_preview_skips_the_compensation(tmp_path, monkeypatch):
     )
 
     assert captured["compensate"] is False
+
+
+def test_lens_tables_tolerate_an_older_chromatic_layout(monkeypatch):
+    """X-Trans III writes a different chromatic table."""
+    knots = (0.5, 1.0)
+    raw = (
+        [4643 / 9, *knots, -1.0, -3.0],
+        [4643 / 9, 0.1],
+        [4643 / 9, *knots, 90.0, 60.0],
+    )
+    _fake_tables(monkeypatch, {"old.RAF": raw})
+    tables = lens.lens_tables("old.RAF")
+    assert tables is not None
+    assert tables.distortion == (-1.0, -3.0)
+    assert tables.chromatic_red == (0.0, 0.0)
+    assert tables.corrects
+
+
+def test_zero_distortion_leaves_the_image_untouched():
+    """A table of zeros means no remap, no zoom and no compensation."""
+    rng = np.random.default_rng(3)
+    pixels = rng.integers(0, 255, (48, 64, 3), dtype=np.uint8)
+    image = Image.fromarray(pixels, "RGB")
+    tables = lens.LensTables(_KNOTS, _ZERO, _VIGNETTING, _ZERO, _ZERO)
+    out = lens.apply_donor_correction(image, tables)
+    assert np.array_equal(np.asarray(out), pixels)
+
+
+def test_fill_scale_keeps_every_edge_pixel_inside_the_source():
+    """Barrel tables get the engine's zoom, pincushion ones a smaller one."""
+    assert 1.005 < lens.fill_scale(_XF23, 400, 600) <= lens.FILL_SCALE
+    pincushion = lens.LensTables(
+        _KNOTS, tuple(-d for d in _DISTORTION), _VIGNETTING, _ZERO, _ZERO
+    )
+    fill = lens.fill_scale(pincushion, 400, 600)
+    assert fill < 1.0
+    map_x, map_y = lens.distortion_maps(pincushion, 400, 600)
+    assert map_x.min() >= -0.5 and map_x.max() <= 599.5
+    assert map_y.min() >= -0.5 and map_y.max() <= 399.5

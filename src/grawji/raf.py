@@ -65,6 +65,7 @@ def embedded_jpeg_prefix(path: str | Path, max_bytes: int) -> bytes:
 _META_OFFSET_POS = 92
 _META_MIN = _META_OFFSET_POS + 8
 # The cropped raw size: what the camera's JPEGs measure.
+_TAG_CROP_ORIGIN = 0x0110
 _TAG_CROPPED_SIZE = 0x0111
 # Each meta record: u16 tag + u16 payload size.
 _META_RECORD_HEADER = 4
@@ -88,8 +89,30 @@ def _read_meta_block(path: str | Path) -> bytes | None:
     return meta if len(meta) >= _META_RECORD_HEADER else None
 
 
-def output_size(path: str | Path) -> tuple[int, int] | None:
-    """The RAF's delivered image size or None."""
+# The camera model, null padded ASCII, sits here in every RAF header.
+_MODEL_POS = 0x1C
+_MODEL_LEN = 32
+
+
+def header_model(path: str | Path) -> str | None:
+    """The camera model a RAF names in its header."""
+    try:
+        with Path(path).open("rb") as handle:
+            header = handle.read(_MODEL_POS + _MODEL_LEN)
+    except OSError:
+        return None
+    if (
+        not header.startswith(RAF_MAGIC)
+        or len(header) < _MODEL_POS + _MODEL_LEN
+    ):
+        return None
+    raw = header[_MODEL_POS : _MODEL_POS + _MODEL_LEN].split(b"\x00", 1)[0]
+    model = raw.decode("ascii", "ignore").strip()
+    return model or None
+
+
+def _meta_pair(path: str | Path, wanted: int) -> tuple[int, int] | None:
+    """The two u16 values of a meta record, or None when absent."""
     meta = _read_meta_block(path)
     if meta is None:
         return None
@@ -100,14 +123,29 @@ def output_size(path: str | Path) -> tuple[int, int] | None:
             break
         tag, size = struct.unpack_from(">HH", meta, pos)
         pos += _META_RECORD_HEADER
-        if (
-            tag == _TAG_CROPPED_SIZE
-            and size == _SIZE_PAYLOAD
-            and pos + size <= len(meta)
-        ):
-            height, width = struct.unpack_from(">HH", meta, pos)
-            if width > 0 and height > 0:
-                return int(width), int(height)
-            return None
+        if tag == wanted:
+            if size != _SIZE_PAYLOAD or pos + size > len(meta):
+                return None
+            first, second = struct.unpack_from(">HH", meta, pos)
+            return int(first), int(second)
         pos += size
     return None
+
+
+def output_size(path: str | Path) -> tuple[int, int] | None:
+    """The RAF's delivered image size or None."""
+    pair = _meta_pair(path, _TAG_CROPPED_SIZE)
+    if pair is None or 0 in pair:
+        return None
+    height, width = pair
+    return width, height
+
+
+def picture_frame(path: str | Path) -> tuple[int, int, int, int] | None:
+    """Where the delivered picture sits in the raw array."""
+    origin = _meta_pair(path, _TAG_CROP_ORIGIN)
+    size = output_size(path)
+    if origin is None or size is None:
+        return None
+    width, height = size
+    return origin[0], origin[1], height, width

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import os
 import sys
 import tomllib
@@ -101,7 +101,7 @@ def main() -> int:
                 print(f"unusable response, keeping the plain entry: {exc}")
                 return 0
             print(f"unusable response, retrying once: {exc}")
-    date = datetime.datetime.now(tz=datetime.UTC).date().isoformat()
+    date = dt.datetime.now(tz=dt.UTC).date().isoformat()
     entry = release_entry(version, date, items, intro=intro)
     METAINFO.write_text(upsert_release(METAINFO.read_text(), version, entry))
     print(f"polished metainfo release entry for {version} via {MODEL}")

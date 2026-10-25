@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import re
 import sys
 import tomllib
@@ -83,7 +83,7 @@ def main() -> int:
     if not bullets:
         print(f"no changelog section for {version}, nothing to sync")
         return 1
-    date = datetime.datetime.now(tz=datetime.UTC).date().isoformat()
+    date = dt.datetime.now(tz=dt.UTC).date().isoformat()
     entry = release_entry(version, date, bullets)
     METAINFO.write_text(upsert_release(METAINFO.read_text(), version, entry))
     print(f"synced metainfo release entry for {version} ({date})")

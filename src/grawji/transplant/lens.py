@@ -36,7 +36,7 @@ FILL_SCALE = 1.01
 # unsharp mask after the remap compensates the resampler's MTF loss to
 # within a few percent without visible halos (tuned on the same renders).
 _MTF_RADIUS = 0.8
-_MTF_PERCENT = 40
+_MTF_PERCENT = 30
 
 
 @dataclass(frozen=True)
@@ -77,19 +77,20 @@ def lens_tables(path: Path | str) -> LensTables | None:
         return None
     distortion, chromatic, vignetting = raw
     count = (len(distortion) - 1) // 2
-    if (
-        count < _MIN_KNOTS
-        or len(vignetting) < 1 + 2 * count
-        or len(chromatic) < 1 + 3 * count
-    ):
+    if count < _MIN_KNOTS or len(vignetting) < 1 + 2 * count:
         msg = f"{path} carries lens tables of an unknown layout"
         raise TransplantError(msg)
+    if len(chromatic) >= 1 + 3 * count:
+        red = tuple(chromatic[1 + count : 1 + 2 * count])
+        blue = tuple(chromatic[1 + 2 * count : 1 + 3 * count])
+    else:
+        red = blue = (0.0,) * count
     return LensTables(
         knots=tuple(distortion[1 : 1 + count]),
         distortion=tuple(distortion[1 + count : 1 + 2 * count]),
         vignetting=tuple(vignetting[1 + count : 1 + 2 * count]),
-        chromatic_red=tuple(chromatic[1 + count : 1 + 2 * count]),
-        chromatic_blue=tuple(chromatic[1 + 2 * count : 1 + 3 * count]),
+        chromatic_red=red,
+        chromatic_blue=blue,
     )
 
 
@@ -137,12 +138,32 @@ def vignetting_gain(
 
 
 def distortion_factor(
-    tables: LensTables, r: npt.NDArray[np.float64]
+    tables: LensTables,
+    r: npt.NDArray[np.float64],
+    fill: float = FILL_SCALE,
 ) -> npt.NDArray[np.float64]:
     """Source radius over corrected radius at corrected radius r."""
     factor = np.asarray(tables.distortion) / 100.0 + 1.0
     knots_out = np.asarray(tables.knots) / factor
-    return np.asarray(np.interp(r, knots_out, factor) * FILL_SCALE)
+    return np.asarray(np.interp(r, knots_out, factor) * fill)
+
+
+def fill_scale(tables: LensTables, height: int, width: int) -> float:
+    """The zoom the correction may apply without sampling off the frame."""
+    cy, cx = (height - 1) / 2, (width - 1) / 2
+    along_x = np.linspace(-cx, cx, 64)
+    along_y = np.linspace(-cy, cy, 64)
+    edge_x = np.concatenate(
+        [along_x, along_x, np.full(64, -cx), np.full(64, cx)]
+    )
+    edge_y = np.concatenate(
+        [np.full(64, -cy), np.full(64, cy), along_y, along_y]
+    )
+    r = np.hypot(edge_x, edge_y) / np.hypot(cx, cy) * RADIUS_SCALE
+    outward = distortion_factor(tables, r, fill=1.0)
+    along = np.maximum(np.abs(edge_x) / cx, np.abs(edge_y) / cy)
+    limit = float(np.min(1.0 / np.maximum(outward * along, 1e-9)))
+    return min(FILL_SCALE, limit)
 
 
 def distortion_maps(
@@ -150,7 +171,9 @@ def distortion_maps(
 ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
     """Source coordinates of every output pixel."""
     cy, cx = (height - 1) / 2, (width - 1) / 2
-    factor = distortion_factor(tables, radius(height, width))
+    factor = distortion_factor(
+        tables, radius(height, width), fill_scale(tables, height, width)
+    )
     yy, xx = np.mgrid[0:height, 0:width]
     map_x = np.ascontiguousarray(cx + factor * (xx - cx), dtype=np.float32)
     map_y = np.ascontiguousarray(cy + factor * (yy - cy), dtype=np.float32)
@@ -161,6 +184,8 @@ def apply_donor_correction(
     image: Image.Image, donor: LensTables, *, compensate: bool = True
 ) -> Image.Image:
     """Apply the donor's distortion correction to a cropped image."""
+    if not any(donor.distortion):
+        return image
     map_x, map_y = distortion_maps(donor, image.height, image.width)
     pixels = np.ascontiguousarray(np.asarray(image.convert("RGB")))
     corrected = Image.fromarray(

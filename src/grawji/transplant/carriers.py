@@ -16,7 +16,7 @@ from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
-_DR_CLASSES = (100, 200, 400)
+DR_CLASSES = (100, 200, 400)
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class CarrierChoice(Generic[T]):
 
 def _stops(dynamic_range: int) -> float:
     """The DR class as stops above DR100."""
-    if dynamic_range not in _DR_CLASSES:
+    if dynamic_range not in DR_CLASSES:
         raise ValueError(f"unknown dynamic range {dynamic_range}")
     return math.log2(dynamic_range / 100)
 

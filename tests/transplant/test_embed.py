@@ -145,9 +145,9 @@ def test_build_transplant_splices_donor_into_carrier(tmp_path, monkeypatch):
         carrier: embed._RawFrame(carrier_pixels, 1022, 0, same),
         donor: embed._RawFrame(donor_pixels, 1019, 6, same),
     }
-    monkeypatch.setattr(embed, "_decode", lambda path: frames[path])
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
 
-    result = embed.build_transplant(donor, carrier)
+    result = embed.build_transplant(donor, carrier, context=0)
 
     assert result.flip == 6
     assert result.donor_size == (6, 4)
@@ -172,7 +172,7 @@ def test_build_transplant_applies_cfa_phase_offset(tmp_path, monkeypatch):
         carrier: embed._RawFrame(carrier_pixels, 1022, 0, _CARRIER_PAT),
         donor: embed._RawFrame(donor_pixels, 1022, 0, _DONOR_PAT),
     }
-    monkeypatch.setattr(embed, "_decode", lambda path: frames[path])
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
 
     result = embed.build_transplant(donor, carrier)
 
@@ -214,7 +214,7 @@ def test_build_transplant_scales_the_donor_exposure(tmp_path, monkeypatch):
         carrier: embed._RawFrame(carrier_pixels, 1022, 0, same),
         donor: embed._RawFrame(donor_pixels, 1019, 0, same),
     }
-    monkeypatch.setattr(embed, "_decode", lambda path: frames[path])
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
 
     result = embed.build_transplant(donor, carrier, exposure_scale=0.25)
 
@@ -275,7 +275,7 @@ def test_build_transplant_transfers_the_donor_wb(tmp_path, monkeypatch):
             np.full((6, 4), 500, dtype=np.uint16), 1019, 0, same, wb=donor_wb
         ),
     }
-    monkeypatch.setattr(embed, "_decode", lambda path: frames[path])
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
 
     result = embed.build_transplant(donor, carrier)
 
@@ -304,7 +304,7 @@ def test_build_transplant_prefers_the_plain_auto_wb_levels(
             np.full((6, 4), 500, dtype=np.uint16), 1019, 0, same, wb=tuned_wb
         ),
     }
-    monkeypatch.setattr(embed, "_decode", lambda path: frames[path])
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
     monkeypatch.setattr(
         embed.imagemeta,
         "fuji_auto_wb_levels",
@@ -332,7 +332,7 @@ def test_build_transplant_undoes_the_donor_vignetting(tmp_path, monkeypatch):
             donor_pixels, 1019, 0, same, visible=(0, 0, 6, 4)
         ),
     }
-    monkeypatch.setattr(embed, "_decode", lambda path: frames[path])
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
     seen = {}
 
     def fake_undo(pixels, black, visible, tables):
@@ -342,7 +342,9 @@ def test_build_transplant_undoes_the_donor_vignetting(tmp_path, monkeypatch):
     monkeypatch.setattr(embed, "undo_vignetting", fake_undo)
     tables = object()
 
-    result = embed.build_transplant(donor, carrier, donor_lens=tables)
+    result = embed.build_transplant(
+        donor, carrier, donor_lens=tables, context=0
+    )
 
     assert seen == {"black": 1019, "visible": (0, 0, 6, 4), "tables": tables}
     # the lifted donor values (plus the black-level delta of 3) land in the frame
@@ -508,3 +510,300 @@ def test_develop_removes_temp_raf_on_camera_error(tmp_path):
     with pytest.raises(RuntimeError):
         pipeline.develop(camera, _transplant(b"x"), tmp_path)
     assert not (tmp_path / "transplant.RAF").exists()
+
+
+def test_finish_cuts_the_frame_out_of_a_letterboxed_thumbnail():
+    """A 4:3 thumbnail of a 3:2 carrier loses its black bars first."""
+    canvas = Image.new("RGB", (640, 480), (0, 0, 0))
+    frame_h = round(640 * 2 / 3)
+    top = (480 - frame_h) // 2
+    canvas.paste((200, 120, 40), (0, top, 640, top + frame_h))
+    out = output.finish_jpeg(
+        _png(canvas),
+        flip=0,
+        donor_size=(12, 18),
+        carrier_size=(12, 18),
+        letterboxed=True,
+    )
+    image = Image.open(io.BytesIO(out))
+    assert abs(image.width / image.height - 1.5) < 0.02
+    assert (
+        max(
+            abs(a - b)
+            for a, b in zip(
+                image.getpixel((5, 5)), (200, 120, 40), strict=True
+            )
+        )
+        < 8
+    )
+
+
+def test_finish_leaves_a_full_frame_thumbnail_alone():
+    """A body that falls back to the full preview has no bars to cut."""
+    frame = Image.new("RGB", (600, 400), (10, 200, 10))
+    out = output.finish_jpeg(
+        _png(frame),
+        flip=0,
+        donor_size=(12, 18),
+        carrier_size=(12, 18),
+        letterboxed=True,
+    )
+    image = Image.open(io.BytesIO(out))
+    assert image.size[0] / image.size[1] == pytest.approx(1.5, abs=0.02)
+
+
+def test_build_transplant_embeds_only_the_donor_picture(tmp_path, monkeypatch):
+    """The donor's masked rows and columns stay out of the carrier."""
+    carrier_pixels = _carrier_pixels()
+    carrier = tmp_path / "carrier.RAF"
+    carrier.write_bytes(_carrier_blob(carrier_pixels))
+    donor = tmp_path / "donor.RAF"
+    donor.write_bytes(b"donor")
+    same = _pattern(["RG", "GB"])
+    donor_pixels = np.full((6, 4), 1019 + 300, dtype=np.uint16)
+    donor_pixels[:, 3] = 1019  # a masked column at the right
+    frames = {
+        carrier: embed._RawFrame(carrier_pixels, 1022, 0, same),
+        donor: embed._RawFrame(
+            donor_pixels,
+            1019,
+            0,
+            same,
+            visible=(0, 0, 6, 3),
+            frame=(0, 0, 6, 3),
+        ),
+    }
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
+
+    result = embed.build_transplant(donor, carrier, context=0)
+
+    assert result.donor_size == (6, 3)
+    base = embed.locate_pixel_base(result.raf, carrier_pixels)
+    width = carrier_pixels.shape[1]
+    row0 = struct.unpack_from(f"<{width}H", result.raf, base)
+    assert row0[:3] == (1322, 1322, 1322)
+    assert (
+        row0[3] == carrier_pixels[0, 3]
+    )  # the carrier's own pixel, not 1019+3
+
+
+def test_place_donor_lands_inside_the_carrier_picture_on_phase():
+    """The donor origin goes to the first on-phase spot in the picture."""
+    carrier = embed._RawFrame(
+        np.zeros((4182, 6384), dtype=np.uint16),
+        1022,
+        0,
+        _CARRIER_PAT,
+        frame=(13, 6, 4160, 6240),
+    )
+    donor = embed._RawFrame(
+        np.zeros((4032, 6160), dtype=np.uint16),
+        1019,
+        0,
+        _DONOR_PAT,
+        frame=(16, 16, 4000, 6000),
+    )
+    top, left = embed.place_donor(donor, carrier)
+    assert (top, left) == (18, 7)
+    assert top >= 13
+    assert left >= 6
+    phase = embed.cfa_phase_offset(_DONOR_PAT, _CARRIER_PAT)
+    assert ((top - 16 - phase[0]) % 6, (left - 16 - phase[1]) % 6) == (0, 0)
+
+
+def test_place_donor_without_frames_is_the_phase_offset():
+    """Frameless arrays place the donor at the bare phase shift."""
+    carrier = embed._RawFrame(_carrier_pixels(), 1022, 0, _CARRIER_PAT)
+    donor = embed._RawFrame(
+        np.zeros((6, 6), dtype=np.uint16), 1019, 0, _DONOR_PAT
+    )
+    assert embed.place_donor(donor, carrier) == embed.cfa_phase_offset(
+        _DONOR_PAT, _CARRIER_PAT
+    )
+
+
+def test_place_donor_refuses_a_picture_too_large_for_the_carriers():
+    """An X-E5 picture does not fit the X-T3's, whatever the array."""
+    carrier = embed._RawFrame(
+        np.zeros((4182, 6384), dtype=np.uint16),
+        1022,
+        0,
+        _CARRIER_PAT,
+        frame=(13, 6, 4160, 6240),
+    )
+    donor = embed._RawFrame(
+        np.zeros((5196, 7872), dtype=np.uint16),
+        1019,
+        0,
+        _CARRIER_PAT,
+        frame=(21, 12, 5152, 7728),
+    )
+    with pytest.raises(embed.TransplantError, match="does not fit"):
+        embed.place_donor(donor, carrier)
+
+
+def test_build_transplant_reports_picture_coordinates(tmp_path, monkeypatch):
+    """Sizes and offset describe the pictures, not the raw arrays."""
+    carrier_pixels = _carrier_pixels()
+    carrier = tmp_path / "carrier.RAF"
+    carrier.write_bytes(_carrier_blob(carrier_pixels))
+    donor = tmp_path / "donor.RAF"
+    donor.write_bytes(b"donor")
+    same = _pattern(["RG", "GB"])
+    donor_pixels = np.full((6, 6), 1019 + 300, dtype=np.uint16)
+    frames = {
+        carrier: embed._RawFrame(
+            carrier_pixels, 1022, 0, same, frame=(3, 1, 8, 8)
+        ),
+        donor: embed._RawFrame(
+            donor_pixels, 1019, 0, same, frame=(1, 1, 4, 5)
+        ),
+    }
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
+
+    result = embed.build_transplant(donor, carrier)
+
+    assert result.carrier_size == (8, 8)
+    assert result.donor_size == (4, 5)
+    assert result.offset == (0, 0)
+    patched = np.frombuffer(
+        result.raf[_PIXEL_BASE : _PIXEL_BASE + 288], dtype="<u2"
+    ).reshape(12, 12)
+    assert (patched[3:7, 1:6] == 1322).all()
+    assert patched[2, 1] == carrier_pixels[2, 1]
+    assert patched[3, 6] == carrier_pixels[3, 6]
+
+
+def test_context_index_uses_the_border_then_repeats_the_edge_period():
+    """Real border indices inside the range, same-phase repeats beyond."""
+    idx = embed._context_index(4, 10, 2, 16, 4, 2)
+    assert list(idx[:4]) == [2, 3, 2, 3]
+    assert list(idx[4:14]) == list(range(4, 14))
+    assert list(idx[14:]) == [14, 15, 14, 15]
+    assert all((i - j) % 2 == 0 for i, j in zip(idx, range(18), strict=True))
+
+
+def test_context_margin_steps_down_to_what_the_carrier_can_hold():
+    """Two periods when there is room, less when not, zero at the end."""
+    carrier = embed._RawFrame(
+        np.zeros((60, 60), dtype=np.uint16), 1022, 0, _CARRIER_PAT
+    )
+    small = embed._RawFrame(
+        np.zeros((12, 12), dtype=np.uint16), 1019, 0, _DONOR_PAT
+    )
+    assert embed.context_margin(small, carrier) == 12
+    tight = embed._RawFrame(
+        np.zeros((42, 42), dtype=np.uint16), 1019, 0, _DONOR_PAT
+    )
+    assert embed.context_margin(tight, carrier) == 6
+    full = embed._RawFrame(
+        np.zeros((54, 54), dtype=np.uint16), 1019, 0, _DONOR_PAT
+    )
+    assert embed.context_margin(full, carrier) == 0
+    with pytest.raises(embed.TransplantError, match="does not fit"):
+        embed.context_margin(carrier, full)
+
+
+def test_build_transplant_embeds_picture_context(tmp_path, monkeypatch):
+    """The sensor border rides along, missing rows repeat the edge period."""
+    carrier_pixels = np.arange(48 * 48, dtype=np.uint16).reshape(48, 48)
+    carrier = tmp_path / "carrier.RAF"
+    carrier.write_bytes(_carrier_blob(carrier_pixels))
+    donor = tmp_path / "donor.RAF"
+    donor.write_bytes(b"donor")
+    same = _pattern(["RG", "GB"])
+    donor_pixels = (1019 + np.arange(30 * 30) % 500).astype(np.uint16)
+    donor_pixels = donor_pixels.reshape(30, 30)
+    frames = {
+        carrier: embed._RawFrame(
+            carrier_pixels, 1022, 0, same, frame=(6, 6, 36, 36)
+        ),
+        donor: embed._RawFrame(
+            donor_pixels, 1019, 0, same, frame=(6, 6, 18, 18)
+        ),
+    }
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
+
+    result = embed.build_transplant(donor, carrier)
+    assert result.context == 8
+    assert result.donor_size == (18, 18)
+    assert result.carrier_size == (36, 36)
+    assert result.offset == (8, 8)
+    patched = np.frombuffer(
+        result.raf[_PIXEL_BASE : _PIXEL_BASE + 48 * 48 * 2], dtype="<u2"
+    ).reshape(48, 48)
+    lifted = donor_pixels.astype(int) + 3
+    assert (patched[14:32, 14:32] == lifted[6:24, 6:24]).all()
+    assert (patched[8:14, 8:14] == lifted[:6, :6]).all()
+    assert (patched[6, 8:14] == lifted[0, :6]).all()
+    assert (patched[7, 8:14] == lifted[1, :6]).all()
+    assert (patched[38, 14:32] == lifted[28, 6:24]).all()
+    assert (patched[39, 14:32] == lifted[29, 6:24]).all()
+    assert patched[5, 5] == carrier_pixels[5, 5]
+    assert patched[40, 40] == carrier_pixels[40, 40]
+
+
+def test_build_transplant_copies_a_shared_sensor_whole(tmp_path, monkeypatch):
+    """Same array, same picture, same phase: the whole donor array goes in."""
+    carrier_pixels = np.arange(24 * 24, dtype=np.uint16).reshape(24, 24)
+    carrier = tmp_path / "carrier.RAF"
+    carrier.write_bytes(_carrier_blob(carrier_pixels))
+    donor = tmp_path / "donor.RAF"
+    donor.write_bytes(b"donor")
+    donor_pixels = (2000 + np.arange(24 * 24) % 300).astype(np.uint16)
+    donor_pixels = donor_pixels.reshape(24, 24)
+    frames = {
+        carrier: embed._RawFrame(
+            carrier_pixels, 1022, 0, _DONOR_PAT, frame=(6, 6, 12, 12)
+        ),
+        donor: embed._RawFrame(
+            donor_pixels, 1019, 0, _DONOR_PAT, frame=(6, 6, 12, 12)
+        ),
+    }
+    monkeypatch.setattr(embed, "decode", lambda path: frames[path])
+
+    result = embed.build_transplant(donor, carrier)
+
+    assert result.whole
+    assert result.seamless
+    assert result.context == 0
+    assert result.donor_size == result.carrier_size == (12, 12)
+    assert result.offset == (0, 0)
+    patched = np.frombuffer(
+        result.raf[_PIXEL_BASE : _PIXEL_BASE + 24 * 24 * 2], dtype="<u2"
+    ).reshape(24, 24)
+    assert (patched == donor_pixels.astype(int) + 3).all()
+
+
+def test_same_geometry_needs_shape_picture_and_phase():
+    """A shifted picture or a rolled phase falls back to placement."""
+    pixels = np.zeros((12, 12), dtype=np.uint16)
+    base = embed._RawFrame(pixels, 1000, 0, _DONOR_PAT, frame=(0, 0, 12, 12))
+    assert embed.same_geometry(base, base)
+    assert not embed.same_geometry(
+        base, embed._RawFrame(pixels, 1000, 0, _DONOR_PAT, frame=(0, 0, 6, 6))
+    )
+    assert not embed.same_geometry(
+        base, embed._RawFrame(pixels, 1000, 0, _CARRIER_PAT, frame=base.frame)
+    )
+    assert not embed.same_geometry(
+        base,
+        embed._RawFrame(
+            np.zeros((18, 12), dtype=np.uint16), 1000, 0, _DONOR_PAT
+        ),
+    )
+    assert embed.Transplant(b"", 0, (1, 1), (1, 1), (0, 0), context=6).seamless
+    assert not embed.Transplant(b"", 0, (1, 1), (1, 1), (0, 0)).seamless
+
+
+def test_finish_keeps_the_full_picture_without_the_inset():
+    """With picture context embedded the crop is the exact donor size."""
+    image = Image.new("RGB", (120, 120), (30, 30, 60))
+    result = output.finish_jpeg(
+        _png(image),
+        flip=0,
+        donor_size=(6, 6),
+        carrier_size=(12, 12),
+        inset=False,
+    )
+    assert Image.open(io.BytesIO(result)).size == (60, 60)

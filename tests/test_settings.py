@@ -85,3 +85,12 @@ def test_corrupt_file_returns_defaults(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text("not json{")
     assert load_settings(path).open_recipe == FROM_IMAGE
+
+
+def test_carriers_round_trip(tmp_path):
+    """The per-body carrier files survive a save and load."""
+    settings = Settings(carriers={"X-E5": "/carriers/xe5.RAF"})
+    path = tmp_path / "settings.json"
+    save_settings(settings, path)
+    assert load_settings(path).carriers == {"X-E5": "/carriers/xe5.RAF"}
+    assert Settings().carriers == {}
