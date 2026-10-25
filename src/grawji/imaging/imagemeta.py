@@ -9,13 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import gi
-
-gi.require_version("GExiv2", "0.10")
-
-from gi.repository import GExiv2, GLib
+from gi.repository import GLib
 
 from grawji import exif, raf
+from grawji.gexiv2 import GExiv2
 
 # Smallest sensible Exif block: the 4-byte offset plus a TIFF header.
 _EXIF_BLOCK_PREFIX = 12

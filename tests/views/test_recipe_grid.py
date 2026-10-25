@@ -7,10 +7,10 @@ import pytest
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-gi.require_version("GExiv2", "0.10")
 
-from gi.repository import GdkPixbuf, GExiv2
+from gi.repository import GdkPixbuf
 
+from grawji.gexiv2 import GExiv2
 from grawji.imaging.pixbufs import trim_letterbox as _trim_letterbox
 from grawji.recipe import Recipe
 from grawji.views.recipe_grid import (

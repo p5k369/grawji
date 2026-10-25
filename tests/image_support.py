@@ -9,9 +9,10 @@ import gi
 import numpy as np
 
 gi.require_version("GdkPixbuf", "2.0")
-gi.require_version("GExiv2", "0.10")
 
-from gi.repository import GdkPixbuf, GExiv2, GLib
+from gi.repository import GdkPixbuf, GLib
+
+from grawji.gexiv2 import GExiv2
 
 # What a viewer has to do to a stored frame to make it upright.
 STORED = {

@@ -8,11 +8,11 @@ import pytest
 
 gi = pytest.importorskip("gi")
 gi.require_version("Gdk", "4.0")
-gi.require_version("GExiv2", "0.10")
 
-from gi.repository import GdkPixbuf, GExiv2
+from gi.repository import GdkPixbuf
 
 from grawji.crop import CropRotate
+from grawji.gexiv2 import GExiv2
 from grawji.imaging.imagemeta import camera_model, exif_orientation, exif_rows
 from grawji.imaging.render import (
     bake_pixbuf,

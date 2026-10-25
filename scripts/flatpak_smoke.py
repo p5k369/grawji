@@ -16,16 +16,16 @@ import gi
 
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
-gi.require_version("GExiv2", "0.10")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 import rawji  # noqa: F401
 import usb.core
-from gi.repository import GdkPixbuf, GExiv2
+from gi.repository import GdkPixbuf
 
 import grawji.views
 from grawji.crop import CropRotate
+from grawji.gexiv2 import GExiv2
 from grawji.imaging.render import bake_pixbuf
 
 # Files the manifest installs into /app, a manifest regression that
