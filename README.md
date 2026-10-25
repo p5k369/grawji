@@ -1,4 +1,4 @@
-# grawji
+# <img src="data/io.github.p5k369.grawji.svg" width="32" height="32" alt="" align="absmiddle"> grawji
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: GPL-3.0-or-later](https://img.shields.io/github/license/p5k369/grawji)](LICENSE)

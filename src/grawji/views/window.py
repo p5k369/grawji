@@ -650,11 +650,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _install_icons(self) -> None:
-        """Register grawji's bundled icons with the icon theme."""
+        """Register the bundled icons ahead of any installed copy."""
         icons = resources.files("grawji").joinpath("ui", "icons")
-        Gtk.IconTheme.get_for_display(
-            Gdk.Display.get_default()
-        ).add_search_path(str(icons))
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        theme.set_search_path([str(icons), *theme.get_search_path()])
 
     def _init_filmstrip(self) -> None:
         """Build the filmstrip flanked by previous/next navigation."""

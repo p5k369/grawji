@@ -1,19 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Placeholder icon: a film-frame aperture. Replace with real artwork. -->
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+<!--
+  grawji application icon.
+  Based on the film strip and iris design contributed by ynnebbenny1234
+  (github.com/p5k369/grawji/issues/99), licensed CC0 1.0.
+-->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3a3a3a"/>
-      <stop offset="1" stop-color="#1b1b1b"/>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#505050"/>
+      <stop offset="1" stop-color="#383838"/>
     </linearGradient>
+    <path id="blade" d="M 66.98 50 L 93.53 69.29 A 30 30 0 0 0 81.37 39.54 Z"/>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)"/>
-  <circle cx="64" cy="64" r="34" fill="none" stroke="#e6e6e6" stroke-width="6"/>
-  <circle cx="64" cy="64" r="13" fill="#e6e6e6"/>
-  <g fill="#e6e6e6">
-    <rect x="61" y="18" width="6" height="14" rx="2"/>
-    <rect x="61" y="96" width="6" height="14" rx="2"/>
-    <rect x="18" y="61" width="14" height="6" rx="2"/>
-    <rect x="96" y="61" width="14" height="6" rx="2"/>
+  <rect x="8" y="8" width="112" height="112" rx="20" fill="url(#frame)"/>
+  <g fill="#bdbdbd">
+    <rect x="16" y="24" width="8" height="8" rx="1.5"/>
+    <rect x="16" y="42" width="8" height="8" rx="1.5"/>
+    <rect x="16" y="60" width="8" height="8" rx="1.5"/>
+    <rect x="16" y="78" width="8" height="8" rx="1.5"/>
+    <rect x="16" y="96" width="8" height="8" rx="1.5"/>
+    <rect x="104" y="24" width="8" height="8" rx="1.5"/>
+    <rect x="104" y="42" width="8" height="8" rx="1.5"/>
+    <rect x="104" y="60" width="8" height="8" rx="1.5"/>
+    <rect x="104" y="78" width="8" height="8" rx="1.5"/>
+    <rect x="104" y="96" width="8" height="8" rx="1.5"/>
+  </g>
+  <g>
+    <use href="#blade" fill="#9a7fa6" transform="rotate(0 64 64)"/>
+    <use href="#blade" fill="#7f9b63" transform="rotate(72 64 64)"/>
+    <use href="#blade" fill="#b45a56" transform="rotate(144 64 64)"/>
+    <use href="#blade" fill="#c2ad62" transform="rotate(216 64 64)"/>
+    <use href="#blade" fill="#5d9ca1" transform="rotate(288 64 64)"/>
   </g>
 </svg>

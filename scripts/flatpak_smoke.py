@@ -34,6 +34,7 @@ _BUNDLE_FILES = (
     "share/applications/io.github.p5k369.grawji.desktop",
     "share/metainfo/io.github.p5k369.grawji.metainfo.xml",
     "share/icons/hicolor/scalable/apps/io.github.p5k369.grawji.svg",
+    "share/icons/hicolor/symbolic/apps/io.github.p5k369.grawji-symbolic.svg",
 )
 
 
