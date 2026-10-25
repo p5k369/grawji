@@ -26,6 +26,8 @@ _FLIP_ROTATION = {3: 180, 5: 90, 6: -90}
 # minimum, shaved off every edge of the donor crop.
 _INSET_FRACTION = 0.002
 _INSET_MIN = 2
+# A thumbnail whose aspect is this close to the carrier's has no bars.
+_ASPECT_TOLERANCE = 0.01
 
 
 def finish_jpeg(  # noqa: PLR0913
@@ -38,6 +40,8 @@ def finish_jpeg(  # noqa: PLR0913
     donor_lens: LensTables | None = None,
     compensate: bool = True,
     quality: int = 95,
+    letterboxed: bool = False,
+    inset: bool = True,
 ) -> bytes:
     """Return the render cropped to the donor region and rotated.
 
@@ -52,8 +56,15 @@ def finish_jpeg(  # noqa: PLR0913
         compensate: Add the output sharpening that offsets the remap's
             high-frequency loss.
         quality: JPEG quality of the re-encoded output.
+        letterboxed: The render is a camera thumbnail with the carrier
+            frame letterboxed inside a 4:3 canvas.
+        inset: Shave the boundary seam off every edge. A transplant
+            embedded with picture context has no seam and keeps the
+            donor's full picture.
     """
     image = Image.open(io.BytesIO(jpeg)).convert("RGB")
+    if letterboxed:
+        image = _unletterbox(image, carrier_size)
     width, height = image.size
     donor_h, donor_w = donor_size
     carrier_h, carrier_w = carrier_size
@@ -72,13 +83,38 @@ def finish_jpeg(  # noqa: PLR0913
         image = lens.apply_donor_correction(
             image, donor_lens, compensate=compensate
         )
-    image = _inset_seam(image)
+    if inset:
+        image = _inset_seam(image)
     rotation = _FLIP_ROTATION.get(flip, 0)
     if rotation:
         image = image.rotate(rotation, expand=True)
     out = io.BytesIO()
     image.save(out, format="JPEG", quality=quality)
     return out.getvalue()
+
+
+def jpeg_size(jpeg: bytes) -> tuple[int, int]:
+    """Width and height of JPEG bytes."""
+    with Image.open(io.BytesIO(jpeg)) as image:
+        return image.size
+
+
+def _unletterbox(
+    image: Image.Image, carrier_size: tuple[int, int]
+) -> Image.Image:
+    """Cut the carrier-aspect frame out of a letterboxed thumbnail."""
+    carrier_h, carrier_w = carrier_size
+    aspect = carrier_w / carrier_h
+    width, height = image.size
+    if abs(width / height - aspect) < _ASPECT_TOLERANCE:
+        return image
+    if width / height > aspect:
+        frame_w = round(height * aspect)
+        left = (width - frame_w) // 2
+        return image.crop((left, 0, left + frame_w, height))
+    frame_h = round(width / aspect)
+    top = (height - frame_h) // 2
+    return image.crop((0, top, width, top + frame_h))
 
 
 def _inset_seam(image: Image.Image) -> Image.Image:

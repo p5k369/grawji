@@ -4,6 +4,7 @@ import struct
 
 import pytest
 
+from grawji import raf
 from grawji.raf import (
     RAF_MAGIC,
     embedded_jpeg,
@@ -144,3 +145,50 @@ def test_output_size_absent_or_broken(tmp_path):
     bad = tmp_path / "bad.RAF"
     bad.write_bytes(b"not a raf")
     assert output_size(bad) is None
+
+
+def test_header_model_reads_the_body_name(tmp_path):
+    """The model sits null padded at 0x1C of every RAF header."""
+    header = bytearray(b"FUJIFILMCCD-RAW 0201FF179504")
+    header += b"X-E5".ljust(32, b"\x00") + bytes(64)
+    path = tmp_path / "shot.RAF"
+    path.write_bytes(bytes(header))
+    assert raf.header_model(path) == "X-E5"
+
+
+def test_header_model_is_none_for_other_files(tmp_path):
+    """A non-RAF or a truncated file yields None, not an error."""
+    other = tmp_path / "shot.jpg"
+    other.write_bytes(b"\xff\xd8not a raf")
+    assert raf.header_model(other) is None
+    assert raf.header_model(tmp_path / "missing.RAF") is None
+
+
+def test_picture_frame_reads_origin_and_size(tmp_path):
+    """The crop origin (0x0110) and cropped size give top, left, h, w."""
+    from grawji.raf import picture_frame
+
+    meta = struct.pack(">I", 3)
+    meta += struct.pack(">HHHH", 0x0100, 4, 4182, 6384)
+    meta += struct.pack(">HHHH", 0x0110, 4, 13, 6)
+    meta += struct.pack(">HHHH", 0x0111, 4, 4160, 6240)
+    header = bytearray(100)
+    header[: len(RAF_MAGIC)] = RAF_MAGIC
+    struct.pack_into(">II", header, 92, 100, len(meta))
+    path = tmp_path / "meta.RAF"
+    path.write_bytes(bytes(header) + meta)
+    assert picture_frame(path) == (13, 6, 4160, 6240)
+
+
+def test_picture_frame_needs_both_records(tmp_path):
+    """Without the origin or the size there is no frame."""
+    from grawji.raf import picture_frame
+
+    meta = struct.pack(">I", 1) + struct.pack(">HHHH", 0x0111, 4, 4160, 6240)
+    header = bytearray(100)
+    header[: len(RAF_MAGIC)] = RAF_MAGIC
+    struct.pack_into(">II", header, 92, 100, len(meta))
+    path = tmp_path / "noorigin.RAF"
+    path.write_bytes(bytes(header) + meta)
+    assert picture_frame(path) is None
+    assert picture_frame(tmp_path / "missing.RAF") is None

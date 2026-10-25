@@ -5,6 +5,7 @@ import struct
 import pytest
 from rawji.fuji_profile import encode_tone_value
 
+from grawji.camera import core
 from grawji.camera.core import (
     OFFSET_FILM_SIM,
     CameraError,
@@ -633,3 +634,132 @@ def test_apply_recipe_clamps_dr_to_the_shot():
     assert _u32(patched, OFF_DYNAMIC_RANGE) == 200  # clamped, not 400
     patched = apply_recipe(dr200, Recipe(dynamic_range="DR100"))
     assert _u32(patched, OFF_DYNAMIC_RANGE) == 100
+
+
+class _StandIn:
+    """What the transplant opener hands a session for a foreign RAF."""
+
+    def __init__(self, path, ev_offset=0.0):
+        self.raf_path = path
+        self.ev_offset = ev_offset
+        self.finished = []
+        self.cleaned = 0
+
+    def finish(self, jpeg, *, full_resolution):
+        self.finished.append((jpeg, full_resolution))
+        return b"FINISHED"
+
+    def cleanup(self):
+        self.cleaned += 1
+
+
+def _foreign_session(monkeypatch, camera, stand_in, *, header_model="X100F"):
+    """A session on an X-E5 that opens RAFs of other bodies via stand_in."""
+    monkeypatch.setattr(
+        CameraSession, "_read_model", staticmethod(lambda cam: "X-E5")
+    )
+    monkeypatch.setattr(core.raf, "header_model", lambda path: header_model)
+    asked = []
+
+    def open_foreign(path, model):
+        asked.append((path, model))
+        return stand_in
+
+    session = CameraSession(
+        camera_factory=lambda: camera,
+        usb_reset=lambda: None,
+        open_foreign=open_foreign,
+    )
+    return session, asked
+
+
+def test_a_native_raf_never_asks_the_opener(monkeypatch, tmp_path):
+    """A RAF whose header names the connected body is uploaded as is."""
+    camera = FakeCamera(profile=bytes(629))
+    stand_in = _StandIn(tmp_path / "stand-in.RAF")
+    session, asked = _foreign_session(
+        monkeypatch, camera, stand_in, header_model="FUJIFILM X-E5"
+    )
+    session.open(tmp_path / "native.RAF")
+    assert asked == []
+    assert session.foreign is None
+    assert ("send_raf", str(tmp_path / "native.RAF")) in camera.calls
+
+
+def test_a_foreign_raf_is_developed_through_its_stand_in(
+    monkeypatch, tmp_path
+):
+    """The stand-in is uploaded and every render goes through finish."""
+    camera = FakeCamera(profile=bytes(629))
+    stand_in = _StandIn(tmp_path / "stand-in.RAF", ev_offset=1.0)
+    session, asked = _foreign_session(monkeypatch, camera, stand_in)
+
+    session.open(tmp_path / "x100f.RAF")
+
+    assert asked == [(tmp_path / "x100f.RAF", "X-E5")]
+    assert session.foreign is stand_in
+    assert ("send_raf", str(tmp_path / "stand-in.RAF")) in camera.calls
+    assert session.render(Recipe(), full_resolution=True) == b"FINISHED"
+    assert session.render_thumb(Recipe()) == b"FINISHED"
+    assert stand_in.finished == [(b"JPEG", True), (b"THUMB", False)]
+    # the EV offset of the DR compensation reached the profile: +1.0 EV
+    assert _u32(camera.set_profiles[0], 529) == 1000
+    session.close()
+    assert stand_in.cleaned == 1
+    assert session.foreign is None
+
+
+def test_a_foreign_raf_without_a_carrier_is_still_foreign(
+    monkeypatch, tmp_path
+):
+    """The opener answering None keeps the old refusal, naming both bodies."""
+    camera = FakeCamera(profile=bytes(629))
+    session, _asked = _foreign_session(monkeypatch, camera, None)
+    with pytest.raises(ForeignRafError, match=r"X100F.*X-E5"):
+        session.open(tmp_path / "x100f.RAF")
+    assert "disconnect" in camera.calls
+    assert not session.is_open
+
+
+def test_a_foreign_raf_is_developed_as_jpeg_only(monkeypatch, tmp_path):
+    """TIFF and HEIF have no finishing path yet, so they are refused."""
+    camera = FakeCamera(profile=bytes(629))
+    stand_in = _StandIn(tmp_path / "stand-in.RAF")
+    session, _asked = _foreign_session(monkeypatch, camera, stand_in)
+    session.open(tmp_path / "x100f.RAF")
+    with pytest.raises(SessionStateError, match="JPEG only"):
+        session.render(Recipe(), full_resolution=True, file_type="tiff16")
+
+
+def test_a_failed_upload_cleans_the_stand_in_up(monkeypatch, tmp_path):
+    """When the camera refuses the stand-in, the temporary file goes too."""
+    camera = FakeCamera(profile=bytes(629), fail_on="send_raf")
+    stand_in = _StandIn(tmp_path / "stand-in.RAF")
+    session, _asked = _foreign_session(monkeypatch, camera, stand_in)
+    with pytest.raises(ForeignRafError):
+        session.open(tmp_path / "x100f.RAF")
+    assert stand_in.cleaned >= 1
+
+
+def test_a_failing_opener_is_a_foreign_raf_not_a_usb_fault(
+    monkeypatch, tmp_path
+):
+    """An opener error is reported as foreign and never triggers a reset."""
+    camera = FakeCamera(profile=bytes(629))
+    monkeypatch.setattr(
+        CameraSession, "_read_model", staticmethod(lambda cam: "X-E5")
+    )
+    monkeypatch.setattr(core.raf, "header_model", lambda path: "X100F")
+    resets = []
+
+    def broken(path, model):
+        raise RuntimeError("the carrier was shot through a lens")
+
+    session = CameraSession(
+        camera_factory=lambda: camera,
+        usb_reset=lambda: resets.append(1),
+        open_foreign=broken,
+    )
+    with pytest.raises(ForeignRafError, match="through a lens"):
+        session.open(tmp_path / "x100f.RAF")
+    assert resets == []

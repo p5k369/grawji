@@ -108,4 +108,5 @@ def develop(
         offset=transplant.offset,
         donor_lens=opts.donor_lens,
         compensate=opts.full_resolution,
+        inset=not transplant.seamless,
     )

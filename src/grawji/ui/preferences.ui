@@ -168,6 +168,12 @@
               </object>
             </child>
             <child>
+              <object class="AdwSwitchRow" id="micro_contrast_row">
+                <property name="title">Restore micro contrast on cross-body exports</property>
+                <property name="subtitle">Restores the fine contrast lost when a RAF from another body is resampled for the connected camera</property>
+              </object>
+            </child>
+            <child>
               <object class="AdwExpanderRow" id="border_row">
                 <property name="title">Border</property>
                 <property name="subtitle">Frame exports with a solid border</property>

@@ -273,3 +273,62 @@ def test_matching_model_does_not_rebuild(tmp_path: Any) -> None:
     dialog.set_bank_names("X-T3", ["STD"] + [""] * 6)
     assert pane._banks[0] is first_card
     assert first_card["loaded"] == "STD"
+
+
+def _carrier_dialog(tmp_path, **hooks):
+    """A manager dialog on a connected X-E5 with the given carrier hooks."""
+    from grawji.views.recipe_manager import RecipeManagerDialog
+
+    library = RecipeLibrary(tmp_path / "recipes.json")
+    library.add("Velvia look", Recipe(film_simulation="Velvia"))
+    host = StubManagerHost(get_model=lambda: "X-E5", **hooks)
+    dialog = RecipeManagerDialog(library=library, host=host)
+    pump()
+    return dialog
+
+
+def test_camera_pane_shows_the_registered_carrier(tmp_path: Any) -> None:
+    """The carrier row names the file and offers the open RAF."""
+    dialog = _carrier_dialog(
+        tmp_path,
+        carrier_for=lambda model: "/carriers/xe5-cap-on.RAF",
+        set_carrier=lambda model, path: None,
+        current_raf=lambda: "/photos/other.RAF",
+    )
+    pane = dialog.camera_pane
+    assert pane.carrier_row.get_subtitle() == "xe5-cap-on.RAF"
+    assert pane.carrier_clear_button.get_visible()
+    assert pane.carrier_current_button.get_visible()
+
+
+def test_camera_pane_reports_a_refused_carrier(tmp_path: Any) -> None:
+    """A refusal from the host lands in the row instead of the file name."""
+    registered: list[tuple[str, str | None]] = []
+
+    def set_carrier(model: str, path: str | None) -> str | None:
+        registered.append((model, path))
+        return "This RAF was shot through a lens." if path else None
+
+    dialog = _carrier_dialog(
+        tmp_path,
+        carrier_for=lambda model: None,
+        set_carrier=set_carrier,
+        current_raf=lambda: "/photos/lensed.RAF",
+    )
+    pane = dialog.camera_pane
+    assert pane.carrier_row.get_subtitle() == "No carrier"
+    assert not pane.carrier_clear_button.get_visible()
+    pane.carrier_current_button.emit("clicked")
+    pump()
+    assert registered == [("X-E5", "/photos/lensed.RAF")]
+    assert "lens" in pane.carrier_row.get_subtitle()
+    assert pane.carrier_row.has_css_class("error")
+
+
+def test_camera_pane_hides_the_carrier_row_without_hooks(
+    tmp_path: Any,
+) -> None:
+    """A host without carrier support shows banks only."""
+    dialog = _carrier_dialog(tmp_path)
+    section = dialog.camera_pane.carrier_row.get_parent().get_parent()
+    assert not section.get_visible()

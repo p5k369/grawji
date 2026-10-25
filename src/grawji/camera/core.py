@@ -17,8 +17,9 @@ import struct
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import rawji
 import usb.core
@@ -45,6 +46,7 @@ from rawji.fuji_profile import (
     encode_tone_value,
 )
 
+from grawji import raf
 from grawji.camera import camera_backup, camera_info
 from grawji.recipe import Recipe
 
@@ -451,6 +453,39 @@ def recipe_from_profile(base: bytes) -> Recipe:
     )
 
 
+class ForeignRaf(Protocol):
+    """A stand-in file that develops a foreign RAF on the connected body."""
+
+    @property
+    def raf_path(self) -> Path:
+        """The stand-in file to upload."""
+        ...
+
+    @property
+    def ev_offset(self) -> float:
+        """EV to add to every recipe."""
+        ...
+
+    def finish(self, jpeg: bytes, *, full_resolution: bool) -> bytes:
+        """The render as the foreign picture."""
+        ...
+
+    def cleanup(self) -> None:
+        """Remove the stand-in file."""
+        ...
+
+
+def _same_model(named: str, connected: str) -> bool:
+    """Whether a RAF header's model names the connected body."""
+
+    def key(model: str) -> str:
+        return "".join(
+            ch for ch in model.upper().replace("FUJIFILM", "") if ch.isalnum()
+        )
+
+    return key(named) == key(connected)
+
+
 class CameraSession:
     """A "load once, render many" session around rawji.FujiCamera.
 
@@ -466,6 +501,7 @@ class CameraSession:
         camera_factory: Callable[[], Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         usb_reset: Callable[[], None] | None = None,
+        open_foreign: Callable[[Path, str], ForeignRaf | None] | None = None,
     ) -> None:
         """Create a session.
 
@@ -476,6 +512,8 @@ class CameraSession:
             usb_reset: Recovery hook run when a connect fails, before the
                 one retry. Defaults to a USB device reset, injectable so
                 tests never reset real hardware.
+            open_foreign: Called with a RAF whose header names another
+                body than the connected one.
         """
         self._camera_factory: Callable[[], Any] = (
             camera_factory or rawji.FujiCamera
@@ -485,10 +523,12 @@ class CameraSession:
         )
         self._timeout = timeout
         self._lock = threading.Lock()
+        self._open_foreign = open_foreign
         self._camera: Any | None = None
         self._base_profile: bytes | None = None
         self._raf_path: Path | None = None
         self._model: str | None = None
+        self._foreign: ForeignRaf | None = None
 
     @property
     def is_open(self) -> bool:
@@ -504,6 +544,11 @@ class CameraSession:
     def raf_path(self) -> Path | None:
         """Path of the currently open RAF, if any."""
         return self._raf_path
+
+    @property
+    def foreign(self) -> ForeignRaf | None:
+        """The stand-in a foreign RAF is developed through."""
+        return self._foreign
 
     @property
     def profile(self) -> bytes | None:
@@ -528,7 +573,7 @@ class CameraSession:
         with self._lock:
             self._close_locked()
             try:
-                camera, base = self._open_attempt(raf_path)
+                camera, base, foreign = self._open_attempt(raf_path)
             except ForeignRafError:
                 raise
             except Exception:
@@ -536,28 +581,57 @@ class CameraSession:
                 # timeout) often recovers with one device reset.
                 # Opening is safe to retry - no conversion is in flight yet.
                 self._usb_reset()
-                camera, base = self._open_attempt(raf_path)
+                camera, base, foreign = self._open_attempt(raf_path)
             self._camera = camera
             self._base_profile = base
             self._raf_path = Path(raf_path)
+            self._foreign = foreign
 
-    def _open_attempt(self, raf_path: str | Path) -> tuple[Any, bytes]:
-        """Run one connect / send_raf / get_profile sequence."""
+    def _open_attempt(
+        self, raf_path: str | Path
+    ) -> tuple[Any, bytes, ForeignRaf | None]:
+        """Run one connect."""
         camera = self._camera_factory()
+        foreign: ForeignRaf | None = None
         try:
             if not camera.connect():
                 raise CameraError("could not connect to camera")
             self._model = self._read_model(camera) or self._model
-            camera.send_raf(str(raf_path))
+            foreign = self._prepare_foreign(Path(raf_path))
+            upload = foreign.raf_path if foreign is not None else raf_path
+            camera.send_raf(str(upload))
             base: bytes = camera.get_profile()
         except Exception as e:
             self._safe_disconnect(camera)
+            if foreign is not None:
+                foreign.cleanup()
             if camera_info.is_foreign_raf(e):
                 raise ForeignRafError(
                     "RAF was shot by a different camera body (PTP 0x2002)"
                 ) from e
             raise
-        return camera, base
+        return camera, base, foreign
+
+    def _prepare_foreign(self, raf_path: Path) -> ForeignRaf | None:
+        """The stand-in for a RAF of another body."""
+        if self._open_foreign is None or self._model is None:
+            return None
+        named = raf.header_model(raf_path)
+        if named is None or _same_model(named, self._model):
+            return None
+        try:
+            prepared = self._open_foreign(raf_path, self._model)
+        except Exception as e:
+            raise ForeignRafError(
+                f"RAF was shot by a {named} and cannot be developed on "
+                f"the connected {self._model}: {e}"
+            ) from e
+        if prepared is None:
+            raise ForeignRafError(
+                f"RAF was shot by a {named}. The connected {self._model} "
+                "has no carrier to develop it through"
+            )
+        return prepared
 
     @staticmethod
     def _read_model(camera: Any) -> str | None:
@@ -596,12 +670,23 @@ class CameraSession:
         with self._lock:
             if self._camera is None or self._base_profile is None:
                 raise SessionStateError("no RAF open; call open() first")
+            if self._foreign is not None:
+                if file_type != "jpeg":
+                    raise SessionStateError(
+                        "a foreign RAF is developed as JPEG only"
+                    )
+                recipe = self._foreign_recipe(recipe, self._foreign)
             profile = apply_file_type(
                 apply_recipe(self._base_profile, recipe), file_type
             )
             self._camera.set_profile(profile)
             self._camera.trigger_conversion(full_resolution=full_resolution)
-            return cast("bytes", self._camera.wait_for_result(self._timeout))
+            result = cast("bytes", self._camera.wait_for_result(self._timeout))
+            if self._foreign is not None:
+                result = self._foreign.finish(
+                    result, full_resolution=full_resolution
+                )
+            return result
 
     def render_thumb(self, recipe: Recipe) -> bytes:
         """Apply a recipe and render a small preview thumbnail.
@@ -617,13 +702,25 @@ class CameraSession:
         with self._lock:
             if self._camera is None or self._base_profile is None:
                 raise SessionStateError("no RAF open; call open() first")
+            if self._foreign is not None:
+                recipe = self._foreign_recipe(recipe, self._foreign)
             profile = apply_recipe(self._base_profile, recipe)
             self._camera.set_profile(profile)
             self._camera.trigger_conversion(full_resolution=False)
-            return cast(
+            result = cast(
                 "bytes",
                 self._camera.wait_for_result(self._timeout, thumbnail=True),
             )
+            if self._foreign is not None:
+                result = self._foreign.finish(result, full_resolution=False)
+            return result
+
+    @staticmethod
+    def _foreign_recipe(recipe: Recipe, foreign: ForeignRaf) -> Recipe:
+        """The recipe with the transplant's exposure offset added."""
+        if not foreign.ev_offset:
+            return recipe
+        return replace(recipe, exposure=recipe.exposure + foreign.ev_offset)
 
     def transfer_bank_recipes(
         self,
@@ -700,9 +797,12 @@ class CameraSession:
         """Disconnect and reset session state (caller holds the lock)."""
         if self._camera is not None:
             self._safe_disconnect(self._camera)
+        if self._foreign is not None:
+            self._foreign.cleanup()
         self._camera = None
         self._base_profile = None
         self._raf_path = None
+        self._foreign = None
 
     @staticmethod
     def _safe_disconnect(camera: Any) -> None:

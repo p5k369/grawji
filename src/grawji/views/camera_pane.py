@@ -1,9 +1,11 @@
-"""The recipe manager's camera pane: bank and FS-dial recipe drops."""
+"""The recipe manager's camera pane."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 import gi
@@ -11,7 +13,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, GdkPixbuf, GLib, GObject, Gtk
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
 from grawji.camera import compatibility as compat
 from grawji.camera import fs_recipe
@@ -75,6 +77,21 @@ def _family_paintable(model: str | None) -> Gdk.Texture | None:
     return texture_for_pixbuf(pixbuf)
 
 
+@dataclass(frozen=True)
+class CarrierHooks:
+    """How the pane reads and registers a body's carrier.
+
+    Attributes:
+        carrier_for: Returns the carrier file registered for a body model.
+        set_carrier: Registers a carrier file for a body.
+        current_raf: Returns the RAF open in the main window.
+    """
+
+    carrier_for: Callable[[str], str | None]
+    set_carrier: Callable[[str, str | None], str | None]
+    current_raf: Callable[[], str | None]
+
+
 @Gtk.Template(string=_UI)
 class CameraPane(Gtk.Box):
     """Assign saved recipes to the connected body's banks and FS dial.
@@ -90,6 +107,10 @@ class CameraPane(Gtk.Box):
     camera_header = Gtk.Template.Child()
     camera_stack = Gtk.Template.Child()
     camera_banks = Gtk.Template.Child()
+    carrier_row = Gtk.Template.Child()
+    carrier_current_button = Gtk.Template.Child()
+    carrier_choose_button = Gtk.Template.Child()
+    carrier_clear_button = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Build the empty pane."""
@@ -107,6 +128,12 @@ class CameraPane(Gtk.Box):
         self._bank_recipe: dict[int, str] = {}
         self._fs_cards: list[dict[str, Any]] = []
         self._fs_recipe: dict[int, str] = {}
+        self._carrier: CarrierHooks | None = None
+        self.carrier_choose_button.connect("clicked", self._on_choose_carrier)
+        self.carrier_current_button.connect(
+            "clicked", self._on_use_current_carrier
+        )
+        self.carrier_clear_button.connect("clicked", self._on_clear_carrier)
 
     def wire(
         self,
@@ -118,6 +145,7 @@ class CameraPane(Gtk.Box):
             Callable[[Callable[[str | None, list[str]], None]], None] | None
         ),
         take_dragged: Callable[[], str | None],
+        carrier: CarrierHooks | None = None,
     ) -> None:
         """Connect the pane to the dialog's collaborators.
 
@@ -130,12 +158,15 @@ class CameraPane(Gtk.Box):
                 thread, or None.
             take_dragged: Returns and consumes the name of the recipe
                 row currently being dragged, or None.
+            carrier: How to read and register the body's carrier for
+                cross-body conversion.
         """
         self._library = library
         self._caps = caps
         self._get_model = get_model
         self._load_bank_names = load_bank_names
         self._take_dragged = take_dragged
+        self._carrier = carrier
 
     def refresh(self) -> bool:
         """Show the connected body's banks, or a placeholder.
@@ -171,6 +202,70 @@ class CameraPane(Gtk.Box):
         for slot in range(capabilities_for_model(model).num_bank_slots):
             self.camera_banks.append(self._build_bank_card(slot))
         self._build_fs_section(model)
+        self._refresh_carrier()
+
+    def _refresh_carrier(self) -> None:
+        """Show the body's carrier, and offer the open RAF when it fits."""
+        model = self._built_model
+        section = self.carrier_row.get_parent().get_parent()
+        if model is None or self._carrier is None:
+            section.set_visible(False)
+            return
+        section.set_visible(True)
+        carrier = self._carrier.carrier_for(model)
+        self.carrier_row.set_subtitle(
+            Path(carrier).name if carrier else "No carrier"
+        )
+        self.carrier_row.remove_css_class("error")
+        self.carrier_clear_button.set_visible(bool(carrier))
+        current = self._carrier.current_raf()
+        self.carrier_current_button.set_visible(
+            bool(current) and current != carrier
+        )
+
+    def _apply_carrier(self, path: str | None) -> None:
+        """Register path for the built body and show the outcome."""
+        if self._built_model is None or self._carrier is None:
+            return
+        problem = self._carrier.set_carrier(self._built_model, path)
+        if problem:
+            self.carrier_row.set_subtitle(problem)
+            self.carrier_row.add_css_class("error")
+            return
+        self._refresh_carrier()
+
+    def _on_choose_carrier(self, _button: Any) -> None:
+        """Pick a carrier RAF with the file chooser."""
+        dialog = Gtk.FileDialog()
+        rafs = Gtk.FileFilter()
+        rafs.set_name("Fujifilm RAF")
+        rafs.add_pattern("*.RAF")
+        rafs.add_pattern("*.raf")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(rafs)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(rafs)
+        dialog.open(self.get_root(), None, self._on_carrier_picked)
+
+    def _on_carrier_picked(self, dialog: Any, result: Any) -> None:
+        """Take the picked file."""
+        try:
+            picked = dialog.open_finish(result)
+        except GLib.Error:
+            return
+        path = picked.get_path() if picked is not None else None
+        if path:
+            self._apply_carrier(path)
+
+    def _on_use_current_carrier(self, _button: Any) -> None:
+        """Register the RAF open in the main window as the carrier."""
+        current = self._carrier.current_raf() if self._carrier else None
+        if current:
+            self._apply_carrier(current)
+
+    def _on_clear_carrier(self, _button: Any) -> None:
+        """Forget the body's carrier."""
+        self._apply_carrier(None)
 
     def collect(self) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
         """The bank recipes, bank names and FS recipes to transfer."""

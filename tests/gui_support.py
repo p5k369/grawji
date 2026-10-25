@@ -1,4 +1,4 @@
-"""Helpers for GUI tests: pump the main loop, walk the widget tree."""
+"""Helpers for GUI tests."""
 
 from __future__ import annotations
 
@@ -37,6 +37,9 @@ class StubManagerHost:
         self.get_capabilities = None
         self.get_model = None
         self.load_bank_names = None
+        self.carrier_for = None
+        self.set_carrier = None
+        self.current_raf = None
         for name, value in overrides.items():
             setattr(self, name, value)
 

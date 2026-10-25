@@ -107,8 +107,7 @@ side. Click one to apply it.
 Edited a shot in darktable, Lightroom or anything else and want that
 look straight out of the camera? Pick the edited export and grawji
 searches, with the real camera engine, for the recipe that comes
-closest to it. An export in AdobeRGB is read as such, so its colors
-count as they are.
+closest to it.
 
 ![The recipe found for the edit](images/edit-match-done.webp)
 

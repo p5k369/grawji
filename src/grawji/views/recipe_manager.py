@@ -1,4 +1,4 @@
-"""The recipe manager dialog: folders, baseline, rename, export."""
+"""The recipe manager dialog."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from grawji.camera import compatibility as compat
 from grawji.recipe import Recipe
 from grawji.recipe_dedup import find_duplicate_recipes
 from grawji.recipes import HOTKEYS, UNGROUPED, RecipeLibrary, recipe_matches
-from grawji.views.camera_pane import CameraPane
+from grawji.views.camera_pane import CameraPane, CarrierHooks
 
 _UI = (
     resources.files("grawji")
@@ -37,6 +37,9 @@ class RecipeManagerHost(Protocol):
     load_bank_names: (
         Callable[[Callable[[str | None, list[str]], None]], None] | None
     )
+    carrier_for: Callable[[str], str | None] | None
+    set_carrier: Callable[[str, str | None], str | None] | None
+    current_raf: Callable[[], str | None] | None
 
     def export_recipe(self, name: str) -> None:
         """Export the named recipe as an FP file."""
@@ -127,6 +130,13 @@ class RecipeManagerDialog(Adw.Dialog):
             get_model=host.get_model,
             load_bank_names=host.load_bank_names,
             take_dragged=self._take_dragged,
+            carrier=(
+                CarrierHooks(
+                    host.carrier_for, host.set_carrier, host.current_raf
+                )
+                if host.carrier_for and host.set_carrier and host.current_raf
+                else None
+            ),
         )
         self.transfer_button.set_sensitive(self.camera_pane.refresh())
 

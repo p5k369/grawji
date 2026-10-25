@@ -37,17 +37,79 @@
           <object class="GtkStackPage">
             <property name="name">banks</property>
             <property name="child">
-              <object class="GtkScrolledWindow">
-                <property name="hscrollbar-policy">never</property>
-                <property name="vexpand">true</property>
-                <property name="overlay-scrolling">false</property>
-                <property name="child">
-                  <object class="GtkBox" id="camera_banks">
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">10</property>
-                    <property name="margin-end">6</property>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">10</property>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="vexpand">true</property>
+                    <property name="overlay-scrolling">false</property>
+                    <property name="child">
+                      <object class="GtkBox" id="camera_banks">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">10</property>
+                        <property name="margin-end">6</property>
+                      </object>
+                    </property>
                   </object>
-                </property>
+                </child>
+                <child>
+                  <object class="GtkBox" id="carrier_section">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <property name="margin-end">6</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="xalign">0</property>
+                        <property name="label">Develop RAFs of other bodies</property>
+                        <style>
+                          <class name="heading"/>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBox">
+                        <property name="selection-mode">none</property>
+                        <style>
+                          <class name="boxed-list"/>
+                        </style>
+                        <child>
+                          <object class="AdwActionRow" id="carrier_row">
+                            <property name="title">Carrier</property>
+                            <property name="subtitle">No carrier</property>
+                            <property name="tooltip-text">A RAF of this body shot without a lens, cap on, uncompressed. Foreign RAFs are developed through it.</property>
+                            <child type="suffix">
+                              <object class="GtkButton" id="carrier_current_button">
+                                <property name="label">Use current image</property>
+                                <property name="valign">center</property>
+                                <property name="visible">false</property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="carrier_choose_button">
+                                <property name="label">Choose…</property>
+                                <property name="valign">center</property>
+                              </object>
+                            </child>
+                            <child type="suffix">
+                              <object class="GtkButton" id="carrier_clear_button">
+                                <property name="icon-name">edit-clear-symbolic</property>
+                                <property name="tooltip-text">Forget this carrier</property>
+                                <property name="valign">center</property>
+                                <property name="visible">false</property>
+                                <style>
+                                  <class name="flat"/>
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
               </object>
             </property>
           </object>

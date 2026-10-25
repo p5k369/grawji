@@ -80,6 +80,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
     copyright_row = Gtk.Template.Child()
     provenance_row = Gtk.Template.Child()
     marks_row = Gtk.Template.Child()
+    micro_contrast_row = Gtk.Template.Child()
     border_row = Gtk.Template.Child()
     border_percent_row = Gtk.Template.Child()
     border_color_button = Gtk.Template.Child()
@@ -140,6 +141,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self.copyright_row.set_text(settings.export_copyright)
         self.provenance_row.set_active(settings.export_provenance)
         self.marks_row.set_active(settings.export_write_marks)
+        self.micro_contrast_row.set_active(settings.crossbody_micro_contrast)
         self.border_row.set_enable_expansion(settings.export_border_enabled)
         self.border_row.set_expanded(settings.export_border_enabled)
         self.border_row.connect(
@@ -233,6 +235,9 @@ class PreferencesDialog(Adw.PreferencesDialog):
         self._settings.export_copyright = self.copyright_row.get_text().strip()
         self._settings.export_provenance = self.provenance_row.get_active()
         self._settings.export_write_marks = self.marks_row.get_active()
+        self._settings.crossbody_micro_contrast = (
+            self.micro_contrast_row.get_active()
+        )
         self._settings.export_border_enabled = (
             self.border_row.get_enable_expansion()
         )

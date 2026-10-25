@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import datetime
+import datetime as dt
 import re
 import sys
 import tomllib
@@ -26,10 +26,10 @@ def _release_errors(release_tag: str) -> list[str]:
             'metainfo release is marked type="development"; '
             "remove the marker to publish"
         )
-    today = datetime.datetime.now(tz=datetime.UTC).date()
+    today = dt.datetime.now(tz=dt.UTC).date()
     date = re.search(r'date="([^"]+)"', entry)
     try:
-        found = datetime.date.fromisoformat(date.group(1)) if date else None
+        found = dt.date.fromisoformat(date.group(1)) if date else None
     except ValueError:
         found = None
     if found is None or abs((found - today).days) > 1:
