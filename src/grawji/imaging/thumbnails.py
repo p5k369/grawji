@@ -20,11 +20,11 @@ from typing import Any, NamedTuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("GExiv2", "0.10")
 
-from gi.repository import GdkPixbuf, GExiv2, GLib
+from gi.repository import GdkPixbuf, GLib
 
 from grawji.exif import format_focal
+from grawji.gexiv2 import GExiv2
 from grawji.imaging.pixbufs import (
     crop_to_aspect,
     orient_exif,

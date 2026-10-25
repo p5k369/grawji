@@ -10,10 +10,10 @@ import pytest
 
 gi = pytest.importorskip("gi")
 gi.require_version("GdkPixbuf", "2.0")
-gi.require_version("GExiv2", "0.10")
 
-from gi.repository import GdkPixbuf, GExiv2
+from gi.repository import GdkPixbuf
 
+from grawji.gexiv2 import GExiv2
 from grawji.imaging.thumbnails import (
     ThumbMeta,
     ThumbnailLoader,

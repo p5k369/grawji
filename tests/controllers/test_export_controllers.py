@@ -294,8 +294,7 @@ def test_batch_resize_forces_a_decode(tmp_path):
 
 def test_batch_credits_stamp_the_passthrough(tmp_path):
     """Artist/copyright reach the EXIF even on the verbatim path."""
-    gi.require_version("GExiv2", "0.10")
-    from gi.repository import GExiv2
+    from grawji.gexiv2 import GExiv2
 
     settings = Settings()
     settings.export_artist = "Jane"
