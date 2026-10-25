@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from importlib import metadata
-
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gtk
+
+import grawji
 
 _SHORTCUT_GROUPS = {
     "Files": [
@@ -86,11 +86,8 @@ def fit_dialog(
 
 
 def app_version() -> str:
-    """Return grawji's installed version, or a fallback if not packaged."""
-    try:
-        return metadata.version("grawji")
-    except metadata.PackageNotFoundError:
-        return "0.0.1"
+    """Return grawji's version."""
+    return grawji.__version__
 
 
 def present_shortcuts(parent: Gtk.Widget) -> None:

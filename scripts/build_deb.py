@@ -207,6 +207,15 @@ def _write_docs(tree: Path, version: str) -> None:
     )
 
 
+def _write_dist_info(site: Path, version: str) -> None:
+    """The package metadata importlib.metadata reads the version from."""
+    info = site / f"grawji-{version}.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: grawji\nVersion: {version}\n"
+    )
+
+
 def stage(tree: Path, rawji: str | None) -> None:
     """Lay out the file tree the package installs."""
     meta = project()
@@ -214,6 +223,7 @@ def stage(tree: Path, rawji: str | None) -> None:
     site.mkdir(parents=True)
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(ROOT / "src" / "grawji", site / "grawji", ignore=ignore)
+    _write_dist_info(site, meta["version"])
     with tempfile.TemporaryDirectory() as scratch:
         _install_rawji(_rawji_source(rawji, Path(scratch)), site)
     for name in VENDORED_WHEELS:

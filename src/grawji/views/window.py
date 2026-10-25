@@ -397,7 +397,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("export-shown", self._export_shown, ()),
             ("trash-rejected", self._trash_rejected, ()),
             ("select-all", self._filmstrip.select_all, ("<Ctrl>a",)),
-            ("cancel-selection", self._filmstrip.clear_selection, ("Escape",)),
+            ("cancel-selection", self._filmstrip.clear_selection, ()),
             ("manage-recipes", self._library.manage, ()),
             ("try-recipes", self._on_try_recipes, ()),
             ("backup-camera", self._backup.backup, ()),
@@ -405,11 +405,11 @@ class MainWindow(Adw.ApplicationWindow):
             ("zoom-in", view.zoom_in, ("<Ctrl>plus", "<Ctrl>equal")),
             ("zoom-out", view.zoom_out, ("<Ctrl>minus",)),
             ("zoom-fit", view.zoom_fit, ("<Ctrl>0",)),
-            ("cycle-background", self._cycle_background, ("b",)),
-            ("toggle-peek", self._toggle_peek, ("backslash",)),
-            ("toggle-crop", self._toggle_crop, ("c",)),
-            ("toggle-export", self._marks.toggle_export, ("e",)),
-            ("toggle-reject", self._marks.toggle_reject, ("x",)),
+            ("cycle-background", self._cycle_background, ()),
+            ("toggle-peek", self._toggle_peek, ()),
+            ("toggle-crop", self._toggle_crop, ()),
+            ("toggle-export", self._marks.toggle_export, ()),
+            ("toggle-reject", self._marks.toggle_reject, ()),
             (
                 "shortcuts",
                 lambda: dialogs.present_shortcuts(self),
@@ -431,8 +431,6 @@ class MainWindow(Adw.ApplicationWindow):
         )
         grid.connect("change-state", self._on_toggle_grid)
         self.add_action(grid)
-        if app is not None:
-            app.set_accels_for_action("win.toggle-grid", ["g"])
 
         histogram = Gio.SimpleAction.new_stateful(
             "toggle-histogram",
@@ -441,8 +439,6 @@ class MainWindow(Adw.ApplicationWindow):
         )
         histogram.connect("change-state", self._on_toggle_histogram)
         self.add_action(histogram)
-        if app is not None:
-            app.set_accels_for_action("win.toggle-histogram", ["h"])
 
         marks_bar = Gio.SimpleAction.new_stateful(
             "toggle-marks-bar",
@@ -451,8 +447,6 @@ class MainWindow(Adw.ApplicationWindow):
         )
         marks_bar.connect("change-state", self._on_toggle_marks_bar)
         self.add_action(marks_bar)
-        if app is not None:
-            app.set_accels_for_action("win.toggle-marks-bar", ["m"])
 
         self._install_mark_actions()
         self._install_source_actions()
@@ -506,9 +500,6 @@ class MainWindow(Adw.ApplicationWindow):
         toggle = Gio.SimpleAction.new("toggle-source", None)
         toggle.connect("activate", lambda *_a: self._toggle_source())
         self.add_action(toggle)
-        app = self.get_application()
-        if app is not None:
-            app.set_accels_for_action("win.toggle-source", ["j"])
 
     def _camera_file_of(self, raf_path: str | Path | None) -> str | None:
         """The camera file a shot is developed from."""
@@ -626,10 +617,10 @@ class MainWindow(Adw.ApplicationWindow):
             "notify::selected", self._on_guides_changed
         )
         self._apply_export_border()
-        crop_keys = Gtk.EventControllerKey.new()
-        crop_keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        crop_keys.connect("key-pressed", self._on_crop_key)
-        self.add_controller(crop_keys)
+        keys = Gtk.EventControllerKey.new()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_window_key)
+        self.add_controller(keys)
 
     def _apply_export_border(self) -> None:
         """Feed the preview the effective export framing settings."""
@@ -1660,23 +1651,27 @@ class MainWindow(Adw.ApplicationWindow):
         if button.get_sensitive():
             button.set_active(not button.get_active())
 
-    def _on_crop_key(
+    def _on_window_key(
         self, _controller: Any, keyval: int, _code: int, state: Any
     ) -> bool:
-        """Crop-edit keys, plus browse keys: Delete and recipe numbers."""
+        """Crop-edit keys, then Delete and the recipe number keys."""
         if self.preview_view.crop_editing:
-            if keyval == Gdk.KEY_Escape:
-                self.preview_view.cancel_crop()
-                return True
-            if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-                self.preview_view.apply_crop()
-                return True
-            return False
-        if self._focus_is_editable():
+            return self._on_crop_key(keyval)
+        if self._focus_is_editable() or self._focus_in_dialog():
             return False
         if keyval == Gdk.KEY_Delete:
             return self._fileops.handle_delete()
         return self._on_recipe_key(keyval, state)
+
+    def _on_crop_key(self, keyval: int) -> bool:
+        """Escape cancels and Return commits the crop being edited."""
+        if keyval == Gdk.KEY_Escape:
+            self.preview_view.cancel_crop()
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self.preview_view.apply_crop()
+            return True
+        return False
 
     def _on_recipe_key(self, keyval: int, state: Any) -> bool:
         """Apply the recipe assigned to a bare number key, if any."""
@@ -1710,6 +1705,16 @@ class MainWindow(Adw.ApplicationWindow):
         """Whether a text widget owns the focus."""
         focus = self.get_focus()
         return isinstance(focus, (Gtk.Editable, Gtk.Text))
+
+    def _focus_in_dialog(self) -> bool:
+        """Whether the focus sits inside a dialog or popover."""
+        focus = self.get_focus()
+        if focus is None:
+            return False
+        return (
+            focus.get_ancestor(Adw.Dialog) is not None
+            or focus.get_ancestor(Gtk.Popover) is not None
+        )
 
     def _on_guides_changed(self, *_args: object) -> None:
         """Remember the chosen composition guides."""
