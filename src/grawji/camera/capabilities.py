@@ -219,6 +219,61 @@ _MODEL_CAPABILITIES = {
 }
 
 
+_SIZE_24MP = (6000, 4000)
+_SIZE_26MP = (6240, 4160)
+_SIZE_40MP = (7728, 5152)
+_SIZE_GFX50 = (8256, 6192)
+_SIZE_GFX100 = (11648, 8736)
+_PICTURE_SIZES = {
+    "XPRO2": _SIZE_24MP,
+    "XT2": _SIZE_24MP,
+    "X100F": _SIZE_24MP,
+    "XT20": _SIZE_24MP,
+    "XE3": _SIZE_24MP,
+    "XH1": _SIZE_24MP,
+    "XT3": _SIZE_26MP,
+    "XT30": _SIZE_26MP,
+    "XPRO3": _SIZE_26MP,
+    "X100V": _SIZE_26MP,
+    "XT4": _SIZE_26MP,
+    "XS10": _SIZE_26MP,
+    "XE4": _SIZE_26MP,
+    "XT30II": _SIZE_26MP,
+    "XH2S": _SIZE_26MP,
+    "XH2": _SIZE_40MP,
+    "XT5": _SIZE_40MP,
+    "XS20": _SIZE_26MP,
+    "X100VI": _SIZE_40MP,
+    "XT50": _SIZE_40MP,
+    "XM5": _SIZE_26MP,
+    "XE5": _SIZE_40MP,
+    "XT30III": _SIZE_26MP,
+    "GFX50S": _SIZE_GFX50,
+    "GFX50R": _SIZE_GFX50,
+    "GFX100": _SIZE_GFX100,
+    "GFX100S": _SIZE_GFX100,
+    "GFX50SII": _SIZE_GFX50,
+    "GFX100II": _SIZE_GFX100,
+    "GFX100SII": _SIZE_GFX100,
+    "GFX100RF": _SIZE_GFX100,
+}
+
+
+def can_carry(
+    model: str | None, donor_model: str | None, donor_size: tuple[int, int]
+) -> bool | None:
+    """Whether a body's carrier has room for a donor picture."""
+    if model is None or donor_model is None:
+        return None
+    body, donor = _normalize(model), _normalize(donor_model)
+    size = _PICTURE_SIZES.get(body)
+    if size is None or donor not in _PICTURE_SIZES:
+        return None
+    if body.startswith("GFX") != donor.startswith("GFX"):
+        return False
+    return donor_size[0] <= size[0] and donor_size[1] <= size[1]
+
+
 def _normalize(model: str) -> str:
     """Reduce an EXIF model string to a table key."""
     return "".join(

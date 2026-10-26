@@ -26,6 +26,7 @@ from grawji.camera import camera_info
 from grawji.camera.capabilities import (
     BASELINE,
     Capabilities,
+    can_carry,
     capabilities_for,
     capabilities_for_model,
     is_known_model,
@@ -224,6 +225,8 @@ class MainWindow(Adw.ApplicationWindow):
     _mark_actions: list[Gio.SimpleAction]
     _exif_rows: list[Any]
     _exif_pairs: list[tuple[str, str]]
+    _notified_models: set[str]
+    _foreign_warned: set[str]
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, the composite widgets and the controllers."""
@@ -240,7 +243,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._image_ev: float | None = None
         self._shot_ev: float | None = None
         self._current_folder: str | None = None
-        self._notified_models: set[str] = set()
+        self._notified_models, self._foreign_warned = set(), set()
         self._exif_rows, self._exif_pairs = [], []
         self._render_pending_id = self._load_pending_id = 0
         self._error_showing = False
@@ -1763,21 +1766,14 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_busy(busy=False, status="Error.")
         # A camera failure aborts any batch mid-flight, unstick its dialog.
         self._batch.abort()
+        if isinstance(exc, ForeignRafError):
+            self._set_busy(busy=False, status=self._foreign_status())
+            self._warn_foreign_once()
+            return
         # A wedged camera fails every queued render in turn; show one dialog.
         if self._error_showing:
             return
-        if isinstance(exc, ForeignRafError):
-            message = "Camera error"
-            detail = (
-                "This RAF was shot by a different camera body. Fuji "
-                "cameras only convert their own RAFs. The connected body "
-                "can develop it through a carrier, registered in the "
-                "Recipe Manager's camera pane."
-                if self._session.model
-                else "This RAF was shot by a different camera body. Fuji "
-                "cameras only convert their own RAFs."
-            )
-        elif camera_info.is_camera_stuck(exc):
+        if camera_info.is_camera_stuck(exc):
             message = "Camera not responding"
             detail = (
                 "The camera stopped responding during conversion and "
@@ -1804,6 +1800,39 @@ class MainWindow(Adw.ApplicationWindow):
         alert.set_detail(detail)
         alert.set_buttons(["Close"])
         alert.choose(self, None, self._on_error_dismissed)
+
+    def _foreign_model(self) -> str:
+        """The body named in the current RAF's header."""
+        named = raf.header_model(self._raf_path) if self._raf_path else None
+        return named or "another body"
+
+    def _foreign_status(self) -> str:
+        """Why a RAF of another body shows its in-camera JPEG only."""
+        return f"Shot on {self._foreign_model()}, showing the in-camera JPEG."
+
+    def _warn_foreign_once(self) -> None:
+        """Toast the first RAF of another body per session."""
+        named = self._foreign_model()
+        if named in self._foreign_warned:
+            return
+        self._foreign_warned.add(named)
+        model = self._session.model
+        size = raf.output_size(self._raf_path) if self._raf_path else None
+        fits = can_carry(model, named, size) if size else None
+        if (
+            model
+            and fits is not False
+            and opener.carrier_for(self._settings, model) is None
+        ):
+            toast = Adw.Toast.new(
+                f"The {model} needs a carrier to develop {named} shots."
+            )
+            toast.set_button_label("Set up…")
+            toast.connect("button-clicked", lambda _t: self._library.manage())
+        else:
+            body = model or "The camera"
+            toast = Adw.Toast.new(f"{body} cannot develop {named} shots.")
+        self.toast_overlay.add_toast(toast)
 
     def _on_error_dismissed(self, dialog: Any, result: Any) -> None:
         """Clear the error-showing guard once the dialog is closed."""
