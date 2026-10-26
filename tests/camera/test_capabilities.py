@@ -8,6 +8,7 @@ from rawji.fuji_profile import create_profile_simple
 from grawji.camera.capabilities import (
     BASELINE,
     FILM_SIMULATIONS,
+    can_carry,
     capabilities_for,
     capabilities_for_model,
     is_xprocessor5,
@@ -180,3 +181,13 @@ def test_bank_slot_counts_per_body():
     for model in ("X100F", "X-T3", "X-H2", "X-T5", "X-E5", "GFX100RF"):
         assert capabilities_for_model(model).num_bank_slots == 7
     assert capabilities_for_model("X-UNKNOWN").num_bank_slots == 7
+
+
+def test_can_carry_needs_room_and_the_same_filter_family() -> None:
+    """A donor fits a carrier body only within its sensor and family."""
+    assert can_carry("X-E5", "X-T3", (6240, 4160)) is True
+    assert can_carry("X-T3", "X-E5", (7728, 5152)) is False
+    assert can_carry("X-T3", "X-T3", (6240, 4160)) is True
+    assert can_carry("GFX100S", "X-T3", (6240, 4160)) is False
+    assert can_carry("X-T3", "X-T9", (6240, 4160)) is None
+    assert can_carry(None, "X-T3", (6240, 4160)) is None
