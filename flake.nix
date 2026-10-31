@@ -15,8 +15,6 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
@@ -44,6 +42,17 @@
             pythonImportsCheck = [ "rawji" ];
           };
 
+          lsdetectWheels = {
+            x86_64-linux = {
+              platform = "manylinux_2_17_x86_64.manylinux2014_x86_64";
+              hash = "sha256-AJVHwSEcLtvYLFum8UWjMmjuicT0t2aWATdqIYNpUIg=";
+            };
+            aarch64-linux = {
+              platform = "manylinux_2_17_aarch64.manylinux2014_aarch64";
+              hash = "sha256-/YW7+fBK1M11Vs1kByiWFSU951ec80jBkyVSkSt3Tvw=";
+            };
+          };
+
           lsdetect = python.pkgs.buildPythonPackage {
             pname = "lsdetect";
             version = "0.4.0";
@@ -55,9 +64,9 @@
               dist = "cp311";
               python = "cp311";
               abi = "abi3";
-              platform = "manylinux_2_17_x86_64.manylinux2014_x86_64";
-              hash = "sha256-AJVHwSEcLtvYLFum8UWjMmjuicT0t2aWATdqIYNpUIg=";
+              inherit (lsdetectWheels.${system}) platform hash;
             };
+            dependencies = [ python.pkgs.numpy ];
             pythonImportsCheck = [ "lsdetect" ];
           };
 

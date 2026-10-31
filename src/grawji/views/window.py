@@ -318,8 +318,9 @@ class MainWindow(Adw.ApplicationWindow):
             get_capabilities=self._current_capabilities,
             get_model=camera_info.detect_camera,
             load_bank_names=self._camera_ops.load_bank_names,
-            carrier_for=self._carrier_for,
-            set_carrier=self._set_carrier,
+            carriers_for=self._carriers_for,
+            add_carrier=self._add_carrier,
+            forget_carrier=self._forget_carrier,
             current_raf=lambda: (
                 str(self._raf_path) if self._raf_path is not None else None
             ),
@@ -1822,7 +1823,7 @@ class MainWindow(Adw.ApplicationWindow):
         if (
             model
             and fits is not False
-            and opener.carrier_for(self._settings, model) is None
+            and not opener.carriers_for(self._settings, model)
         ):
             toast = Adw.Toast.new(
                 f"The {model} needs a carrier to develop {named} shots."
@@ -1848,26 +1849,39 @@ class MainWindow(Adw.ApplicationWindow):
         model = self._session.model or camera_info.detect_camera()
         return capabilities_for_model(model)
 
-    def _carrier_for(self, model: str) -> str | None:
-        """The carrier file registered for a body, as the pane shows it."""
-        carrier = opener.carrier_for(self._settings, model)
-        return str(carrier) if carrier is not None else None
+    def _carriers_for(self, model: str) -> dict[int, str]:
+        """A body's carrier files by dynamic range, as the pane shows them."""
+        found = opener.carriers_for(self._settings, model)
+        return {dr: str(path) for dr, path in found.items()}
 
-    def _set_carrier(self, model: str, path: str | None) -> str | None:
-        """Register (or forget) a body's carrier."""
-        key = opener.normalize_model(model)
-        if path is None:
-            for registered in list(self._settings.carriers):
-                if opener.normalize_model(registered) == key:
-                    del self._settings.carriers[registered]
-            self._save_settings()
-            return None
+    def _add_carrier(self, model: str, path: str) -> str | None:
+        """Register a RAF as a body's carrier under its shot dynamic range."""
         problem = opener.check_carrier(path, model)
         if problem is not None:
             return problem
-        self._settings.carriers[model] = path
-        self._save_settings()
+        self._store_carriers(
+            model,
+            self._carriers_for(model) | {opener.dynamic_range_of(path): path},
+        )
         return None
+
+    def _forget_carrier(self, model: str, dynamic_range: int) -> None:
+        """Forget a body's carrier of a dynamic range."""
+        registered = self._carriers_for(model)
+        registered.pop(dynamic_range, None)
+        self._store_carriers(model, registered)
+
+    def _store_carriers(self, model: str, registered: dict[int, str]) -> None:
+        """Persist a body's carrier set under one spelling of its model."""
+        key = opener.normalize_model(model)
+        for name in list(self._settings.carriers):
+            if opener.normalize_model(name) == key:
+                del self._settings.carriers[name]
+        if registered:
+            self._settings.carriers[model] = {
+                str(dr): registered[dr] for dr in sorted(registered)
+            }
+        self._save_settings()
 
     def _developed_by_row(self) -> list[tuple[str, str]]:
         """The info row naming the body that develops a foreign RAF."""

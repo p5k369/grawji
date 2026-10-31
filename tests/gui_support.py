@@ -37,8 +37,9 @@ class StubManagerHost:
         self.get_capabilities = None
         self.get_model = None
         self.load_bank_names = None
-        self.carrier_for = None
-        self.set_carrier = None
+        self.carriers_for = None
+        self.add_carrier = None
+        self.forget_carrier = None
         self.current_raf = None
         for name, value in overrides.items():
             setattr(self, name, value)

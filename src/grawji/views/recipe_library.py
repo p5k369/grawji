@@ -48,8 +48,9 @@ class RecipeLibraryController:
         load_bank_names: (
             Callable[[Callable[[str | None, list[str]], None]], None] | None
         ) = None,
-        carrier_for: Callable[[str], str | None] | None = None,
-        set_carrier: Callable[[str, str | None], str | None] | None = None,
+        carriers_for: Callable[[str], dict[int, str]] | None = None,
+        add_carrier: Callable[[str, str], str | None] | None = None,
+        forget_carrier: Callable[[str, int], None] | None = None,
         current_raf: Callable[[], str | None] | None = None,
         run_transfer: Callable[..., None] | None = None,
         render_thumb: (
@@ -75,8 +76,10 @@ class RecipeLibraryController:
             get_model: Returns the connected body's model, used to tag a
                 saved recipe's origin and drive the camera-bank pane.
             load_bank_names: Reads current bank names off the main thread.
-            carrier_for: Returns the carrier file registered for a body.
-            set_carrier: Registers a body's carrier, returning a refusal.
+            carriers_for: Returns a body's carrier files by dynamic range.
+            add_carrier: Registers a RAF as a body's carrier under the
+                dynamic range it was shot at.
+            forget_carrier: Forgets a body's carrier of a dynamic range.
             current_raf: Returns the RAF open in the main window.
             run_transfer: Performs the USB bank transfer off the main thread.
             render_thumb: Renders a recipe against the open RAF and calls
@@ -94,8 +97,9 @@ class RecipeLibraryController:
         self.get_capabilities = get_capabilities
         self.get_model = get_model
         self.load_bank_names = load_bank_names
-        self.carrier_for = carrier_for
-        self.set_carrier = set_carrier
+        self.carriers_for = carriers_for
+        self.add_carrier = add_carrier
+        self.forget_carrier = forget_carrier
         self.current_raf = current_raf
         self._run_transfer = run_transfer
         self._render_thumb = render_thumb

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
-from pathlib import Path
 from typing import Any
 
 import gi
@@ -19,6 +18,7 @@ from grawji.camera import compatibility as compat
 from grawji.camera import fs_recipe
 from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipes import RecipeLibrary
+from grawji.views.carrier_row import CarrierRow
 from grawji.views.textures import texture_for_pixbuf
 
 _UI = (
@@ -79,16 +79,19 @@ def _family_paintable(model: str | None) -> Gdk.Texture | None:
 
 @dataclass(frozen=True)
 class CarrierHooks:
-    """How the pane reads and registers a body's carrier.
+    """How the pane reads and registers a body's carriers.
 
     Attributes:
-        carrier_for: Returns the carrier file registered for a body model.
-        set_carrier: Registers a carrier file for a body.
+        carriers_for: Returns a body's carrier files by dynamic range.
+        add_carrier: Registers a RAF as a body's carrier under the
+            dynamic range it was shot at, returning a refusal.
+        forget_carrier: Forgets a body's carrier of a dynamic range.
         current_raf: Returns the RAF open in the main window.
     """
 
-    carrier_for: Callable[[str], str | None]
-    set_carrier: Callable[[str, str | None], str | None]
+    carriers_for: Callable[[str], dict[int, str]]
+    add_carrier: Callable[[str, str], str | None]
+    forget_carrier: Callable[[str, int], None]
     current_raf: Callable[[], str | None]
 
 
@@ -107,10 +110,13 @@ class CameraPane(Gtk.Box):
     camera_header = Gtk.Template.Child()
     camera_stack = Gtk.Template.Child()
     camera_banks = Gtk.Template.Child()
-    carrier_row = Gtk.Template.Child()
+    carrier_section = Gtk.Template.Child()
+    carrier_row_100 = Gtk.Template.Child()
+    carrier_row_200 = Gtk.Template.Child()
+    carrier_row_400 = Gtk.Template.Child()
+    carrier_problem = Gtk.Template.Child()
+    carrier_add_button = Gtk.Template.Child()
     carrier_current_button = Gtk.Template.Child()
-    carrier_choose_button = Gtk.Template.Child()
-    carrier_clear_button = Gtk.Template.Child()
 
     def __init__(self, **kwargs: object) -> None:
         """Build the empty pane."""
@@ -129,11 +135,17 @@ class CameraPane(Gtk.Box):
         self._fs_cards: list[dict[str, Any]] = []
         self._fs_recipe: dict[int, str] = {}
         self._carrier: CarrierHooks | None = None
-        self.carrier_choose_button.connect("clicked", self._on_choose_carrier)
+        self.carrier_rows: dict[int, CarrierRow] = {
+            100: self.carrier_row_100,
+            200: self.carrier_row_200,
+            400: self.carrier_row_400,
+        }
+        for dr, row in self.carrier_rows.items():
+            row.clear_button.connect("clicked", self._on_clear_carrier, dr)
+        self.carrier_add_button.connect("clicked", self._on_choose_carrier)
         self.carrier_current_button.connect(
             "clicked", self._on_use_current_carrier
         )
-        self.carrier_clear_button.connect("clicked", self._on_clear_carrier)
 
     def wire(
         self,
@@ -205,34 +217,33 @@ class CameraPane(Gtk.Box):
         self._refresh_carrier()
 
     def _refresh_carrier(self) -> None:
-        """Show the body's carrier, and offer the open RAF when it fits."""
+        """Show each range's carrier, offering the open RAF when it is new."""
         model = self._built_model
-        section = self.carrier_row.get_parent().get_parent()
         if model is None or self._carrier is None:
-            section.set_visible(False)
+            self.carrier_section.set_visible(False)
             return
-        section.set_visible(True)
-        carrier = self._carrier.carrier_for(model)
-        self.carrier_row.set_subtitle(
-            Path(carrier).name if carrier else "No carrier"
-        )
-        self.carrier_row.remove_css_class("error")
-        self.carrier_clear_button.set_visible(bool(carrier))
+        self.carrier_section.set_visible(True)
+        registered = self._carrier.carriers_for(model)
+        for dr, row in self.carrier_rows.items():
+            higher = [have for have in registered if have > dr]
+            row.show(
+                registered.get(dr),
+                served_by=min(higher) if higher else None,
+            )
         current = self._carrier.current_raf()
         self.carrier_current_button.set_visible(
-            bool(current) and current != carrier
+            bool(current) and current not in registered.values()
         )
 
-    def _apply_carrier(self, path: str | None) -> None:
-        """Register path for the built body and show the outcome."""
+    def _add_carrier(self, path: str) -> None:
+        """Register path as a carrier of the built body, show the outcome."""
         if self._built_model is None or self._carrier is None:
             return
-        problem = self._carrier.set_carrier(self._built_model, path)
-        if problem:
-            self.carrier_row.set_subtitle(problem)
-            self.carrier_row.add_css_class("error")
-            return
-        self._refresh_carrier()
+        problem = self._carrier.add_carrier(self._built_model, path)
+        self.carrier_problem.set_label(problem or "")
+        self.carrier_problem.set_visible(bool(problem))
+        if not problem:
+            self._refresh_carrier()
 
     def _on_choose_carrier(self, _button: Any) -> None:
         """Pick a carrier RAF with the file chooser."""
@@ -255,17 +266,21 @@ class CameraPane(Gtk.Box):
             return
         path = picked.get_path() if picked is not None else None
         if path:
-            self._apply_carrier(path)
+            self._add_carrier(path)
 
     def _on_use_current_carrier(self, _button: Any) -> None:
-        """Register the RAF open in the main window as the carrier."""
+        """Register the RAF open in the main window as a carrier."""
         current = self._carrier.current_raf() if self._carrier else None
         if current:
-            self._apply_carrier(current)
+            self._add_carrier(current)
 
-    def _on_clear_carrier(self, _button: Any) -> None:
-        """Forget the body's carrier."""
-        self._apply_carrier(None)
+    def _on_clear_carrier(self, _button: Any, dr: int) -> None:
+        """Forget the body's carrier of a dynamic range."""
+        if self._built_model is None or self._carrier is None:
+            return
+        self._carrier.forget_carrier(self._built_model, dr)
+        self.carrier_problem.set_visible(False)
+        self._refresh_carrier()
 
     def collect(self) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
         """The bank recipes, bank names and FS recipes to transfer."""

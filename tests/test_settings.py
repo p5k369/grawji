@@ -89,8 +89,15 @@ def test_corrupt_file_returns_defaults(tmp_path):
 
 def test_carriers_round_trip(tmp_path):
     """The per-body carrier files survive a save and load."""
-    settings = Settings(carriers={"X-E5": "/carriers/xe5.RAF"})
+    carriers = {"X-E5": {"100": "/carriers/dr100.RAF", "400": "/c/4.RAF"}}
+    settings = Settings(carriers=carriers)
     path = tmp_path / "settings.json"
     save_settings(settings, path)
-    assert load_settings(path).carriers == {"X-E5": "/carriers/xe5.RAF"}
+    assert load_settings(path).carriers == carriers
     assert Settings().carriers == {}
+
+
+def test_a_single_old_carrier_becomes_a_set_without_a_range():
+    """Settings written before the per-DR sets still name their carrier."""
+    loaded = Settings.from_dict({"carriers": {"X-E5": "/carriers/xe5.RAF"}})
+    assert loaded.carriers == {"X-E5": {"": "/carriers/xe5.RAF"}}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiCarrierRow" parent="AdwActionRow">
+    <property name="subtitle">Missing</property>
+    <child type="suffix">
+      <object class="GtkButton" id="clear_button">
+        <property name="icon-name">edit-clear-symbolic</property>
+        <property name="tooltip-text">Forget this carrier</property>
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="flat"/>
+        </style>
+      </object>
+    </child>
+  </template>
+</interface>

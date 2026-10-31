@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,12 +78,22 @@ def dynamic_range_of(path: Path | str) -> int:
 
 def prepare(
     donor: Path,
-    carrier: Path,
+    available: Mapping[int, Path],
     carrier_model: str,
     *,
     micro_contrast: bool = True,
 ) -> Prepared:
-    """Embed the donor into the carrier and write the file to upload."""
+    """Embed the donor into the fitting carrier and write the upload file.
+
+    Args:
+        donor: The foreign RAF.
+        available: The body's carriers by the dynamic range they were shot at.
+        carrier_model: The body that develops the picture.
+        micro_contrast: Whether a full-size render gets its micro
+            contrast back.
+    """
+    choice = carriers.select_carrier(dynamic_range_of(donor), available)
+    carrier = choice.carrier
     donor_lens = lens.lens_tables(donor)
     carrier_lens = lens.lens_tables(carrier)
     if carrier_lens is not None and carrier_lens.corrects:
@@ -92,9 +102,6 @@ def prepare(
             "carrier shot without one"
         )
         raise TransplantError(msg)
-    choice = carriers.select_carrier(
-        dynamic_range_of(donor), {dynamic_range_of(carrier): carrier}
-    )
     transplant = embed.build_transplant(
         donor,
         carrier,
@@ -133,9 +140,14 @@ def check_carrier(path: Path | str, model: str) -> str | None:
         return (
             "This RAF was shot through a lens; shoot the carrier without one."
         )
+    return _pixel_problem(Path(path))
+
+
+def _pixel_problem(path: Path) -> str | None:
+    """Why a native RAF's pixel block cannot take a transplant."""
     try:
-        frame = embed.decode(Path(path))
-        embed.locate_pixel_base(Path(path).read_bytes(), frame.pixels)
+        frame = embed.decode(path)
+        embed.locate_pixel_base(path.read_bytes(), frame.pixels)
     except TransplantError:
         return "This RAF is compressed. Shoot the carrier uncompressed."
     except (OSError, ValueError):
@@ -162,12 +174,12 @@ def from_settings(
 
     def open_foreign(donor: Path, model: str) -> Prepared | None:
         current = settings()
-        carrier = carrier_for(current, model)
-        if carrier is None:
+        available = carriers_for(current, model)
+        if not available:
             return None
         return prepare(
             donor,
-            carrier,
+            available,
             model,
             micro_contrast=current.crossbody_micro_contrast,
         )
@@ -175,13 +187,20 @@ def from_settings(
     return open_foreign
 
 
-def carrier_for(settings: Settings, model: str) -> Path | None:
-    """The registered carrier of a body, by its normalized model name."""
+def carriers_for(settings: Settings, model: str) -> dict[int, Path]:
+    """The registered carriers of a body by the dynamic range they hold."""
     wanted = normalize_model(model)
-    for registered, path in settings.carriers.items():
-        if normalize_model(registered) == wanted and path:
-            return Path(path)
-    return None
+    found: dict[int, Path] = {}
+    for registered, by_range in settings.carriers.items():
+        if normalize_model(registered) != wanted:
+            continue
+        for key, path in by_range.items():
+            if not path:
+                continue
+            shot = int(key) if key.isdigit() else dynamic_range_of(path)
+            if shot in carriers.DR_CLASSES:
+                found[shot] = Path(path)
+    return found
 
 
 def normalize_model(model: str) -> str:
