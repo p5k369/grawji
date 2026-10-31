@@ -63,7 +63,7 @@ def test_prepare_writes_the_stand_in_and_keeps_the_donor_tables(
         dynamic_ranges={donor: 100, carrier: 100},
     )
 
-    prepared = opener.prepare(donor, carrier, "X-E5")
+    prepared = opener.prepare(donor, {100: carrier}, "X-E5")
 
     assert prepared.raf_path.read_bytes() == b"carrier-with-donor"
     assert prepared.donor_lens is _LENSED
@@ -86,7 +86,7 @@ def test_prepare_scales_a_lower_dr_donor_into_a_higher_carrier(
         dynamic_ranges={donor: 100, carrier: 400},
     )
 
-    prepared = opener.prepare(donor, carrier, "X-E5")
+    prepared = opener.prepare(donor, {400: carrier}, "X-E5")
 
     assert built["exposure_scale"] == pytest.approx(0.25)
     assert prepared.ev_offset == 0.0
@@ -102,7 +102,7 @@ def test_prepare_falls_back_to_ev_for_a_higher_dr_donor(monkeypatch, tmp_path):
         dynamic_ranges={donor: 400, carrier: None},
     )
 
-    prepared = opener.prepare(donor, carrier, "X-E5")
+    prepared = opener.prepare(donor, {100: carrier}, "X-E5")
 
     assert prepared.ev_offset == pytest.approx(2.0)
     prepared.cleanup()
@@ -117,7 +117,27 @@ def test_prepare_refuses_a_lensed_carrier(monkeypatch, tmp_path):
         dynamic_ranges={donor: 100, carrier: 100},
     )
     with pytest.raises(TransplantError, match="without one"):
-        opener.prepare(donor, carrier, "X-E5")
+        opener.prepare(donor, {100: carrier}, "X-E5")
+
+
+def test_prepare_picks_the_carrier_of_the_donors_dynamic_range(
+    monkeypatch, tmp_path
+):
+    """With a set of carriers the donor's own DR class is used as is."""
+    donor = tmp_path / "donor.RAF"
+    low, mid, high = (tmp_path / f"dr{dr}.RAF" for dr in (100, 200, 400))
+    built = _stub(
+        monkeypatch,
+        tables={donor: None, low: None, mid: None, high: None},
+        dynamic_ranges={donor: 200, low: 100, mid: 200, high: 400},
+    )
+
+    prepared = opener.prepare(donor, {100: low, 400: high, 200: mid}, "X-E5")
+
+    assert built["carrier"] == mid
+    assert built["exposure_scale"] == 1.0
+    assert prepared.ev_offset == 0.0
+    prepared.cleanup()
 
 
 def test_finish_passes_the_geometry_and_the_preview_flags(monkeypatch):
@@ -193,12 +213,24 @@ def test_finish_passes_the_geometry_and_the_preview_flags(monkeypatch):
     assert seen["compensate"] is False
 
 
-def test_carrier_for_matches_models_loosely():
-    """FUJIFILM X-E5, x-e5 and X-E5 name the same carrier."""
-    settings = Settings(carriers={"FUJIFILM X-E5": "/carriers/xe5.RAF"})
-    assert opener.carrier_for(settings, "x-e5") == Path("/carriers/xe5.RAF")
-    assert opener.carrier_for(settings, "X-T3") is None
-    assert opener.carrier_for(Settings(carriers={"X-E5": ""}), "X-E5") is None
+def test_carriers_for_matches_models_loosely():
+    """FUJIFILM X-E5, x-e5 and X-E5 name the same carriers."""
+    settings = Settings(
+        carriers={"FUJIFILM X-E5": {"400": "/carriers/xe5.RAF", "100": ""}}
+    )
+    assert opener.carriers_for(settings, "x-e5") == {
+        400: Path("/carriers/xe5.RAF")
+    }
+    assert opener.carriers_for(settings, "X-T3") == {}
+
+
+def test_carriers_for_classes_an_old_carrier_by_its_metadata(monkeypatch):
+    """A carrier from before the ranges were recorded reads its own DR."""
+    monkeypatch.setattr(opener.imagemeta, "fuji_dynamic_range", lambda p: 400)
+    settings = Settings(carriers={"X-E5": {"": "/carriers/old.RAF"}})
+    assert opener.carriers_for(settings, "X-E5") == {
+        400: Path("/carriers/old.RAF")
+    }
 
 
 def test_from_settings_reads_the_settings_on_every_call(monkeypatch, tmp_path):
@@ -208,18 +240,18 @@ def test_from_settings_reads_the_settings_on_every_call(monkeypatch, tmp_path):
     monkeypatch.setattr(
         opener,
         "prepare",
-        lambda donor, carrier, model, *, micro_contrast: calls.append(
-            (donor, carrier, model, micro_contrast)
+        lambda donor, available, model, *, micro_contrast: calls.append(
+            (donor, available, model, micro_contrast)
         ),
     )
     hook = opener.from_settings(lambda: settings)
     donor = tmp_path / "donor.RAF"
 
     assert hook(donor, "X-E5") is None
-    settings.carriers["X-E5"] = "/carriers/xe5.RAF"
+    settings.carriers["X-E5"] = {"400": "/carriers/xe5.RAF"}
     settings.crossbody_micro_contrast = False
     hook(donor, "X-E5")
-    assert calls == [(donor, Path("/carriers/xe5.RAF"), "X-E5", False)]
+    assert calls == [(donor, {400: Path("/carriers/xe5.RAF")}, "X-E5", False)]
 
 
 def test_check_carrier_names_what_is_wrong(monkeypatch, tmp_path):

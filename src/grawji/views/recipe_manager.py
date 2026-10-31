@@ -37,8 +37,9 @@ class RecipeManagerHost(Protocol):
     load_bank_names: (
         Callable[[Callable[[str | None, list[str]], None]], None] | None
     )
-    carrier_for: Callable[[str], str | None] | None
-    set_carrier: Callable[[str, str | None], str | None] | None
+    carriers_for: Callable[[str], dict[int, str]] | None
+    add_carrier: Callable[[str, str], str | None] | None
+    forget_carrier: Callable[[str, int], None] | None
     current_raf: Callable[[], str | None] | None
 
     def export_recipe(self, name: str) -> None:
@@ -132,9 +133,15 @@ class RecipeManagerDialog(Adw.Dialog):
             take_dragged=self._take_dragged,
             carrier=(
                 CarrierHooks(
-                    host.carrier_for, host.set_carrier, host.current_raf
+                    host.carriers_for,
+                    host.add_carrier,
+                    host.forget_carrier,
+                    host.current_raf,
                 )
-                if host.carrier_for and host.set_carrier and host.current_raf
+                if host.carriers_for
+                and host.add_carrier
+                and host.forget_carrier
+                and host.current_raf
                 else None
             ),
         )

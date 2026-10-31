@@ -99,8 +99,8 @@ class Settings:
             imaging.export.FORMATS.
         edit_match_budget: Renders a recipe-from-edit search may make
             before it settles for the best it has.
-        carriers: Per body model, the lensless uncompressed RAF the body
-            develops foreign RAFs through.
+        carriers: Per body model, the lensless uncompressed RAFs the
+            body develops foreign RAFs through.
         crossbody_micro_contrast: Restore the micro contrast the
             resampling of a cross-body export takes away.
     """
@@ -137,7 +137,7 @@ class Settings:
     export_max_edge: int = 0
     export_artist: str = ""
     export_copyright: str = ""
-    carriers: dict[str, str] = field(default_factory=dict)
+    carriers: dict[str, dict[str, str]] = field(default_factory=dict)
     crossbody_micro_contrast: bool = True
     export_provenance: bool = True
     export_write_marks: bool = True
@@ -154,6 +154,12 @@ class Settings:
         known = {f: data[f] for f in cls.__dataclass_fields__ if f in data}
         if "export_format" not in known and data.get("export_jxl"):
             known["export_format"] = "jxl"
+        carriers = known.get("carriers")
+        if isinstance(carriers, dict):
+            known["carriers"] = {
+                model: {"": paths} if isinstance(paths, str) else paths
+                for model, paths in carriers.items()
+            }
         return cls(**known)  # type: ignore[arg-type]
 
 

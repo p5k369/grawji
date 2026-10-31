@@ -70,40 +70,62 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkLabel">
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                        <property name="label">Lensless, uncompressed RAFs of this body, one per dynamic range. DR400 covers the rest.</property>
+                        <style>
+                          <class name="caption"/>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkListBox">
                         <property name="selection-mode">none</property>
                         <style>
                           <class name="boxed-list"/>
                         </style>
                         <child>
-                          <object class="AdwActionRow" id="carrier_row">
-                            <property name="title">Carrier</property>
-                            <property name="subtitle">No carrier</property>
-                            <property name="tooltip-text">A RAF of this body shot without a lens, cap on, uncompressed. Foreign RAFs are developed through it.</property>
-                            <child type="suffix">
-                              <object class="GtkButton" id="carrier_current_button">
-                                <property name="label">Use current image</property>
-                                <property name="valign">center</property>
-                                <property name="visible">false</property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="carrier_choose_button">
-                                <property name="label">Choose…</property>
-                                <property name="valign">center</property>
-                              </object>
-                            </child>
-                            <child type="suffix">
-                              <object class="GtkButton" id="carrier_clear_button">
-                                <property name="icon-name">edit-clear-symbolic</property>
-                                <property name="tooltip-text">Forget this carrier</property>
-                                <property name="valign">center</property>
-                                <property name="visible">false</property>
-                                <style>
-                                  <class name="flat"/>
-                                </style>
-                              </object>
-                            </child>
+                          <object class="GrawjiCarrierRow" id="carrier_row_100">
+                            <property name="title">DR100</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GrawjiCarrierRow" id="carrier_row_200">
+                            <property name="title">DR200</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GrawjiCarrierRow" id="carrier_row_400">
+                            <property name="title">DR400</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="carrier_problem">
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                        <property name="visible">false</property>
+                        <style>
+                          <class name="caption"/>
+                          <class name="error"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox">
+                        <property name="spacing">6</property>
+                        <child>
+                          <object class="GtkButton" id="carrier_add_button">
+                            <property name="label">Add carrier…</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="carrier_current_button">
+                            <property name="label">Use current image</property>
+                            <property name="visible">false</property>
                           </object>
                         </child>
                       </object>

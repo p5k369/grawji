@@ -287,42 +287,65 @@ def _carrier_dialog(tmp_path, **hooks):
     return dialog
 
 
-def test_camera_pane_shows_the_registered_carrier(tmp_path: Any) -> None:
-    """The carrier row names the file and offers the open RAF."""
+def test_camera_pane_lists_the_registered_carriers(tmp_path: Any) -> None:
+    """Each range names its file or the higher one standing in."""
     dialog = _carrier_dialog(
         tmp_path,
-        carrier_for=lambda model: "/carriers/xe5-cap-on.RAF",
-        set_carrier=lambda model, path: None,
+        carriers_for=lambda model: {400: "/carriers/xe5-cap-on.RAF"},
+        add_carrier=lambda model, path: None,
+        forget_carrier=lambda model, dr: None,
         current_raf=lambda: "/photos/other.RAF",
     )
     pane = dialog.camera_pane
-    assert pane.carrier_row.get_subtitle() == "xe5-cap-on.RAF"
-    assert pane.carrier_clear_button.get_visible()
+    assert pane.carrier_rows[400].get_subtitle() == "xe5-cap-on.RAF"
+    assert pane.carrier_rows[400].clear_button.get_visible()
+    assert pane.carrier_rows[200].get_subtitle() == (
+        "Missing, served by the DR400 carrier"
+    )
+    assert not pane.carrier_rows[200].clear_button.get_visible()
     assert pane.carrier_current_button.get_visible()
+    assert not pane.carrier_problem.get_visible()
+
+
+def test_camera_pane_does_not_offer_a_registered_raf(tmp_path: Any) -> None:
+    """The open RAF is not offered again once it is a carrier."""
+    dialog = _carrier_dialog(
+        tmp_path,
+        carriers_for=lambda model: {400: "/carriers/xe5.RAF"},
+        add_carrier=lambda model, path: None,
+        forget_carrier=lambda model, dr: None,
+        current_raf=lambda: "/carriers/xe5.RAF",
+    )
+    assert not dialog.camera_pane.carrier_current_button.get_visible()
 
 
 def test_camera_pane_reports_a_refused_carrier(tmp_path: Any) -> None:
-    """A refusal from the host lands in the row instead of the file name."""
-    registered: list[tuple[str, str | None]] = []
+    """A refusal from the host shows under the list; forgetting clears it."""
+    added: list[tuple[str, str]] = []
+    forgotten: list[tuple[str, int]] = []
 
-    def set_carrier(model: str, path: str | None) -> str | None:
-        registered.append((model, path))
-        return "This RAF was shot through a lens." if path else None
+    def add_carrier(model: str, path: str) -> str | None:
+        added.append((model, path))
+        return "This RAF was shot through a lens."
 
     dialog = _carrier_dialog(
         tmp_path,
-        carrier_for=lambda model: None,
-        set_carrier=set_carrier,
+        carriers_for=lambda model: {100: "/carriers/xe5-dr100.RAF"},
+        add_carrier=add_carrier,
+        forget_carrier=lambda model, dr: forgotten.append((model, dr)),
         current_raf=lambda: "/photos/lensed.RAF",
     )
     pane = dialog.camera_pane
-    assert pane.carrier_row.get_subtitle() == "No carrier"
-    assert not pane.carrier_clear_button.get_visible()
+    assert pane.carrier_rows[400].get_subtitle() == "Missing"
     pane.carrier_current_button.emit("clicked")
     pump()
-    assert registered == [("X-E5", "/photos/lensed.RAF")]
-    assert "lens" in pane.carrier_row.get_subtitle()
-    assert pane.carrier_row.has_css_class("error")
+    assert added == [("X-E5", "/photos/lensed.RAF")]
+    assert pane.carrier_problem.get_visible()
+    assert "lens" in pane.carrier_problem.get_label()
+    pane.carrier_rows[100].clear_button.emit("clicked")
+    pump()
+    assert forgotten == [("X-E5", 100)]
+    assert not pane.carrier_problem.get_visible()
 
 
 def test_camera_pane_hides_the_carrier_row_without_hooks(
@@ -330,5 +353,4 @@ def test_camera_pane_hides_the_carrier_row_without_hooks(
 ) -> None:
     """A host without carrier support shows banks only."""
     dialog = _carrier_dialog(tmp_path)
-    section = dialog.camera_pane.carrier_row.get_parent().get_parent()
-    assert not section.get_visible()
+    assert not dialog.camera_pane.carrier_section.get_visible()
