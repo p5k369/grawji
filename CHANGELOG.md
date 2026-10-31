@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.0](https://github.com/p5k369/grawji/compare/v0.7.1...v0.8.0) (2026-10-31)
+
+
+### Features
+
+* **transplant:** develop foreign RAFs through the connected body ([#184](https://github.com/p5k369/grawji/issues/184)) ([7cd98fe](https://github.com/p5k369/grawji/commit/7cd98fe46b48ee0112b784b12019fbfd78a77838))
+* **transplant:** keep one carrier per dynamic range ([#197](https://github.com/p5k369/grawji/issues/197)) ([9275785](https://github.com/p5k369/grawji/commit/927578536bf51d8c3bf42b1667713274722274d3))
+* **transplant:** open foreign RAFs in the app through a registered carrier ([#190](https://github.com/p5k369/grawji/issues/190)) ([b3d5b09](https://github.com/p5k369/grawji/commit/b3d5b09fa81f720218e37f9be916e136a38828c8))
+* **ui:** ship the new application icon ([#193](https://github.com/p5k369/grawji/issues/193)) ([5c59f3a](https://github.com/p5k369/grawji/commit/5c59f3a177d9c4ab5f8d901f1aefd61eebd5e05e))
+
+
+### Bug Fixes
+
+* **imaging:** load GExiv2 0.16 as well as 0.10 ([#191](https://github.com/p5k369/grawji/issues/191)) ([57f9338](https://github.com/p5k369/grawji/commit/57f9338823f4450d108a6dd6011ad10b6c607b59))
+* **ui:** keep typed letters out of the main window's hotkeys ([#192](https://github.com/p5k369/grawji/issues/192)) ([a4c2f64](https://github.com/p5k369/grawji/commit/a4c2f64e5523a366fbe01e88a5d033058700f029)), closes [#186](https://github.com/p5k369/grawji/issues/186)
+* **ui:** warn once about another body's RAFs, not per image ([#195](https://github.com/p5k369/grawji/issues/195)) ([a712ae0](https://github.com/p5k369/grawji/commit/a712ae0253380a5ce9f5cda71edafa934f1881b8))
+
 ## [0.7.1](https://github.com/p5k369/grawji/compare/v0.7.0...v0.7.1) (2026-10-11)
 
 
