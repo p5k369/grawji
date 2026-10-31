@@ -49,6 +49,20 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.0" date="2026-10-31">
+      <description>
+        <p>This release lets you develop RAF files from other Fujifilm bodies on your connected camera.</p>
+        <ul>
+          <li>Develop RAF files shot on another camera body using the camera you have connected</li>
+          <li>Open RAF files from other bodies directly in the app once a matching carrier file is registered</li>
+          <li>Keep a separate carrier file for each dynamic range setting</li>
+          <li>Show the warning about RAF files from another body only once instead of for every image</li>
+          <li>Typed letters no longer trigger keyboard shortcuts in the main window</li>
+          <li>Added the new application icon</li>
+          <li>Works with both GExiv2 0.10 and 0.16</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-10-11">
       <description>
         <p>This release makes recipe searches more predictable.</p>
