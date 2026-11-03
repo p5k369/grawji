@@ -49,6 +49,20 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.0" date="2026-11-03">
+      <description>
+        <p>This release lets you develop RAF files from other cameras through your connected body.</p>
+        <ul>
+          <li>Develop RAF files shot on a different Fujifilm body using the camera you have connected</li>
+          <li>Open foreign RAF files directly in grawji once a carrier file has been registered</li>
+          <li>Keep a separate carrier file for each dynamic range setting</li>
+          <li>Show the warning about another body's RAF files only once instead of for every image</li>
+          <li>Added the new application icon</li>
+          <li>Typing letters no longer triggers keyboard shortcuts in the main window</li>
+          <li>Added support for GExiv2 0.16 alongside 0.10</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-10-11">
       <description>
         <p>This release makes recipe searches more predictable.</p>
