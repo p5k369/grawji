@@ -49,6 +49,14 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.2" date="2026-11-04">
+      <description>
+        <p>This release improves the Debian package.</p>
+        <ul>
+          <li>The Debian package now bundles the RAW image support library for every supported Python version, so installs work without extra setup.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-11-04">
       <description>
         <p>This release fixes a photo orientation issue.</p>
