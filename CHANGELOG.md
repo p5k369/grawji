@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/p5k369/grawji/compare/v0.8.1...v0.8.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **deb:** vendor rawpy for every supported Python ([#202](https://github.com/p5k369/grawji/issues/202)) ([b2df157](https://github.com/p5k369/grawji/commit/b2df1572775255d6a5b244628f7f8d7ba9ac282d))
+
 ## [0.8.1](https://github.com/p5k369/grawji/compare/v0.8.0...v0.8.1) (2026-11-04)
 
 
