@@ -14,6 +14,7 @@ from gi.repository import GdkPixbuf
 from grawji.crop import CropRotate
 from grawji.gexiv2 import GExiv2
 from grawji.imaging.imagemeta import camera_model, exif_orientation, exif_rows
+from grawji.imaging.pixbufs import orient_decoded
 from grawji.imaging.render import (
     bake_pixbuf,
     flatten_alpha,
@@ -205,3 +206,47 @@ def test_with_exif_of_copies_the_metadata_upright(tmp_path):
     assert check.try_get_tag_string("Exif.Image.Model") == "X100F"
     assert check.try_get_orientation() == GExiv2.Orientation.NORMAL
     assert check.try_get_tag_long("Exif.Photo.PixelXDimension") == 6
+
+
+class _Reported:
+    """A decoded 8x6 pixbuf whose loader reports a given orientation."""
+
+    def __init__(self, reported: str | None) -> None:
+        self._pixbuf = _flat_pixbuf(8, 6, 128)
+        self._reported = reported
+        self.embedded_applied = False
+
+    def get_option(self, _name: str) -> str | None:
+        return self._reported
+
+    def apply_embedded_orientation(self) -> GdkPixbuf.Pixbuf:
+        self.embedded_applied = True
+        return self._pixbuf.rotate_simple(GdkPixbuf.PixbufRotation.CLOCKWISE)
+
+    def rotate_simple(self, rotation: int) -> GdkPixbuf.Pixbuf:
+        return self._pixbuf.rotate_simple(rotation)
+
+    def flip(self, horizontal: bool) -> GdkPixbuf.Pixbuf:
+        return self._pixbuf.flip(horizontal)
+
+
+def _size(pixbuf: GdkPixbuf.Pixbuf) -> tuple[int, int]:
+    return pixbuf.get_width(), pixbuf.get_height()
+
+
+def test_orient_decoded_prefers_the_files_own_tag() -> None:
+    """A non-upright embedded orientation wins over the fallback."""
+    decoded = _Reported("6")
+    assert _size(orient_decoded(decoded, 1)) == (6, 8)
+    assert decoded.embedded_applied
+
+
+@pytest.mark.parametrize("reported", [None, "1"])
+def test_orient_decoded_falls_back_for_bare_files(
+    reported: str | None,
+) -> None:
+    """A loader reporting no tag, or upright like glycin, uses the fallback."""
+    decoded = _Reported(reported)
+    assert _size(orient_decoded(decoded, 6)) == (6, 8)
+    assert not decoded.embedded_applied
+    assert _size(orient_decoded(_Reported(reported), 1)) == (8, 6)

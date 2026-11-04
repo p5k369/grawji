@@ -19,7 +19,7 @@ from grawji.imaging.perspective import (
     warp_cached,
     warp_pixbuf,
 )
-from grawji.imaging.pixbufs import area_resize, orient_exif, pixel_rows
+from grawji.imaging.pixbufs import area_resize, orient_decoded, pixel_rows
 from grawji.keystone import Keystone
 
 _ROTATIONS = {
@@ -85,10 +85,7 @@ def oriented_jpeg(jpeg: bytes, fallback_orientation: int = 1) -> Any:
     loader = GdkPixbuf.PixbufLoader()
     loader.write(jpeg)
     loader.close()
-    pixbuf = loader.get_pixbuf()
-    if pixbuf.get_option("orientation") is not None:
-        return pixbuf.apply_embedded_orientation() or pixbuf
-    return orient_exif(pixbuf, fallback_orientation)
+    return orient_decoded(loader.get_pixbuf(), fallback_orientation)
 
 
 def thumb_jpeg(pixbuf: Any, max_edge: int = 256, quality: int = 82) -> bytes:

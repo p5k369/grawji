@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, GdkPixbuf, GLib, Gtk, Pango
 
-from grawji.imaging.pixbufs import orient_exif, trim_letterbox
+from grawji.imaging.pixbufs import orient_decoded, trim_letterbox
 from grawji.recipe import Recipe
 from grawji.views.textures import texture_for_pixbuf
 
@@ -272,9 +272,4 @@ def _decode_scaled(jpeg: bytes, width: int, orientation: int = 1) -> Any:
     loader.connect("size-prepared", on_size)
     loader.write(jpeg)
     loader.close()
-    pixbuf = loader.get_pixbuf()
-    if pixbuf.get_option("orientation") is not None:
-        pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
-    else:
-        pixbuf = orient_exif(pixbuf, orientation)
-    return trim_letterbox(pixbuf)
+    return trim_letterbox(orient_decoded(loader.get_pixbuf(), orientation))
