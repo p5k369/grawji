@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/p5k369/grawji/compare/v0.8.0...v0.8.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **imaging:** keep the RAF orientation on glycin-backed pixbuf loaders ([#199](https://github.com/p5k369/grawji/issues/199)) ([e222398](https://github.com/p5k369/grawji/commit/e222398c2b99854d3ebc6609108a8200cbedac51))
+
 ## [0.8.0](https://github.com/p5k369/grawji/compare/v0.7.1...v0.8.0) (2026-11-03)
 
 
