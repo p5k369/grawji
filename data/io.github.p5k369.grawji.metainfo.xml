@@ -49,6 +49,14 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.8.1" date="2026-11-04">
+      <description>
+        <p>This release fixes a photo orientation issue.</p>
+        <ul>
+          <li>Photos now keep the correct orientation from the RAF file when previewed</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-11-03">
       <description>
         <p>This release lets you develop RAF files from other cameras through your connected body.</p>
