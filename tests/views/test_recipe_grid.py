@@ -166,7 +166,7 @@ def test_fallback_previews_use_their_own_orientation(tmp_path) -> None:
     pixbuf.savev(str(source), "jpeg", [], [])
     meta = GExiv2.Metadata()
     meta.open_path(str(source))
-    meta.try_set_tag_long("Exif.Image.Orientation", 6)
+    meta.try_set_orientation(GExiv2.Orientation.ROT_90)
     meta.save_file(str(source))
     decoded = _decode_scaled(source.read_bytes(), 360, 6)
     assert (decoded.get_width(), decoded.get_height()) == (6, 8)

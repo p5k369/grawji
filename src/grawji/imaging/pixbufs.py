@@ -119,6 +119,14 @@ def orient_exif(pixbuf: Any, orientation: int) -> Any:
     return pixbuf
 
 
+def orient_decoded(pixbuf: Any, fallback: int = 1) -> Any:
+    """Turn a freshly decoded JPEG upright."""
+    embedded = pixbuf.get_option("orientation")
+    if embedded not in (None, "1"):
+        return pixbuf.apply_embedded_orientation() or pixbuf
+    return orient_exif(pixbuf, fallback)
+
+
 # Rows processed per band, so a large frame is not widened to float at
 # once.
 _RESIZE_BAND = 256
