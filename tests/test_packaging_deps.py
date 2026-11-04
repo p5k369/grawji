@@ -106,3 +106,13 @@ def test_the_deb_depends_line_resolves():
     depends = build_deb().depends()
     assert "python3-numpy" in depends
     assert "python3-gi" in depends
+
+
+def test_the_deb_vendors_wheels_for_its_whole_python_range():
+    """The Depends floor is the oldest Python a vendored wheel serves."""
+    module = build_deb()
+    versions = module.VENDORED_PYTHONS
+    assert versions == tuple(
+        sorted(versions, key=lambda v: tuple(map(int, v.split("."))))
+    )
+    assert f"python3 (>= {versions[0]})" in module.depends()

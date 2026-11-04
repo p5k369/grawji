@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -50,6 +51,11 @@ DEBIAN_NAMES = {
     "lsdetect": None,
 }
 VENDORED_WHEELS = ("lsdetect", "rawpy")
+VENDORED_PYTHONS = ("3.11", "3.12", "3.13", "3.14")
+_WHEEL_PLATFORMS = {
+    "amd64": ("manylinux_2_28_x86_64", "manylinux2014_x86_64"),
+    "arm64": ("manylinux_2_28_aarch64", "manylinux2014_aarch64"),
+}
 
 EXTRA_DEPENDS = [
     "python3-gi-cairo",
@@ -112,7 +118,8 @@ def depends() -> list[str]:
             )
         if mapped:
             names.append(mapped)
-    return ["python3 (>= 3.11)", *sorted({*names, *EXTRA_DEPENDS})]
+    floor = VENDORED_PYTHONS[0]
+    return [f"python3 (>= {floor})", *sorted({*names, *EXTRA_DEPENDS})]
 
 
 def _rawji_source(given: str | None, into: Path) -> Path:
@@ -146,36 +153,52 @@ def _install_rawji(source: Path, site: Path) -> None:
 
 def _vendor_wheel(name: str, site: Path) -> None:
     """Vendor a compiled wheel that is not in apt."""
+    platforms = [
+        flag
+        for tag in _WHEEL_PLATFORMS[_debian_arch()]
+        for flag in ("--platform", tag)
+    ]
     with tempfile.TemporaryDirectory() as scratch:
-        target = Path(scratch)
-        subprocess.run(  # noqa: S603
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--target",
-                str(target),
-                "--no-deps",
-                name,
-            ],
-            check=True,
-        )
+        wheels = Path(scratch) / "wheels"
+        for version in VENDORED_PYTHONS:
+            subprocess.run(  # noqa: S603
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "download",
+                    "--quiet",
+                    "--no-deps",
+                    "--only-binary=:all:",
+                    "--implementation",
+                    "cp",
+                    "--python-version",
+                    version,
+                    *platforms,
+                    "--dest",
+                    str(wheels),
+                    name,
+                ],
+                check=True,
+            )
         vendored = False
-        for item in target.iterdir():
-            if item.name.endswith(".dist-info") or item.name == "bin":
-                continue
-            if item.is_dir():
-                shutil.copytree(
-                    item,
-                    site / item.name,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-                )
-            else:
-                shutil.copy2(item, site / item.name)
-            vendored = True
+        for wheel in sorted(wheels.glob("*.whl")):
+            vendored |= _unpack_wheel(wheel, site)
         if not vendored:
-            raise SystemExit(f"pip installed no {name} files to vendor")
+            raise SystemExit(f"pip downloaded no {name} files to vendor")
+
+
+def _unpack_wheel(wheel: Path, site: Path) -> bool:
+    """Extract a wheel's packages into site."""
+    unpacked = False
+    with zipfile.ZipFile(wheel) as archive:
+        for member in archive.infolist():
+            top = member.filename.split("/", 1)[0]
+            if top.endswith(".dist-info") or top == "bin":
+                continue
+            archive.extract(member, site)
+            unpacked = True
+    return unpacked
 
 
 def _write_docs(tree: Path, version: str) -> None:
