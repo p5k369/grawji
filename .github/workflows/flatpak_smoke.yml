@@ -20,6 +20,11 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v7
+      - name: Put the flatpak installation on the writable layer
+        run: |
+          cp -a /var/lib/flatpak /var/lib/flatpak.rw
+          rm -rf /var/lib/flatpak
+          mv /var/lib/flatpak.rw /var/lib/flatpak
       - name: Build the Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
