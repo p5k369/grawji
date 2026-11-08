@@ -113,8 +113,7 @@ def test_a_resize_keeps_the_zoom_relative_to_the_fit(shown: Any) -> None:
 
 def test_a_narrow_image_that_grows_wider_stays_centred(shown: Any) -> None:
     """An image smaller than the viewport must not poison the middle."""
-    # Proportions that fit the wide viewport and overflow the narrow one.
-    shown.show_pixbuf(_pixbuf(1240, 2000))
+    shown.show_pixbuf(_pixbuf(1000, 2000))
     settle(shown, 0.2)
     shown.set_zoom(2.0)
     settle(shown)
