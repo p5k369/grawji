@@ -125,6 +125,9 @@ _CANVAS_CSS = """
 .thumb.thumb-marked {
     background-color: alpha(@accent_bg_color, 0.30);
 }
+row.recipe-selected {
+    background-color: alpha(@accent_bg_color, 0.28);
+}
 .camera-state image { opacity: 0.4; }
 .camera-state.camera-connected image {
     color: @accent_color;

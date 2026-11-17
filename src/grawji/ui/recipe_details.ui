@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiRecipeDetails" parent="GtkStack">
+    <property name="width-request">320</property>
+    <property name="hexpand">false</property>
+    <child>
+      <object class="GtkStackPage">
+        <property name="name">none</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">8</property>
+            <property name="valign">center</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <child>
+              <object class="GtkImage">
+                <property name="icon-name">emblem-documents-symbolic</property>
+                <property name="pixel-size">64</property>
+                <property name="margin-bottom">8</property>
+                <style>
+                  <class name="dim-label"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="hint_title">
+                <property name="label">No recipe selected</property>
+                <property name="wrap">true</property>
+                <property name="max-width-chars">26</property>
+                <property name="justify">center</property>
+                <style>
+                  <class name="title-3"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="hint_text">
+                <property name="wrap">true</property>
+                <property name="max-width-chars">30</property>
+                <property name="justify">center</property>
+                <style>
+                  <class name="dim-label"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkStackPage">
+        <property name="name">one</property>
+        <property name="child">
+          <object class="GtkScrolledWindow">
+            <property name="hscrollbar-policy">never</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <property name="margin-start">16</property>
+                <property name="margin-end">16</property>
+                <property name="margin-top">16</property>
+                <property name="margin-bottom">16</property>
+                <child>
+                  <object class="GrawjiRecipeThumb" id="picture">
+                    <property name="tile-width">288</property>
+                    <property name="tile-height">192</property>
+                    <property name="contain">true</property>
+                    <property name="halign">center</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkLabel" id="name_label">
+                        <property name="xalign">0</property>
+                        <property name="max-width-chars">18</property>
+                        <property name="hexpand">true</property>
+                        <property name="ellipsize">end</property>
+                        <property name="selectable">false</property>
+                        <style>
+                          <class name="title-3"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="rename_button">
+                        <property name="icon-name">document-edit-symbolic</property>
+                        <property name="tooltip-text">Rename</property>
+                        <property name="valign">center</property>
+                        <style>
+                          <class name="flat"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="origin_label">
+                    <property name="xalign">0</property>
+                    <property name="max-width-chars">30</property>
+                    <property name="ellipsize">end</property>
+                    <property name="margin-top">-8</property>
+                    <style>
+                      <class name="caption"/>
+                      <class name="dim-label"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="fit_label">
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <property name="max-width-chars">30</property>
+                    <property name="visible">false</property>
+                    <style>
+                      <class name="caption"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="comment_button">
+                    <property name="tooltip-text">Edit the comment</property>
+                    <property name="child">
+                      <object class="GtkLabel" id="comment_label">
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                        <property name="max-width-chars">28</property>
+                      </object>
+                    </property>
+                    <style>
+                      <class name="flat"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkButton" id="apply_button">
+                        <property name="label">Apply to image</property>
+                        <property name="hexpand">true</property>
+                        <style>
+                          <class name="suggested-action"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="baseline_button">
+                        <property name="label">Baseline</property>
+                        <property name="tooltip-text">Compare other recipes against this one in the split view</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkButton" id="image_button">
+                        <property name="label">Update picture</property>
+                        <property name="hexpand">true</property>
+                        <property name="tooltip-text">Render this recipe on the open image as its picture</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="clear_image_button">
+                        <property name="icon-name">edit-clear-symbolic</property>
+                        <property name="tooltip-text">Remove the picture</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="copy_button">
+                        <property name="label">Copy as text</property>
+                        <property name="hexpand">true</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="camera_box">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="xalign">0</property>
+                        <property name="label">Put into the camera</property>
+                        <style>
+                          <class name="heading"/>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkGrid" id="target_box">
+                        <property name="column-homogeneous">true</property>
+                        <property name="column-spacing">4</property>
+                        <property name="row-spacing">4</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="xalign">0</property>
+                    <property name="label">Settings</property>
+                    <style>
+                      <class name="heading"/>
+                      <class name="dim-label"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkGrid" id="values_grid">
+                    <property name="column-spacing">16</property>
+                    <property name="row-spacing">4</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">12</property>
+                    <property name="tooltip-text">Press the number in the main window to apply this recipe</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="xalign">0</property>
+                        <property name="hexpand">true</property>
+                        <property name="label">Apply with key</property>
+                        <style>
+                          <class name="heading"/>
+                          <class name="dim-label"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkDropDown" id="key_dropdown">
+                        <property name="valign">center</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </property>
+      </object>
+    </child>
+  </template>
+</interface>

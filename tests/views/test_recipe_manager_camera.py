@@ -109,9 +109,7 @@ def test_a_drop_names_the_bank_after_the_recipe(tmp_path: Any) -> None:
     dialog.set_bank_names("X-E5", ["BW", "", "", "", "", "", ""])
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
     dialog.camera_pane._on_bank_drop(None, "Acros look", 0.0, 0.0, 4)
-    assert dialog.camera_pane._banks[0]["name_label"].get_text() == (
-        "Velvia look"
-    )
+    assert dialog.camera_pane._banks[0].bank_name == "Velvia look"
     pump()
     dialog._on_transfer_clicked(None)
     assert captured["names"] == {0: "Velvia look", 4: "Acros look"}
@@ -129,8 +127,8 @@ def test_a_second_drop_renames_again(tmp_path: Any) -> None:
     pane = dialog.camera_pane
     pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
     pane._on_bank_drop(None, "Acros look", 0.0, 0.0, 0)
-    assert pane._banks[0]["name_label"].get_text() == "Acros look"
-    pane._banks[0]["name_label"].set_label("MINE")
+    assert pane._banks[0].bank_name == "Acros look"
+    pane._banks[0].set_bank_name("MINE")
     pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
     pump()
     dialog._on_transfer_clicked(None)
@@ -161,7 +159,7 @@ def test_explicit_rename_beats_the_default_name(tmp_path: Any) -> None:
     )
     dialog.set_bank_names("X-E5", [""] * 7)
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 2)
-    dialog.camera_pane._banks[2]["name_label"].set_label("SUMMER")
+    dialog.camera_pane._banks[2].set_bank_name("SUMMER")
     pump()
     dialog._on_transfer_clicked(None)
     assert captured["names"] == {2: "SUMMER"}
@@ -179,20 +177,35 @@ def test_bank_rename_is_collected(tmp_path: Any) -> None:
     )
     dialog.set_bank_names("X-T3", ["STD", "PORTRA", "", "", "", "", ""])
     dialog.camera_pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 0)
-    dialog.camera_pane._banks[1]["name_label"].set_label("KODAK")  # rename C2
+    dialog.camera_pane._banks[1].set_bank_name("KODAK")  # rename C2
     pump()
     dialog._on_transfer_clicked(None)
     assert captured["recipes"] == {0: "Velvia look"}
     assert captured["names"] == {0: "Velvia look", 1: "KODAK"}
 
 
-def test_name_row_visible_on_every_body(tmp_path: Any) -> None:
-    """Bank cards look identical on every body, name row included."""
+def test_banks_are_renamable_on_every_body(tmp_path: Any) -> None:
+    """Bank rows look identical on every body, rename button included."""
     for model in ("X-T3", "X100F"):
         dialog = _dialog(tmp_path, model=model)
         assert all(
-            b["name_row"].get_visible() for b in dialog.camera_pane._banks
+            b.edit_button.get_visible() for b in dialog.camera_pane._banks
         )
+
+
+def test_a_drop_shows_the_recipe_on_the_row(tmp_path: Any) -> None:
+    """The row names the pending recipe until the transfer is done."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    pane = dialog.camera_pane
+    pane._on_bank_drop(None, "Velvia look", 0.0, 0.0, 1)
+    pane._on_fs_drop(None, "Acros look", 0.0, 0.0, 0)
+    assert "Velvia look" in pane._banks[1].get_subtitle()
+    assert not pane._banks[1].thumb.get_visible()  # it has no picture
+    assert "Acros look" in pane._fs_cards[0].get_subtitle()
+    assert not pane._fs_cards[0].edit_button.get_visible()
+    dialog.on_transfer_finished()
+    assert pane._banks[1].get_subtitle() == "Drop a recipe here"
+    assert not pane._banks[1].thumb.get_visible()
 
 
 def test_fs_cards_only_on_bodies_with_an_fs_layout(tmp_path: Any) -> None:
@@ -262,7 +275,7 @@ def test_deviceinfo_model_rebuilds_the_pane(tmp_path: Any) -> None:
     dialog.set_bank_names("X-S20", ["BW", "STD", "", ""])
     assert len(pane._banks) == 4
     assert "X-S20" in pane.camera_header.get_label()
-    assert pane._banks[0]["loaded"] == "BW"
+    assert pane._banks[0].loaded == "BW"
 
 
 def test_matching_model_does_not_rebuild(tmp_path: Any) -> None:
@@ -272,7 +285,7 @@ def test_matching_model_does_not_rebuild(tmp_path: Any) -> None:
     first_card = pane._banks[0]
     dialog.set_bank_names("X-T3", ["STD"] + [""] * 6)
     assert pane._banks[0] is first_card
-    assert first_card["loaded"] == "STD"
+    assert first_card.loaded == "STD"
 
 
 def _carrier_dialog(tmp_path, **hooks):
@@ -354,3 +367,65 @@ def test_camera_pane_hides_the_carrier_row_without_hooks(
     """A host without carrier support shows banks only."""
     dialog = _carrier_dialog(tmp_path)
     assert not dialog.camera_pane.carrier_section.get_visible()
+
+
+def test_a_click_selects_and_modifiers_extend(tmp_path: Any) -> None:
+    """Plain selects one, Ctrl toggles, Shift takes the range."""
+    dialog = _dialog(tmp_path, model="X-T3")
+    dialog.select("Velvia look")
+    assert dialog.selected == ["Velvia look"]
+    assert dialog.details.get_visible_child_name() == "one"
+    assert dialog.details.name_label.get_label() == "Velvia look"
+    dialog.select("Acros look", toggle=True)
+    assert dialog.selected == ["Velvia look", "Acros look"]
+    assert dialog.details.get_visible_child_name() == "none"
+    assert dialog.export_button.get_sensitive()
+    dialog.select("Acros look", toggle=True)
+    assert dialog.selected == ["Velvia look"]
+    dialog.select("Velvia look")
+    dialog.select("Acros look", extend=True)
+    assert dialog.selected == ["Velvia look", "Acros look"]
+
+
+def test_nothing_selected_disables_the_bulk_actions(tmp_path: Any) -> None:
+    """The action bar acts on a selection only."""
+    dialog = _dialog(tmp_path, model="X-T3")
+    assert dialog.selected == []
+    assert not dialog.export_button.get_sensitive()
+    assert not dialog.delete_button.get_sensitive()
+    assert not dialog.move_button.get_sensitive()
+
+
+def test_details_buttons_assign_to_the_camera(tmp_path: Any) -> None:
+    """A slot button in the details pane assigns like a drop does."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog.select("Velvia look")
+    labels = [label for label, _ in dialog.camera_pane.targets()]
+    assert labels[:2] == ["C1", "C2"]
+    assert labels[-1] == "FS3"
+    dialog._assign_target("Velvia look", 1)
+    dialog._assign_target("Velvia look", labels.index("FS1"))
+    assert dialog.camera_pane._bank_recipe == {1: "Velvia look"}
+    assert dialog.camera_pane._fs_recipe == {0: "Velvia look"}
+
+
+def test_an_assignment_can_be_taken_back(tmp_path: Any) -> None:
+    """Undo drops the pending recipe and the name it gave the bank."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog.set_bank_names("X-E5", ["BW", "", "", "", "", "", ""])
+    pane = dialog.camera_pane
+    pane.assign_bank(0, "Velvia look")
+    assert pane._banks[0].bank_name == "Velvia look"
+    pane._banks[0].clear_button.emit("clicked")
+    assert pane._bank_recipe == {}
+    assert pane._banks[0].bank_name == "BW"
+    assert not pane._banks[0].clear_button.get_visible()
+
+
+def test_the_selection_survives_a_refresh(tmp_path: Any) -> None:
+    """Rebuilding the list keeps what is still there selected."""
+    dialog = _dialog(tmp_path, model="X-T3")
+    dialog.select_names(["Velvia look", "Acros look"])
+    dialog._library.delete("Acros look")
+    dialog.refresh()
+    assert dialog.selected == ["Velvia look"]

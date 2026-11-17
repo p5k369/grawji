@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from importlib import resources
 from typing import Any
 
@@ -18,7 +19,9 @@ from grawji.camera import compatibility as compat
 from grawji.camera import fs_recipe
 from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipes import RecipeLibrary
+from grawji.views.bank_row import BankRow
 from grawji.views.carrier_row import CarrierRow
+from grawji.views.recipe_thumb import thumb_texture
 from grawji.views.textures import texture_for_pixbuf
 
 _UI = (
@@ -27,8 +30,11 @@ _UI = (
     .read_text(encoding="utf-8")
 )
 
+# Referencing the class registers GrawjiBankRow's thumbnail type.
+_ = BankRow
+
 # Camera-family hero
-_HERO_PX = 44
+_HERO_PX = 36
 _HERO_ART_RATIO = 88 / 128
 _HERO_SUPERSAMPLE = 4
 
@@ -108,9 +114,13 @@ class CameraPane(Gtk.Box):
 
     camera_image = Gtk.Template.Child()
     camera_header = Gtk.Template.Child()
+    transfer_button = Gtk.Template.Child()
     camera_stack = Gtk.Template.Child()
-    camera_banks = Gtk.Template.Child()
+    bank_list = Gtk.Template.Child()
+    fs_section = Gtk.Template.Child()
+    fs_list = Gtk.Template.Child()
     carrier_section = Gtk.Template.Child()
+    carrier_expander = Gtk.Template.Child()
     carrier_row_100 = Gtk.Template.Child()
     carrier_row_200 = Gtk.Template.Child()
     carrier_row_400 = Gtk.Template.Child()
@@ -129,10 +139,10 @@ class CameraPane(Gtk.Box):
         ) = None
         self._take_dragged: Callable[[], str | None] = lambda: None
         self._built_model: str | None = None
-        self._banks: list[dict[str, Any]] = []
+        self._banks: list[BankRow] = []
         self._bank_names_loaded = False
         self._bank_recipe: dict[int, str] = {}
-        self._fs_cards: list[dict[str, Any]] = []
+        self._fs_cards: list[BankRow] = []
         self._fs_recipe: dict[int, str] = {}
         self._carrier: CarrierHooks | None = None
         self.carrier_rows: dict[int, CarrierRow] = {
@@ -187,6 +197,7 @@ class CameraPane(Gtk.Box):
             Whether the pane is writable.
         """
         model = self._get_model() if self._get_model else None
+        self.transfer_button.set_visible(bool(model))
         if not model:
             self.camera_stack.set_visible_child_name("none")
             return False
@@ -198,23 +209,37 @@ class CameraPane(Gtk.Box):
         return True
 
     def _populate(self, model: str) -> None:
-        """(Re)build the header and the bank/FS cards for model."""
+        """(Re)build the header and the bank/FS rows for model."""
         self._built_model = model
-        self._banks.clear()
-        self._fs_cards.clear()
         self._bank_recipe.clear()
         self._fs_recipe.clear()
-        while (child := self.camera_banks.get_first_child()) is not None:
-            self.camera_banks.remove(child)
-        self.camera_header.set_label(f"{model} · custom banks")
+        for row in self._banks:
+            self.bank_list.remove(row)
+        for row in self._fs_cards:
+            self.fs_list.remove(row)
+        self._banks.clear()
+        self._fs_cards.clear()
+        self.camera_header.set_label(model)
         texture = _family_paintable(model)
         if texture is not None:
             self.camera_image.set_from_paintable(texture)
-        self.camera_banks.append(self._section_heading("Custom banks"))
         for slot in range(capabilities_for_model(model).num_bank_slots):
-            self.camera_banks.append(self._build_bank_card(slot))
+            row = BankRow(f"C{slot + 1}")
+            row.edit_button.connect("clicked", self._on_rename_bank, slot)
+            row.clear_button.connect("clicked", self._on_unassign_bank, slot)
+            self._add_drop(row, self._on_bank_drop, slot)
+            self.bank_list.append(row)
+            self._banks.append(row)
         self._build_fs_section(model)
         self._refresh_carrier()
+
+    def _add_drop(
+        self, row: BankRow, handler: Callable[..., bool], slot: int
+    ) -> None:
+        """Let a row take a dragged recipe."""
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect("drop", handler, slot)
+        row.add_controller(drop)
 
     def _refresh_carrier(self) -> None:
         """Show each range's carrier, offering the open RAF when it is new."""
@@ -230,6 +255,10 @@ class CameraPane(Gtk.Box):
                 registered.get(dr),
                 served_by=min(higher) if higher else None,
             )
+        have = ", ".join(f"DR{dr}" for dr in sorted(registered))
+        self.carrier_expander.set_subtitle(
+            f"Carriers: {have}" if have else "No carrier yet"
+        )
         current = self._carrier.current_raf()
         self.carrier_current_button.set_visible(
             bool(current) and current not in registered.values()
@@ -242,6 +271,8 @@ class CameraPane(Gtk.Box):
         problem = self._carrier.add_carrier(self._built_model, path)
         self.carrier_problem.set_label(problem or "")
         self.carrier_problem.set_visible(bool(problem))
+        if problem:
+            self.carrier_expander.set_expanded(True)
         if not problem:
             self._refresh_carrier()
 
@@ -294,9 +325,8 @@ class CameraPane(Gtk.Box):
         """Refresh the pane after a transfer."""
         self._bank_recipe.clear()
         self._fs_recipe.clear()
-        for card in (*self._banks, *self._fs_cards):
-            card["assigned"].set_label("Drop a recipe here")
-            card["assigned"].add_css_class("dim-label")
+        for row in (*self._banks, *self._fs_cards):
+            row.clear_assignment()
         if self._load_bank_names is not None:
             self._load_bank_names(self.set_bank_names)
 
@@ -308,113 +338,22 @@ class CameraPane(Gtk.Box):
             return
         self._bank_names_loaded = True
         for bank, name in zip(self._banks, names, strict=False):
-            bank["name_row"].set_visible(True)
-            bank["name_label"].set_label(name)
-            bank["loaded"] = name
-            bank["dropped"] = None
+            bank.set_bank_name(name)
+            bank.loaded = name
+            bank.dropped = None
 
     def _build_fs_section(self, model: str | None) -> None:
-        """Add FS1-FSn dial-position cards if this body has an FS layout."""
+        """Add FS1-FSn dial rows if this body has an FS layout."""
         layout = fs_recipe.layout_for(model)
+        self.fs_section.set_visible(layout is not None)
         if layout is None:
             return
-        self.camera_banks.append(
-            self._section_heading("Film-simulation dial (FS)")
-        )
         for slot in range(layout.num_slots):
-            self.camera_banks.append(self._build_fs_card(slot))
-
-    def _section_heading(self, text: str) -> Gtk.Widget:
-        """A small heading that separates the bank and FS card groups."""
-        label = Gtk.Label(label=text, xalign=0)
-        label.add_css_class("heading")
-        label.add_css_class("dim-label")
-        label.set_margin_top(6)
-        return label
-
-    def _build_bank_card(self, slot: int) -> Gtk.Widget:
-        """A drop-target card for bank C{slot+1} with a rename affordance."""
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        card.add_css_class("card")
-        inner = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=6,
-            margin_top=12,
-            margin_bottom=12,
-            margin_start=12,
-            margin_end=12,
-        )
-        card.append(inner)
-
-        header = Gtk.Box(spacing=8)
-        title = Gtk.Label(label=f"C{slot + 1}", xalign=0)
-        title.add_css_class("heading")
-        header.append(title)
-        name_label = Gtk.Label(xalign=0, hexpand=True)
-        name_label.add_css_class("dim-label")
-        header.append(name_label)
-        edit = Gtk.Button(
-            icon_name="document-edit-symbolic", valign=Gtk.Align.CENTER
-        )
-        edit.add_css_class("flat")
-        edit.set_tooltip_text("Rename this bank")
-        edit.connect("clicked", self._on_rename_bank, slot)
-        header.append(edit)
-        inner.append(header)
-
-        assigned = Gtk.Label(label="Drop a recipe here", xalign=0)
-        assigned.add_css_class("dim-label")
-        assigned.set_wrap(True)
-        inner.append(assigned)
-
-        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
-        drop.connect("drop", self._on_bank_drop, slot)
-        card.add_controller(drop)
-
-        self._banks.append(
-            {
-                "name_row": header,
-                "name_label": name_label,
-                "assigned": assigned,
-                "loaded": "",
-                "dropped": None,
-            }
-        )
-        return card
-
-    def _build_fs_card(self, slot: int) -> Gtk.Widget:
-        """A drop-target card for FS dial position slot+1.
-
-        FS positions are physical dial presets, not user-named banks, so
-        the card has no name row or rename affordance.
-        """
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        card.add_css_class("card")
-        inner = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=6,
-            margin_top=12,
-            margin_bottom=12,
-            margin_start=12,
-            margin_end=12,
-        )
-        card.append(inner)
-
-        title = Gtk.Label(label=f"FS{slot + 1}", xalign=0)
-        title.add_css_class("heading")
-        inner.append(title)
-
-        assigned = Gtk.Label(label="Drop a recipe here", xalign=0)
-        assigned.add_css_class("dim-label")
-        assigned.set_wrap(True)
-        inner.append(assigned)
-
-        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
-        drop.connect("drop", self._on_fs_drop, slot)
-        card.add_controller(drop)
-
-        self._fs_cards.append({"assigned": assigned})
-        return card
+            row = BankRow(f"FS{slot + 1}", renamable=False)
+            row.clear_button.connect("clicked", self._on_unassign_fs, slot)
+            self._add_drop(row, self._on_fs_drop, slot)
+            self.fs_list.append(row)
+            self._fs_cards.append(row)
 
     def _compat_note(self, name: str) -> str:
         """A short compatibility suffix for a recipe on this body."""
@@ -423,10 +362,16 @@ class CameraPane(Gtk.Box):
             return ""
         verdict = compat.evaluate(recipe, self._caps)
         if verdict.level == compat.UNAVAILABLE:
-            return "  (film sim N/A here)"
+            return " · sim N/A"
         if verdict.level == compat.DEGRADED:
-            return f"  ({len(verdict.issues)} dropped)"
+            return f" · {len(verdict.issues)} dropped"
         return ""
+
+    def _thumb(self, name: str) -> Any:
+        """A recipe's picture texture, or None."""
+        if self._library is None:
+            return None
+        return thumb_texture(self._library, name)
 
     def _dropped_name(self, value: Any) -> str | None:
         """Resolve a drop payload to a saved recipe name, or None."""
@@ -444,56 +389,93 @@ class CameraPane(Gtk.Box):
     ) -> bool:
         """Assign the dropped recipe to bank slot."""
         name = self._dropped_name(value)
-        if name is None:
+        return name is not None and self.assign_bank(slot, name)
+
+    def assign_bank(self, slot: int, name: str) -> bool:
+        """Mark a saved recipe for bank slot, False if there is none."""
+        if self._library is None or self._library.get(name) is None:
+            return False
+        if not 0 <= slot < len(self._banks):
             return False
         self._bank_recipe[slot] = name
-        label = self._banks[slot]["assigned"]
-        label.set_label(f"→ {name}{self._compat_note(name)}")
-        label.remove_css_class("dim-label")
+        self._banks[slot].assign(
+            name, self._compat_note(name), self._thumb(name)
+        )
         self._name_after_recipe(slot, name)
         return True
+
+    def assign_fs(self, slot: int, name: str) -> bool:
+        """Mark a saved recipe for FS dial position slot."""
+        if self._library is None or self._library.get(name) is None:
+            return False
+        if not 0 <= slot < len(self._fs_cards):
+            return False
+        self._fs_recipe[slot] = name
+        self._fs_cards[slot].assign(
+            name, self._compat_note(name), self._thumb(name)
+        )
+        return True
+
+    def targets(self) -> list[tuple[str, Callable[[str], bool]]]:
+        """The slots a recipe can go into, each with its assigner."""
+        if self.camera_stack.get_visible_child_name() != "banks":
+            return []
+        banks: list[tuple[str, Callable[[str], bool]]] = [
+            (f"C{slot + 1}", partial(self.assign_bank, slot))
+            for slot in range(len(self._banks))
+        ]
+        dial: list[tuple[str, Callable[[str], bool]]] = [
+            (f"FS{slot + 1}", partial(self.assign_fs, slot))
+            for slot in range(len(self._fs_cards))
+        ]
+        return banks + dial
+
+    def _on_unassign_bank(self, _button: Any, slot: int) -> None:
+        """Take a pending recipe off a bank, and the name it gave."""
+        self._bank_recipe.pop(slot, None)
+        bank = self._banks[slot]
+        if bank.dropped is not None and bank.bank_name == bank.dropped:
+            bank.set_bank_name(bank.loaded)
+        bank.dropped = None
+        bank.clear_assignment()
+
+    def _on_unassign_fs(self, _button: Any, slot: int) -> None:
+        """Take a pending recipe off an FS dial position."""
+        self._fs_recipe.pop(slot, None)
+        self._fs_cards[slot].clear_assignment()
 
     def _name_after_recipe(self, slot: int, name: str) -> None:
         """Give a bank the name of the recipe dropped on it."""
         if not self._bank_names_loaded:
             return
         bank = self._banks[slot]
-        shown = bank["name_label"].get_text()
-        if shown in (bank["loaded"], bank["dropped"]):
-            bank["name_label"].set_label(name)
-            bank["dropped"] = name
+        if bank.bank_name in (bank.loaded, bank.dropped):
+            bank.set_bank_name(name)
+            bank.dropped = name
 
     def _on_fs_drop(
         self, _target: Any, value: Any, _x: float, _y: float, slot: int
     ) -> bool:
         """Assign the dropped recipe to FS dial position slot."""
         name = self._dropped_name(value)
-        if name is None:
-            return False
-        self._fs_recipe[slot] = name
-        label = self._fs_cards[slot]["assigned"]
-        label.set_label(f"→ {name}{self._compat_note(name)}")
-        label.remove_css_class("dim-label")
-        return True
+        return name is not None and self.assign_fs(slot, name)
 
     def _on_rename_bank(self, _button: Any, slot: int) -> None:
         """Prompt for a new name for bank slot."""
-        label = self._banks[slot]["name_label"]
+        bank = self._banks[slot]
         self._prompt(
             f"Rename bank C{slot + 1}",
             "New name",
-            label.get_text(),
-            label.set_label,
+            bank.bank_name,
+            bank.set_bank_name,
         )
 
     def _names_by_slot(self) -> dict[int, str]:
         """Bank names the user changed from the loaded ones."""
         out: dict[int, str] = {}
         for slot, bank in enumerate(self._banks):
-            if not bank["name_row"].get_visible():
-                continue
-            text = bank["name_label"].get_text().strip()
-            if text and text != bank["loaded"]:
+            text = bank.bank_name.strip()
+            if text and text != bank.loaded:
                 out[slot] = text
         return out
 

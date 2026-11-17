@@ -21,10 +21,12 @@ from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.imaging import imagemeta
 from grawji.photo_recipe import PhotoRecipe, recipe_from_tags
 from grawji.recipe import Recipe
+from grawji.recipe_import import ImportReport
 from grawji.recipe_text import format_recipe_text, parse_recipe_text
 from grawji.recipes import UNGROUPED, RecipeLibrary
 from grawji.settings import FROM_IMAGE_LABEL
 from grawji.views import dialogs
+from grawji.views.recipe_bulk import RecipeBulk
 from grawji.views.recipe_manager import RecipeManagerDialog
 from grawji.views.recipe_panel import RecipePanel
 
@@ -104,6 +106,13 @@ class RecipeLibraryController:
         self._run_transfer = run_transfer
         self._render_thumb = render_thumb
         self._manager: RecipeManagerDialog | None = None
+        self._bulk = RecipeBulk(
+            parent=parent,
+            library=library,
+            get_iopcode=get_iopcode,
+            on_imported=self._on_imported,
+            on_message=self._toast,
+        )
         self._refresh()
 
     def manage(self) -> None:
@@ -331,11 +340,64 @@ class RecipeLibraryController:
         self._manager = None
         self._on_closed()
 
-    def delete_recipe(self, name: str) -> None:
-        """Remove a saved recipe and persist the change."""
-        if self._library.delete(name):
+    def import_files(self, folder: str) -> None:
+        """Pick recipe files and photos and store them in a folder."""
+        self._bulk.import_files(folder)
+
+    def import_folder(self, folder: str) -> None:
+        """Pick a directory and store every recipe below it."""
+        self._bulk.import_folder(folder)
+
+    def import_clipboard(self, folder: str) -> None:
+        """Store the recipe text on the clipboard in a folder."""
+
+        def done(clipboard: Any, result: Any) -> None:
+            try:
+                text = clipboard.read_text_finish(result)
+            except GLib.Error:
+                text = None
+            self._bulk.import_text(text or "", folder)
+
+        self._parent.get_clipboard().read_text_async(None, done)
+
+    def _on_imported(self, report: ImportReport) -> None:
+        """Show what an import added and select it in the manager."""
+        self._refresh()
+        self._toast(report.summary())
+        if self._manager is not None and report.added:
+            self._manager.select_names(report.added)
+
+    def export_recipes(self, names: list[str]) -> None:
+        """Export one recipe to a file, or several into a directory."""
+        if len(names) == 1:
+            self.export_recipe(names[0])
+        elif names:
+            self._bulk.export(names)
+
+    def copy_recipe_text(self, name: str) -> None:
+        """Copy a saved recipe to the clipboard as shareable text."""
+        recipe = self._library.get(name)
+        if recipe is None:
+            return
+        self._parent.get_clipboard().set(format_recipe_text(recipe, name))
+        self._toast(f"Copied “{name}” as text.")
+
+    def delete_recipes(self, names: list[str]) -> None:
+        """Remove saved recipes and persist the change."""
+        deleted = [name for name in names if self._library.delete(name)]
+        if not deleted:
+            return
+        self._refresh()
+        if len(deleted) == 1:
+            self._toast(f"Deleted recipe “{deleted[0]}”.")
+        else:
+            self._toast(f"Deleted {len(deleted)} recipes.")
+
+    def move_recipes(self, names: list[str], folder: str) -> None:
+        """Move recipes into a folder and refresh."""
+        moved = [name for name in names if self._library.move(name, folder)]
+        if moved:
             self._refresh()
-            self._on_status(f"Deleted recipe “{name}”.")
 
     def rename_recipe(self, old: str, new: str) -> None:
         """Rename a saved recipe, keeping its position, and persist."""
@@ -346,11 +408,6 @@ class RecipeLibraryController:
             renamed = self._library.get(new)
             if renamed is not None:
                 self._panel.set_active(renamed, new)
-
-    def move_recipe(self, name: str, folder: str) -> None:
-        """Move a recipe into a folder and refresh."""
-        if self._library.move(name, folder):
-            self._refresh()
 
     def place_recipe(self, name: str, folder: str, before: str | None) -> None:
         """Place a dragged recipe into folder before another, and refresh."""
