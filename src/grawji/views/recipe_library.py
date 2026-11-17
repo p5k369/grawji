@@ -45,6 +45,7 @@ class RecipeLibraryController:
         get_iopcode: Callable[[], int | None],
         on_baseline_changed: Callable[[], None] = lambda: None,
         on_closed: Callable[[], None] = lambda: None,
+        on_apply_saved: Callable[[str], None] | None = None,
         get_capabilities: Callable[[], Any] | None = None,
         get_model: Callable[[], str | None] | None = None,
         load_bank_names: (
@@ -73,6 +74,8 @@ class RecipeLibraryController:
                 or cleared, so the window can update the compare state.
             on_closed: Called when the manager dialog is dismissed, so the
                 window can re-open a session the bank pane closed.
+            on_apply_saved: Applies a saved recipe the way the panel's
+                picker does.
             get_capabilities: Returns the connected body's Capabilities for
                 recipe-compatibility badges, or None to disable them.
             get_model: Returns the connected body's model, used to tag a
@@ -96,6 +99,7 @@ class RecipeLibraryController:
         self._get_iopcode = get_iopcode
         self._on_baseline_changed = on_baseline_changed
         self._on_closed = on_closed
+        self._on_apply_saved = on_apply_saved
         self.get_capabilities = get_capabilities
         self.get_model = get_model
         self.load_bank_names = load_bank_names
@@ -180,6 +184,13 @@ class RecipeLibraryController:
         known = self._library.get(label) is not None
         default = label if known or self._panel.active_unsaved else ""
         self._prompt_save(self._panel.get_recipe(), default)
+
+    def apply_saved(self, name: str) -> None:
+        """Apply a saved recipe as the user's choice for this image."""
+        if self._on_apply_saved is not None:
+            self._on_apply_saved(name)
+        else:
+            self.apply(name)
 
     def apply(self, name: str) -> None:
         """Apply a saved recipe to the controls and re-render."""

@@ -32,6 +32,8 @@ _ = (CameraPane, RecipeDetails)
 
 _SELECTED_CSS = "recipe-selected"
 _DOUBLE_CLICK = 2
+_SCROLL_EDGE = 56
+_SCROLL_STEP = 18.0
 
 
 class RecipeManagerHost(Protocol):
@@ -47,8 +49,8 @@ class RecipeManagerHost(Protocol):
     forget_carrier: Callable[[str, int], None] | None
     current_raf: Callable[[], str | None] | None
 
-    def apply(self, name: str) -> None:
-        """Apply the named recipe to the open image."""
+    def apply_saved(self, name: str) -> None:
+        """Apply the named recipe to the open image and remember it."""
 
     def import_files(self, folder: str) -> None:
         """Pick recipe files and store them in a folder."""
@@ -127,6 +129,7 @@ class RecipeManagerDialog(Adw.Dialog):
     move_button = Gtk.Template.Child()
     export_button = Gtk.Template.Child()
     delete_button = Gtk.Template.Child()
+    list_scroll = Gtk.Template.Child()
     content = Gtk.Template.Child()
     stack = Gtk.Template.Child()
     details = Gtk.Template.Child()
@@ -157,6 +160,12 @@ class RecipeManagerDialog(Adw.Dialog):
         self.export_button.connect("clicked", self._on_export_clicked)
         self.delete_button.connect("clicked", self._on_delete_clicked)
         self.import_button.set_popover(self._import_popover())
+        self._scroll_speed = 0.0
+        self._scroll_tick: int | None = None
+        motion = Gtk.DropControllerMotion()
+        motion.connect("motion", self._on_drag_motion)
+        motion.connect("leave", self._on_drag_leave)
+        self.list_scroll.add_controller(motion)
         self.details.set_actions(
             DetailActions(
                 apply=self._apply,
@@ -410,7 +419,7 @@ class RecipeManagerDialog(Adw.Dialog):
 
     def _apply(self, name: str) -> None:
         """Apply a recipe to the open image and say so."""
-        self._host.apply(name)
+        self._host.apply_saved(name)
         self.show_toast(f"Applied “{name}”.")
 
     def _set_baseline(self, name: str, active: bool) -> None:
@@ -563,29 +572,28 @@ class RecipeManagerDialog(Adw.Dialog):
             self._host.transfer_banks(recipes, names, fs_recipes)
 
     def _folder_header(self, folder: str) -> Gtk.Widget:
-        """A folder header menu: reorder (up/down), rename, delete."""
+        """A folder's header: up and down arrows, then rename and delete."""
         folders = self._library.folders()
         index = folders.index(folder)
-        menu = Gtk.MenuButton(
-            icon_name="view-more-symbolic", valign=Gtk.Align.CENTER
-        )
+        header = Gtk.Box(valign=Gtk.Align.CENTER)
+        for icon, tooltip, up, possible in (
+            ("go-up-symbolic", "Move the folder up", True, index > 0),
+            (
+                "go-down-symbolic",
+                "Move the folder down",
+                False,
+                index < len(folders) - 1,
+            ),
+        ):
+            arrow = Gtk.Button(icon_name=icon, tooltip_text=tooltip)
+            arrow.add_css_class("flat")
+            arrow.set_sensitive(possible)
+            arrow.connect("clicked", self._on_reorder_clicked, folder, up)
+            header.append(arrow)
+        menu = Gtk.MenuButton(icon_name="view-more-symbolic")
+        menu.set_tooltip_text("Folder actions")
         menu.add_css_class("flat")
         popover, box = self._popover()
-        if index > 0:
-            self._entry(
-                box,
-                popover,
-                "Move Up",
-                lambda: self._host.reorder_folder(folder, True),
-            )
-        if index < len(folders) - 1:
-            self._entry(
-                box,
-                popover,
-                "Move Down",
-                lambda: self._host.reorder_folder(folder, False),
-            )
-        self._separator(box)
         self._entry(
             box,
             popover,
@@ -600,7 +608,12 @@ class RecipeManagerDialog(Adw.Dialog):
             destructive=True,
         )
         menu.set_popover(popover)
-        return menu
+        header.append(menu)
+        return header
+
+    def _on_reorder_clicked(self, _button: Any, folder: str, up: bool) -> None:
+        """Nudge a folder one step up or down."""
+        self._host.reorder_folder(folder, up)
 
     def _on_recipe_drag(
         self, _source: Any, _x: float, _y: float, name: str
@@ -626,10 +639,40 @@ class RecipeManagerDialog(Adw.Dialog):
         icon.set_child(chip)
         drag.set_hotspot(-8, -8)
 
+    def _on_drag_motion(self, _motion: Any, _x: float, y: float) -> None:
+        """Scroll the list while a drag hovers near its top or bottom."""
+        height = self.list_scroll.get_height()
+        if y < _SCROLL_EDGE:
+            self._scroll_speed = -(_SCROLL_EDGE - y) / _SCROLL_EDGE
+        elif y > height - _SCROLL_EDGE:
+            self._scroll_speed = (y - (height - _SCROLL_EDGE)) / _SCROLL_EDGE
+        else:
+            self._scroll_speed = 0.0
+        if self._scroll_speed and self._scroll_tick is None:
+            self._scroll_tick = self.list_scroll.add_tick_callback(
+                self._on_scroll_tick
+            )
+
+    def _on_drag_leave(self, *_args: Any) -> None:
+        """Stop scrolling once the drag leaves the list or ends."""
+        self._scroll_speed = 0.0
+
+    def _on_scroll_tick(self, _widget: Any, _clock: Any) -> bool:
+        """Move the list one frame's worth, until the drag lets go."""
+        if not self._scroll_speed:
+            self._scroll_tick = None
+            return False
+        adjustment = self.list_scroll.get_vadjustment()
+        adjustment.set_value(
+            adjustment.get_value() + self._scroll_speed * _SCROLL_STEP
+        )
+        return True
+
     def _on_recipe_drop(
         self, _target: Any, _value: Any, _x: float, _y: float, target: str
     ) -> bool:
         """Drop a recipe before target, adopting target's folder."""
+        self._scroll_speed = 0.0
         if self._dragged is not None and self._dragged != target:
             self._host.place_recipe(
                 self._dragged, self._library.folder_of(target), target
@@ -641,6 +684,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self, _target: Any, _value: Any, _x: float, _y: float, folder: str
     ) -> bool:
         """Drop a recipe onto a folder's area to append it there."""
+        self._scroll_speed = 0.0
         if self._dragged is not None:
             self._host.place_recipe(self._dragged, folder, None)
             self._dragged = None
@@ -654,11 +698,6 @@ class RecipeManagerDialog(Adw.Dialog):
         popover = Gtk.Popover()
         popover.set_child(box)
         return popover, box
-
-    @staticmethod
-    def _separator(box: Gtk.Box) -> None:
-        """Append a thin separator to a popover box."""
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
     @staticmethod
     def _entry(

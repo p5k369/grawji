@@ -9,7 +9,7 @@
   <ui filename="preferences.ui" sha256="6cfecdc8b2f0a37852eb9becd218b5e9ea1e3490afad948283bcb75708b96881"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
   <ui filename="camera_pane.ui" sha256="bb4d93d6147db574332fa252e4dc3d7e585afbec04f066a64edd2dfeed3ade00"/>
-  <ui filename="recipe_manager.ui" sha256="2b199fa24ec84acca5f3fb6efbf1ad54c90d14198b8d19d95c8add2e6c47c1cc"/>
+  <ui filename="recipe_manager.ui" sha256="5d298ccecdae03023cd17ebd22d2e2f4fb1dc33c5774c174a36690f60c50a97a"/>
   <ui filename="marks_bar.ui" sha256="7a025ea24fdf7691485fb6f78bf17028700b1b959d39887b3d8736f35880eb7b"/>
   <ui filename="rating_badges.ui" sha256="bfcb271d7e0ce49798eb113c85adeb489bc49c2974804794b6e65cf5e2624151"/>
   <ui filename="detail_badges.ui" sha256="480f1b6ce9fbe1d5456dc29e8da219d65c30afc42db9fce9d3c2da21b41046ae"/>

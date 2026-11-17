@@ -429,3 +429,16 @@ def test_the_selection_survives_a_refresh(tmp_path: Any) -> None:
     dialog._library.delete("Acros look")
     dialog.refresh()
     assert dialog.selected == ["Velvia look"]
+
+
+def test_a_drag_near_the_edge_scrolls_the_list(tmp_path: Any) -> None:
+    """Hovering a drag at the top or bottom sets the scroll direction."""
+    dialog = _dialog(tmp_path, model="X-T3")
+    height = dialog.list_scroll.get_height()
+    dialog._on_drag_motion(None, 10.0, 4.0)
+    assert dialog._scroll_speed < 0
+    dialog._on_drag_motion(None, 10.0, height + 200.0)
+    assert dialog._scroll_speed > 0
+    dialog._on_drag_leave()
+    assert dialog._scroll_speed == 0.0
+    assert dialog._on_scroll_tick(None, None) is False

@@ -102,6 +102,8 @@ _DEFAULT_SIDEBAR_WIDTH = 240
 _SIDEBAR_COLLAPSED_MAX = 10
 # EVs are thirds of a stop, anything closer than this is the same EV.
 _EV_EPSILON = 1e-6
+# A recipe's picture keeps the camera thumbnail's full size.
+_RECIPE_THUMB_EDGE = 640
 
 # App-wide CSS: preview canvas backgrounds, thumbnails, the folder tree.
 _CANVAS_CSS = """
@@ -330,6 +332,7 @@ class MainWindow(Adw.ApplicationWindow):
             run_transfer=self._camera_ops.run_bank_transfer,
             render_thumb=self._render_recipe_thumb,
             on_closed=self._on_recipe_manager_closed,
+            on_apply_saved=partial(self._on_apply_recipe, None),
         )
         self._single_export = SingleExportController(
             parent=self,
@@ -1577,7 +1580,11 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             try:
                 upright = oriented_jpeg(jpeg, orientation)
-                on_done(thumb_jpeg(trim_letterbox(upright)))
+                on_done(
+                    thumb_jpeg(
+                        trim_letterbox(upright), max_edge=_RECIPE_THUMB_EDGE
+                    )
+                )
             except GLib.Error:
                 on_done(None)
 
