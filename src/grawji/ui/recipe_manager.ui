@@ -15,7 +15,7 @@
             <child type="start">
               <object class="GtkSearchEntry" id="search_entry">
                 <property name="placeholder-text">Search recipes</property>
-                <property name="tooltip-text">Filter recipes by name, comment or film simulation</property>
+                <property name="tooltip-text">Filter recipes by name, comment or film simulation (Ctrl+F)</property>
               </object>
             </child>
           </object>
@@ -47,6 +47,11 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkButton" id="pictures_button">
+                        <property name="visible">false</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkLabel" id="selection_label">
                         <property name="hexpand">true</property>
                         <property name="xalign">1</property>
@@ -57,6 +62,10 @@
                         </style>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkBox" id="bulk_box">
+                        <property name="spacing">6</property>
+                        <property name="visible">false</property>
                     <child>
                       <object class="GtkMenuButton" id="move_button">
                         <property name="label">Move to</property>
@@ -76,6 +85,8 @@
                         <property name="icon-name">user-trash-symbolic</property>
                         <property name="sensitive">false</property>
                         <property name="tooltip-text">Delete the selected recipes</property>
+                      </object>
+                    </child>
                       </object>
                     </child>
                   </object>
@@ -100,6 +111,18 @@
                                 <property name="margin-bottom">16</property>
                               </object>
                             </property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkStackPage">
+                        <property name="name">nomatch</property>
+                        <property name="child">
+                          <object class="AdwStatusPage">
+                            <property name="icon-name">edit-find-symbolic</property>
+                            <property name="title">No recipes match</property>
+                            <property name="description">Try another name, comment or film simulation.</property>
                           </object>
                         </property>
                       </object>

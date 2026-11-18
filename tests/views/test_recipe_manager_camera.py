@@ -10,6 +10,8 @@ gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
+from gi.repository import Gdk
+
 from grawji.camera.capabilities import capabilities_for_model
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
@@ -38,11 +40,29 @@ def _dialog(tmp_path, *, model, on_transfer=_NOOP):
 
 
 def test_camera_pane_shows_banks_when_connected(tmp_path: Any) -> None:
-    """A connected body shows seven bank cards and enables Transfer."""
+    """A connected body shows seven bank cards."""
     dialog = _dialog(tmp_path, model="X-T3")
     assert dialog.camera_pane.camera_stack.get_visible_child_name() == "banks"
     assert len(dialog.camera_pane._banks) == 7
-    assert dialog.transfer_button.get_sensitive()
+
+
+def test_transfer_waits_for_something_to_write(tmp_path: Any) -> None:
+    """Transfer counts the pending slots and is off with none or busy."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    pane = dialog.camera_pane
+    button = dialog.transfer_button
+    assert not button.get_sensitive()
+    pane.assign_bank(0, "Velvia look")
+    pane.assign_fs(1, "Acros look")
+    assert button.get_sensitive()
+    assert button.get_label() == "Transfer 2"
+    dialog.set_busy(True)
+    assert not button.get_sensitive()
+    dialog.set_busy(False)
+    pane._banks[0].clear_button.emit("clicked")
+    pane._fs_cards[1].clear_button.emit("clicked")
+    assert not button.get_sensitive()
+    assert button.get_label() == "Transfer"
 
 
 def test_camera_pane_placeholder_without_camera(tmp_path: Any) -> None:
@@ -201,7 +221,7 @@ def test_a_drop_shows_the_recipe_on_the_row(tmp_path: Any) -> None:
     pane._on_fs_drop(None, "Acros look", 0.0, 0.0, 0)
     assert "Velvia look" in pane._banks[1].get_subtitle()
     assert not pane._banks[1].thumb.get_visible()  # it has no picture
-    assert "Acros look" in pane._fs_cards[0].get_subtitle()
+    assert pane._fs_cards[0].get_title() == "Acros look"
     assert not pane._fs_cards[0].edit_button.get_visible()
     dialog.on_transfer_finished()
     assert pane._banks[1].get_subtitle() == "Drop a recipe here"
@@ -396,17 +416,55 @@ def test_nothing_selected_disables_the_bulk_actions(tmp_path: Any) -> None:
     assert not dialog.move_button.get_sensitive()
 
 
-def test_details_buttons_assign_to_the_camera(tmp_path: Any) -> None:
-    """A slot button in the details pane assigns like a drop does."""
+def test_a_click_on_a_slot_takes_the_selected_recipe(tmp_path: Any) -> None:
+    """With one recipe selected, activating a slot assigns it."""
     dialog = _dialog(tmp_path, model="X-E5")
+    pane = dialog.camera_pane
+    assert not pane._banks[1].get_activatable()
     dialog.select("Velvia look")
-    labels = [label for label, _ in dialog.camera_pane.targets()]
-    assert labels[:2] == ["C1", "C2"]
-    assert labels[-1] == "FS3"
-    dialog._assign_target("Velvia look", 1)
-    dialog._assign_target("Velvia look", labels.index("FS1"))
-    assert dialog.camera_pane._bank_recipe == {1: "Velvia look"}
-    assert dialog.camera_pane._fs_recipe == {0: "Velvia look"}
+    assert "Velvia look" in pane.candidate_label.get_label()
+    pane._banks[1].emit("activated")
+    pane._fs_cards[0].emit("activated")
+    assert pane._bank_recipe == {1: "Velvia look"}
+    assert pane._fs_recipe == {0: "Velvia look"}
+    dialog.select("Acros look", toggle=True)
+    assert not pane._banks[1].get_activatable()
+    assert "Velvia look" not in pane.candidate_label.get_label()
+
+
+def test_a_named_bank_says_what_it_replaces(tmp_path: Any) -> None:
+    """A bank named after its recipe does not repeat the name."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog.set_bank_names("X-E5", ["BW", "", "", "", "", "", ""])
+    pane = dialog.camera_pane
+    pane.assign_bank(0, "Velvia look")
+    assert pane._banks[0].get_subtitle() == "replaces BW"
+    pane.assign_bank(1, "Acros look")
+    assert pane._banks[1].get_subtitle() == "will be written"
+
+
+def test_the_bulk_actions_show_with_a_selection(tmp_path: Any) -> None:
+    """Move, export and delete stay away until something is selected."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    assert not dialog.bulk_box.get_visible()
+    dialog.select("Velvia look")
+    assert dialog.bulk_box.get_visible()
+
+
+def test_missing_pictures_are_offered_with_an_open_image(
+    tmp_path: Any,
+) -> None:
+    """The button renders every picture-less recipe on the open image."""
+    asked: list[list[str]] = []
+    dialog = _dialog(tmp_path, model="X-E5")
+    assert dialog.pictures_button.get_visible()
+    assert not dialog.pictures_button.get_sensitive()
+    dialog._host.current_raf = lambda: "/x/a.RAF"
+    dialog._host.render_missing_thumbs = asked.append
+    dialog.refresh()
+    assert dialog.pictures_button.get_sensitive()
+    dialog.pictures_button.emit("clicked")
+    assert asked == [["Velvia look", "Acros look"]]
 
 
 def test_an_assignment_can_be_taken_back(tmp_path: Any) -> None:
@@ -442,3 +500,84 @@ def test_a_drag_near_the_edge_scrolls_the_list(tmp_path: Any) -> None:
     dialog._on_drag_leave()
     assert dialog._scroll_speed == 0.0
     assert dialog._on_scroll_tick(None, None) is False
+
+
+def test_a_drag_takes_the_whole_selection(tmp_path: Any) -> None:
+    """Dragging a selected row moves every selected recipe."""
+    placed: list[tuple[list[str], str, str | None]] = []
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog._library.add("Third", Recipe(film_simulation="Astia"))
+    dialog.refresh()
+    dialog._host.place_recipes = lambda *args: placed.append(args)
+    dialog.select("Velvia look")
+    dialog.select("Acros look", toggle=True)
+    dialog._on_recipe_drag(None, 0.0, 0.0, "Acros look")
+    dialog._on_recipe_drop(None, None, 0.0, 0.0, "Third")
+    dialog._on_recipe_drag(None, 0.0, 0.0, "Third")
+    dialog._on_group_drop(None, None, 0.0, 0.0, "")
+    assert placed == [
+        (["Velvia look", "Acros look"], "", "Third"),
+        (["Third"], "", None),
+    ]
+
+
+def test_the_keyboard_moves_and_extends_the_selection(tmp_path: Any) -> None:
+    """Arrows walk the list, Shift extends and Ctrl+A takes everything."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog.get_focus = lambda: dialog._rows["Velvia look"]
+    dialog.select("Velvia look")
+    assert dialog._on_list_key(None, Gdk.KEY_Down, 0, Gdk.ModifierType(0))
+    assert dialog.selected == ["Acros look"]
+    shift = Gdk.ModifierType.SHIFT_MASK
+    assert dialog._on_list_key(None, Gdk.KEY_Up, 0, shift)
+    assert dialog.selected == ["Velvia look", "Acros look"]
+    dialog.select("Acros look")
+    ctrl = Gdk.ModifierType.CONTROL_MASK
+    assert dialog._on_list_key(None, Gdk.KEY_a, 0, ctrl)
+    assert dialog.selected == ["Velvia look", "Acros look"]
+    dialog.get_focus = lambda: None
+    assert not dialog._on_list_key(None, Gdk.KEY_Down, 0, Gdk.ModifierType(0))
+
+
+def test_the_context_menu_follows_the_selection(tmp_path: Any) -> None:
+    """One recipe can be applied and renamed, several only handled."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog._library.create_folder("Film")
+    dialog.refresh()
+    dialog.select("Velvia look")
+    labels = [label for label, _, _ in dialog._menu_entries()]
+    assert labels == [
+        "Apply to image",
+        "Rename…",
+        "Move to “Film”",
+        "Export…",
+        "Delete",
+    ]
+    dialog.select("Acros look", toggle=True)
+    labels = [label for label, _, _ in dialog._menu_entries()]
+    assert labels == ["Move to “Film”", "Export…", "Delete"]
+
+
+def test_a_search_without_hits_says_so(tmp_path: Any) -> None:
+    """The list gives way to a note while nothing matches."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog.search_entry.set_text("zzz")
+    dialog._apply_search()
+    assert dialog.stack.get_visible_child_name() == "nomatch"
+    dialog.search_entry.set_text("velvia")
+    dialog._apply_search()
+    assert dialog.stack.get_visible_child_name() == "list"
+
+
+def test_delete_goes_straight_to_the_host(tmp_path: Any) -> None:
+    """Deleting asks nothing, the toast carries the undo."""
+    deleted: list[list[str]] = []
+    undone: list[bool] = []
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog._host.delete_recipes = deleted.append
+    dialog.select("Velvia look")
+    dialog.delete_button.emit("clicked")
+    assert deleted == [["Velvia look"]]
+    dialog.show_toast("Deleted.", undo=lambda: undone.append(True))
+    dialog._toast.emit("button-clicked")
+    assert undone == [True]

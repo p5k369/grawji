@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,31 @@ def recipe_matches(query: str, *fields: str) -> bool:
     """Whether every word of the query occurs in one of the fields."""
     haystack = " ".join(fields).casefold()
     return all(term in haystack for term in query.casefold().split())
+
+
+@dataclass(frozen=True)
+class Removed:
+    """A deleted recipe with everything needed to bring it back.
+
+    Attributes:
+        name: The name it was stored under.
+        recipe: The recipe.
+        index: Its position in the display order.
+        folder: The folder it was in.
+        thumb: Its picture as stored, or None.
+        comment: Its comment.
+        hotkey: Its number key, or None.
+        baseline: Whether it was the compare baseline.
+    """
+
+    name: str
+    recipe: Recipe
+    index: int
+    folder: str
+    thumb: str | None
+    comment: str
+    hotkey: int | None
+    baseline: bool
 
 
 class RecipeLibrary:
@@ -178,6 +204,62 @@ class RecipeLibrary:
             self._baseline = None
         self._save()
         return True
+
+    def remove(self, names: list[str]) -> list[Removed]:
+        """Delete the named recipes and return what restore needs."""
+        order = list(self._recipes)
+        removed = [
+            Removed(
+                name=name,
+                recipe=self._recipes[name],
+                index=order.index(name),
+                folder=self._folder_of.get(name, UNGROUPED),
+                thumb=self._thumb_of.get(name),
+                comment=self._comment_of.get(name, ""),
+                hotkey=self._hotkey_of.get(name),
+                baseline=self._baseline == name,
+            )
+            for name in dict.fromkeys(names)
+            if name in self._recipes
+        ]
+        for entry in removed:
+            del self._recipes[entry.name]
+            self._folder_of.pop(entry.name, None)
+            self._thumb_of.pop(entry.name, None)
+            self._comment_of.pop(entry.name, None)
+            self._hotkey_of.pop(entry.name, None)
+            if entry.baseline:
+                self._baseline = None
+        if removed:
+            self._save()
+        return removed
+
+    def restore(self, removed: list[Removed]) -> list[str]:
+        """Bring deleted recipes back to where they were."""
+        order = list(self._recipes)
+        recipes = dict(self._recipes)
+        restored: list[str] = []
+        for entry in sorted(removed, key=lambda entry: entry.index):
+            if entry.name in recipes:
+                continue
+            order.insert(min(entry.index, len(order)), entry.name)
+            recipes[entry.name] = entry.recipe
+            self._folder_of[entry.name] = entry.folder
+            self._ensure_folder(entry.folder)
+            if entry.thumb is not None:
+                self._thumb_of[entry.name] = entry.thumb
+            if entry.comment:
+                self._comment_of[entry.name] = entry.comment
+            taken = self._hotkey_of.values()
+            if entry.hotkey is not None and entry.hotkey not in taken:
+                self._hotkey_of[entry.name] = entry.hotkey
+            if entry.baseline and self._baseline is None:
+                self._baseline = entry.name
+            restored.append(entry.name)
+        if restored:
+            self._recipes = {name: recipes[name] for name in order}
+            self._save()
+        return restored
 
     def rename(self, old: str, new: str) -> bool:
         """Rename a recipe, keeping its place and folder, False if invalid.

@@ -25,7 +25,9 @@ _UI = (
     .read_text(encoding="utf-8")
 )
 
-_TARGET_COLUMNS = 5
+_PICTURE_WIDTH = 288
+_PICTURE_MAX_HEIGHT = 240
+_PLACEHOLDER_HEIGHT = 96
 
 _ = RecipeThumb
 
@@ -44,7 +46,6 @@ class Shown:
         is_baseline: Whether it is the compare baseline.
         fit: What the connected body cannot do with it.
         fit_css: The style class of the fit note.
-        targets: The camera slots it can go into.
     """
 
     name: str
@@ -56,7 +57,6 @@ class Shown:
     is_baseline: bool
     fit: str
     fit_css: str
-    targets: list[str]
 
 
 @dataclass
@@ -71,7 +71,6 @@ class DetailActions:
     copy_text: Callable[[str], None]
     baseline: Callable[[str, bool], None]
     hotkey: Callable[[str, int | None], None]
-    target: Callable[[str, int], None]
 
 
 @Gtk.Template(string=_UI)
@@ -94,8 +93,6 @@ class RecipeDetails(Gtk.Stack):
     image_button = Gtk.Template.Child()
     clear_image_button = Gtk.Template.Child()
     copy_button = Gtk.Template.Child()
-    camera_box = Gtk.Template.Child()
-    target_box = Gtk.Template.Child()
     values_grid = Gtk.Template.Child()
     key_dropdown = Gtk.Template.Child()
 
@@ -105,7 +102,6 @@ class RecipeDetails(Gtk.Stack):
         self._actions: DetailActions | None = None
         self._shown: Shown | None = None
         self._filling = False
-        self._targets: list[str] = []
         self.key_dropdown.connect("notify::selected", self._on_key_picked)
         for button, handler in (
             (self.apply_button, lambda a, n: a.apply(n)),
@@ -144,7 +140,7 @@ class RecipeDetails(Gtk.Stack):
         self._shown = shown
         self._filling = True
         recipe = shown.recipe
-        self.picture.set_texture(shown.texture)
+        self._show_picture(shown.texture)
         self.name_label.set_label(shown.name)
         origin = [film_sim_label(recipe.film_simulation)]
         if recipe.origin_body:
@@ -161,14 +157,13 @@ class RecipeDetails(Gtk.Stack):
             self.comment_label.remove_css_class("dim-label")
         else:
             self.comment_label.add_css_class("dim-label")
-        self.image_button.set_label(
-            "Update picture" if shown.texture is not None else "Make picture"
+        self.image_button.set_tooltip_text(
+            "Render this recipe on the open image as its picture"
         )
         self.clear_image_button.set_visible(shown.texture is not None)
         self.baseline_button.set_active(shown.is_baseline)
         self._fill_values(recipe)
         self._fill_keys(shown)
-        self._fill_targets(shown.targets)
         self._filling = False
         self.set_visible_child_name("one")
 
@@ -198,21 +193,16 @@ class RecipeDetails(Gtk.Stack):
         index = HOTKEYS.index(shown.hotkey) + 1 if shown.hotkey else 0
         self.key_dropdown.set_selected(index)
 
-    def _fill_targets(self, targets: list[str]) -> None:
-        """Offer a button per camera slot."""
-        self.camera_box.set_visible(bool(targets))
-        if targets == self._targets:
-            return
-        self._targets = list(targets)
-        while (child := self.target_box.get_first_child()) is not None:
-            self.target_box.remove(child)
-        for index, label in enumerate(targets):
-            button = Gtk.Button(label=label)
-            button.set_tooltip_text(f"Assign to {label}")
-            button.connect("clicked", self._on_target_clicked, index)
-            self.target_box.attach(
-                button, index % _TARGET_COLUMNS, index // _TARGET_COLUMNS, 1, 1
-            )
+    def _show_picture(self, texture: Any) -> None:
+        """Size the tile to the picture."""
+        if texture is None:
+            width, height = _PICTURE_WIDTH, _PLACEHOLDER_HEIGHT
+        else:
+            ratio = texture.get_height() / texture.get_width()
+            height = min(round(_PICTURE_WIDTH * ratio), _PICTURE_MAX_HEIGHT)
+            width = min(_PICTURE_WIDTH, round(height / ratio))
+        self.picture.set_tile_size(width, height)
+        self.picture.set_texture(texture)
 
     def _on_clicked(
         self, _button: Any, handler: Callable[[DetailActions, str], None]
@@ -235,8 +225,3 @@ class RecipeDetails(Gtk.Stack):
         key = HOTKEYS[index - 1] if 0 < index <= len(HOTKEYS) else None
         if key != self._shown.hotkey:
             self._actions.hotkey(self._shown.name, key)
-
-    def _on_target_clicked(self, _button: Any, index: int) -> None:
-        """Assign the shown recipe to a camera slot."""
-        if self._actions is not None and self._shown is not None:
-            self._actions.target(self._shown.name, index)

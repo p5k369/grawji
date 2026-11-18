@@ -8,8 +8,8 @@
   <ui filename="batch_export.ui" sha256="a2179fe58eb83df67efeb1f81836592aadcbb6564009d891ecb6f0c076dfd5b3"/>
   <ui filename="preferences.ui" sha256="6cfecdc8b2f0a37852eb9becd218b5e9ea1e3490afad948283bcb75708b96881"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
-  <ui filename="camera_pane.ui" sha256="bb4d93d6147db574332fa252e4dc3d7e585afbec04f066a64edd2dfeed3ade00"/>
-  <ui filename="recipe_manager.ui" sha256="5d298ccecdae03023cd17ebd22d2e2f4fb1dc33c5774c174a36690f60c50a97a"/>
+  <ui filename="camera_pane.ui" sha256="e08b0bdf9ba9c7c8044d224a66ac7348285c3fa250df88db004e19c62b825ae8"/>
+  <ui filename="recipe_manager.ui" sha256="bf046e0b90fdfe452521cc7ceca065da43dab5559c334dff932d622b5a50b2f8"/>
   <ui filename="marks_bar.ui" sha256="7a025ea24fdf7691485fb6f78bf17028700b1b959d39887b3d8736f35880eb7b"/>
   <ui filename="rating_badges.ui" sha256="bfcb271d7e0ce49798eb113c85adeb489bc49c2974804794b6e65cf5e2624151"/>
   <ui filename="detail_badges.ui" sha256="480f1b6ce9fbe1d5456dc29e8da219d65c30afc42db9fce9d3c2da21b41046ae"/>
@@ -17,6 +17,6 @@
   <ui filename="filter_popover.ui" sha256="6bd3802d9f5fe12b851fd94f3bec4486775e6ed4626f9f4e60f690abb33432f8"/>
   <ui filename="edit_match.ui" sha256="255b63fe16966371377df10ee40057d239d4470ba7e4611766d420b506eaa948"/>
   <ui filename="carrier_row.ui" sha256="ec9d89e4d2e770a63f52a0511227dd6a67ed076da91d7cff6c8bdcd0ef8b1176"/>
-  <ui filename="bank_row.ui" sha256="19f9180be3969209f01881c1b331ebefd5e1dd39d1257d8ef254fe43592317be"/>
-  <ui filename="recipe_details.ui" sha256="d6831f94759754e8e7d5c340316ba29f3081b8e4713ca23acc877eede9e7c6ea"/>
+  <ui filename="bank_row.ui" sha256="aaab979a3c945a8210bcc972e78350f22d7bf1d51ac1cc52b4abf699135b2487"/>
+  <ui filename="recipe_details.ui" sha256="a38353358875763be76815b23c83d225effc3d477e1a630ba603240678767993"/>
 </cambalache-project>

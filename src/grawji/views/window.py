@@ -130,6 +130,13 @@ _CANVAS_CSS = """
 row.recipe-selected {
     background-color: alpha(@accent_bg_color, 0.28);
 }
+row.recipe-row > box.header { min-height: 44px; }
+row.recipe-row:drop(active) {
+    box-shadow: inset 0 2px 0 0 @accent_color;
+}
+row .on-hover { opacity: 0; }
+row:hover .on-hover, row .on-hover:focus-visible { opacity: 1; }
+button.recipe-comment { padding: 8px 10px; font-weight: normal; }
 .camera-state image { opacity: 0.4; }
 .camera-state.camera-connected image {
     color: @accent_color;

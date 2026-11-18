@@ -116,6 +116,7 @@ class CameraPane(Gtk.Box):
     camera_header = Gtk.Template.Child()
     transfer_button = Gtk.Template.Child()
     camera_stack = Gtk.Template.Child()
+    candidate_label = Gtk.Template.Child()
     bank_list = Gtk.Template.Child()
     fs_section = Gtk.Template.Child()
     fs_list = Gtk.Template.Child()
@@ -145,6 +146,8 @@ class CameraPane(Gtk.Box):
         self._fs_cards: list[BankRow] = []
         self._fs_recipe: dict[int, str] = {}
         self._carrier: CarrierHooks | None = None
+        self._candidate: str | None = None
+        self._busy = False
         self.carrier_rows: dict[int, CarrierRow] = {
             100: self.carrier_row_100,
             200: self.carrier_row_200,
@@ -227,10 +230,13 @@ class CameraPane(Gtk.Box):
             row = BankRow(f"C{slot + 1}")
             row.edit_button.connect("clicked", self._on_rename_bank, slot)
             row.clear_button.connect("clicked", self._on_unassign_bank, slot)
+            row.connect("activated", self._on_bank_activated, slot)
             self._add_drop(row, self._on_bank_drop, slot)
             self.bank_list.append(row)
             self._banks.append(row)
         self._build_fs_section(model)
+        self.set_candidate(self._candidate)
+        self._update_transfer()
         self._refresh_carrier()
 
     def _add_drop(
@@ -327,6 +333,7 @@ class CameraPane(Gtk.Box):
         self._fs_recipe.clear()
         for row in (*self._banks, *self._fs_cards):
             row.clear_assignment()
+        self._update_transfer()
         if self._load_bank_names is not None:
             self._load_bank_names(self.set_bank_names)
 
@@ -341,6 +348,7 @@ class CameraPane(Gtk.Box):
             bank.set_bank_name(name)
             bank.loaded = name
             bank.dropped = None
+        self._update_transfer()
 
     def _build_fs_section(self, model: str | None) -> None:
         """Add FS1-FSn dial rows if this body has an FS layout."""
@@ -351,6 +359,7 @@ class CameraPane(Gtk.Box):
         for slot in range(layout.num_slots):
             row = BankRow(f"FS{slot + 1}", renamable=False)
             row.clear_button.connect("clicked", self._on_unassign_fs, slot)
+            row.connect("activated", self._on_fs_activated, slot)
             self._add_drop(row, self._on_fs_drop, slot)
             self.fs_list.append(row)
             self._fs_cards.append(row)
@@ -402,6 +411,7 @@ class CameraPane(Gtk.Box):
             name, self._compat_note(name), self._thumb(name)
         )
         self._name_after_recipe(slot, name)
+        self._update_transfer()
         return True
 
     def assign_fs(self, slot: int, name: str) -> bool:
@@ -414,21 +424,46 @@ class CameraPane(Gtk.Box):
         self._fs_cards[slot].assign(
             name, self._compat_note(name), self._thumb(name)
         )
+        self._update_transfer()
         return True
 
-    def targets(self) -> list[tuple[str, Callable[[str], bool]]]:
-        """The slots a recipe can go into, each with its assigner."""
-        if self.camera_stack.get_visible_child_name() != "banks":
-            return []
-        banks: list[tuple[str, Callable[[str], bool]]] = [
-            (f"C{slot + 1}", partial(self.assign_bank, slot))
-            for slot in range(len(self._banks))
-        ]
-        dial: list[tuple[str, Callable[[str], bool]]] = [
-            (f"FS{slot + 1}", partial(self.assign_fs, slot))
-            for slot in range(len(self._fs_cards))
-        ]
-        return banks + dial
+    def set_busy(self, busy: bool) -> None:
+        """Hold Transfer back while a transfer runs."""
+        self._busy = busy
+        self._update_transfer()
+
+    def _update_transfer(self) -> None:
+        """Offer Transfer, with a count, only when something is pending."""
+        recipes, names, dial = self.collect()
+        count = len(set(recipes) | set(names)) + len(dial)
+        button = self.transfer_button
+        button.set_label(f"Transfer {count}" if count else "Transfer")
+        button.set_sensitive(count > 0 and not self._busy)
+        if count:
+            button.add_css_class("suggested-action")
+        else:
+            button.remove_css_class("suggested-action")
+
+    def set_candidate(self, name: str | None) -> None:
+        """Let a click on a slot take the recipe selected in the list."""
+        self._candidate = name
+        for row in (*self._banks, *self._fs_cards):
+            row.set_activatable(name is not None)
+        if name is None:
+            text = "Select one recipe to assign it, or drag one onto a slot."
+        else:
+            text = f"Click a slot to put “{name}” there."
+        self.candidate_label.set_label(text)
+
+    def _on_bank_activated(self, _row: Any, slot: int) -> None:
+        """Put the selected recipe into the clicked bank."""
+        if self._candidate is not None:
+            self.assign_bank(slot, self._candidate)
+
+    def _on_fs_activated(self, _row: Any, slot: int) -> None:
+        """Put the selected recipe onto the clicked FS dial position."""
+        if self._candidate is not None:
+            self.assign_fs(slot, self._candidate)
 
     def _on_unassign_bank(self, _button: Any, slot: int) -> None:
         """Take a pending recipe off a bank, and the name it gave."""
@@ -438,11 +473,13 @@ class CameraPane(Gtk.Box):
             bank.set_bank_name(bank.loaded)
         bank.dropped = None
         bank.clear_assignment()
+        self._update_transfer()
 
     def _on_unassign_fs(self, _button: Any, slot: int) -> None:
         """Take a pending recipe off an FS dial position."""
         self._fs_recipe.pop(slot, None)
         self._fs_cards[slot].clear_assignment()
+        self._update_transfer()
 
     def _name_after_recipe(self, slot: int, name: str) -> None:
         """Give a bank the name of the recipe dropped on it."""
@@ -467,8 +504,13 @@ class CameraPane(Gtk.Box):
             f"Rename bank C{slot + 1}",
             "New name",
             bank.bank_name,
-            bank.set_bank_name,
+            partial(self._renamed_bank, bank),
         )
+
+    def _renamed_bank(self, bank: BankRow, name: str) -> None:
+        """Take a typed bank name."""
+        bank.set_bank_name(name)
+        self._update_transfer()
 
     def _names_by_slot(self) -> dict[int, str]:
         """Bank names the user changed from the loaded ones."""

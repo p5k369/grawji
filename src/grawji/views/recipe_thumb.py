@@ -48,6 +48,12 @@ class RecipeThumb(Gtk.Widget):
         self._texture = texture
         self.queue_draw()
 
+    def set_tile_size(self, width: int, height: int) -> None:
+        """Change the tile's size."""
+        self.tile_width = width
+        self.tile_height = height
+        self.queue_resize()
+
     def do_measure(
         self, orientation: Gtk.Orientation, _for_size: int
     ) -> tuple[int, int, int, int]:

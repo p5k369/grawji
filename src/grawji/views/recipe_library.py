@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ from grawji.photo_recipe import PhotoRecipe, recipe_from_tags
 from grawji.recipe import Recipe
 from grawji.recipe_import import ImportReport
 from grawji.recipe_text import format_recipe_text, parse_recipe_text
-from grawji.recipes import UNGROUPED, RecipeLibrary
+from grawji.recipes import UNGROUPED, RecipeLibrary, Removed
 from grawji.settings import FROM_IMAGE_LABEL
 from grawji.views import dialogs
 from grawji.views.recipe_bulk import RecipeBulk
@@ -395,14 +396,27 @@ class RecipeLibraryController:
 
     def delete_recipes(self, names: list[str]) -> None:
         """Remove saved recipes and persist the change."""
-        deleted = [name for name in names if self._library.delete(name)]
-        if not deleted:
+        removed = self._library.remove(names)
+        if not removed:
             return
         self._refresh()
-        if len(deleted) == 1:
-            self._toast(f"Deleted recipe “{deleted[0]}”.")
+        if len(removed) == 1:
+            message = f"Deleted recipe “{removed[0].name}”."
         else:
-            self._toast(f"Deleted {len(deleted)} recipes.")
+            message = f"Deleted {len(removed)} recipes."
+        if self._manager is not None:
+            self._manager.show_toast(
+                message, undo=partial(self._restore, removed)
+            )
+        else:
+            self._on_status(message)
+
+    def _restore(self, removed: list[Removed]) -> None:
+        """Bring deleted recipes back and select them."""
+        restored = self._library.restore(removed)
+        self._refresh()
+        if restored and self._manager is not None:
+            self._manager.select_names(restored)
 
     def move_recipes(self, names: list[str], folder: str) -> None:
         """Move recipes into a folder and refresh."""
@@ -420,9 +434,16 @@ class RecipeLibraryController:
             if renamed is not None:
                 self._panel.set_active(renamed, new)
 
-    def place_recipe(self, name: str, folder: str, before: str | None) -> None:
-        """Place a dragged recipe into folder before another, and refresh."""
-        if self._library.place_recipe(name, folder, before):
+    def place_recipes(
+        self, names: list[str], folder: str, before: str | None
+    ) -> None:
+        """Place dragged recipes into folder before another, and refresh."""
+        placed = [
+            name
+            for name in names
+            if self._library.place_recipe(name, folder, before)
+        ]
+        if placed:
             self._refresh()
 
     def reorder_folder(self, folder: str, up: bool) -> None:
@@ -472,6 +493,38 @@ class RecipeLibraryController:
                 self._toast("Open an image to generate a recipe picture.")
 
         self._render_thumb(recipe, done)
+
+    def render_missing_thumbs(self, names: list[str]) -> None:
+        """Render a picture for each named recipe."""
+        if self._render_thumb is None:
+            return
+        self._render_next_thumb(list(names), 0, len(names))
+
+    def _render_next_thumb(
+        self, pending: list[str], made: int, total: int
+    ) -> None:
+        """Render the next pending picture."""
+        render = self._render_thumb
+        while pending and self._library.get(pending[0]) is None:
+            pending.pop(0)
+        if not pending or render is None or self._manager is None:
+            self._refresh()
+            self._toast(f"Made {made} recipe pictures.")
+            return
+        name = pending.pop(0)
+        recipe = self._library.get(name)
+        self._toast(f"Making picture {made + 1} of {total}…")
+
+        def done(jpeg: bytes | None) -> None:
+            if jpeg is None:
+                self._refresh()
+                self._toast(f"Stopped after {made} recipe pictures.")
+                return
+            stored = self._library.set_thumb(name, jpeg)
+            self._render_next_thumb(pending, made + int(stored), total)
+
+        if recipe is not None:
+            render(recipe, done)
 
     def _toast(self, message: str) -> None:
         """Report to the manager toast if open, else the status line."""

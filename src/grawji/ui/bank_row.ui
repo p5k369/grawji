@@ -39,6 +39,7 @@
         <property name="valign">center</property>
         <style>
           <class name="flat"/>
+          <class name="on-hover"/>
         </style>
       </object>
     </child>

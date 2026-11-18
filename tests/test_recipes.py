@@ -343,3 +343,41 @@ def test_recipe_matches_empty_query_matches_everything():
     """An empty or blank query never filters anything out."""
     assert recipe_matches("", "Landscape", "", "Velvia")
     assert recipe_matches("   ", "anything", "", "")
+
+
+def test_removed_recipes_come_back_as_they_were(tmp_path) -> None:
+    """Restore puts recipes back in place with their extras."""
+    library = RecipeLibrary(tmp_path / "recipes.json")
+    for name in ("a", "b", "c", "d"):
+        library.add(name, Recipe(film_simulation="Velvia"))
+    library.move("b", "Film")
+    library.set_comment("b", "note")
+    library.set_hotkey("b", 3)
+    library.set_thumb("d", b"jpeg")
+    library.set_baseline("d")
+    removed = library.remove(["d", "b", "missing"])
+    assert library.names == ["a", "c"]
+    assert library.baseline is None
+    assert library.restore(removed) == ["b", "d"]
+    assert library.names == ["a", "b", "c", "d"]
+    assert library.folder_of("b") == "Film"
+    assert library.comment("b") == "note"
+    assert library.hotkey_of("b") == 3
+    assert library.thumb_jpeg("d") == b"jpeg"
+    assert library.baseline == "d"
+    reloaded = RecipeLibrary(tmp_path / "recipes.json")
+    assert reloaded.names == ["a", "b", "c", "d"]
+
+
+def test_restore_leaves_what_was_given_away(tmp_path) -> None:
+    """A reused name or number key stays with its new owner."""
+    library = RecipeLibrary(tmp_path / "recipes.json")
+    library.add("a", Recipe(film_simulation="Velvia"))
+    library.add("b", Recipe(film_simulation="Astia"))
+    library.set_hotkey("a", 1)
+    removed = library.remove(["a", "b"])
+    library.add("b", Recipe(film_simulation="Provia"))
+    library.set_hotkey("b", 1)
+    assert library.restore(removed) == ["a"]
+    assert library.hotkey_of("a") is None
+    assert library.get("b") == Recipe(film_simulation="Provia")

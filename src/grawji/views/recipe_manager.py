@@ -16,7 +16,7 @@ from gi.repository import Adw, Gdk, GLib, GObject, Gtk
 from grawji.camera import compatibility as compat
 from grawji.recipe import Recipe
 from grawji.recipe_dedup import find_duplicate_recipes
-from grawji.recipe_text import film_sim_label
+from grawji.recipe_text import recipe_summary
 from grawji.recipes import HOTKEYS, UNGROUPED, RecipeLibrary, recipe_matches
 from grawji.views.camera_pane import CameraPane, CarrierHooks
 from grawji.views.recipe_details import DetailActions, RecipeDetails, Shown
@@ -34,6 +34,8 @@ _SELECTED_CSS = "recipe-selected"
 _DOUBLE_CLICK = 2
 _SCROLL_EDGE = 56
 _SCROLL_STEP = 18.0
+_ROW_THUMB = (54, 36)
+_UNDO_SECONDS = 8
 
 
 class RecipeManagerHost(Protocol):
@@ -85,8 +87,10 @@ class RecipeManagerHost(Protocol):
     def set_hotkey(self, name: str, key: int | None) -> None:
         """Assign a number key to a recipe, or clear it with None."""
 
-    def place_recipe(self, name: str, folder: str, before: str | None) -> None:
-        """Position a recipe in a folder, before another recipe."""
+    def place_recipes(
+        self, names: list[str], folder: str, before: str | None
+    ) -> None:
+        """Position recipes in a folder, before another recipe."""
 
     def create_folder(self, name: str) -> None:
         """Create a folder."""
@@ -111,6 +115,9 @@ class RecipeManagerHost(Protocol):
     def render_recipe_thumb(self, name: str) -> None:
         """Render the recipe's thumbnail against the open image."""
 
+    def render_missing_thumbs(self, names: list[str]) -> None:
+        """Render a picture for each named recipe, one after another."""
+
     def edit_comment(self, name: str) -> None:
         """Prompt for the recipe's hover comment."""
 
@@ -125,6 +132,8 @@ class RecipeManagerDialog(Adw.Dialog):
     search_entry = Gtk.Template.Child()
     import_button = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
+    pictures_button = Gtk.Template.Child()
+    bulk_box = Gtk.Template.Child()
     selection_label = Gtk.Template.Child()
     move_button = Gtk.Template.Child()
     export_button = Gtk.Template.Child()
@@ -141,7 +150,8 @@ class RecipeManagerDialog(Adw.Dialog):
         self._library = library
         self._host = host
         self._caps = host.get_capabilities() if host.get_capabilities else None
-        self._dragged: str | None = None
+        self._dragged: list[str] = []
+        self._cursor: str | None = None
         self._groups: list[Adw.PreferencesGroup] = []
         self._search_rows: list[
             tuple[Adw.PreferencesGroup, Adw.ActionRow, str]
@@ -159,6 +169,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self.transfer_button.connect("clicked", self._on_transfer_clicked)
         self.export_button.connect("clicked", self._on_export_clicked)
         self.delete_button.connect("clicked", self._on_delete_clicked)
+        self.pictures_button.connect("clicked", self._on_pictures_clicked)
         self.import_button.set_popover(self._import_popover())
         self._scroll_speed = 0.0
         self._scroll_tick: int | None = None
@@ -166,6 +177,14 @@ class RecipeManagerDialog(Adw.Dialog):
         motion.connect("motion", self._on_drag_motion)
         motion.connect("leave", self._on_drag_leave)
         self.list_scroll.add_controller(motion)
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_list_key)
+        self.list_scroll.add_controller(keys)
+        find = Gtk.EventControllerKey()
+        find.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        find.connect("key-pressed", self._on_dialog_key)
+        self.add_controller(find)
         self.details.set_actions(
             DetailActions(
                 apply=self._apply,
@@ -176,7 +195,6 @@ class RecipeManagerDialog(Adw.Dialog):
                 copy_text=host.copy_recipe_text,
                 baseline=self._set_baseline,
                 hotkey=host.set_hotkey,
-                target=self._assign_target,
             )
         )
         self.camera_pane.wire(
@@ -199,7 +217,7 @@ class RecipeManagerDialog(Adw.Dialog):
                 else None
             ),
         )
-        self.transfer_button.set_sensitive(self.camera_pane.refresh())
+        self.camera_pane.refresh()
         self.refresh()
 
     def refresh(self) -> None:
@@ -218,10 +236,12 @@ class RecipeManagerDialog(Adw.Dialog):
         self.stack.set_visible_child_name("list" if has_recipes else "empty")
         ungrouped = self._library.names_in(UNGROUPED)
         if ungrouped:
-            self._add_group(UNGROUPED, "Recipes", ungrouped)
+            title = "Ungrouped" if self._library.folders() else ""
+            self._add_group(UNGROUPED, title, ungrouped)
         for folder in self._library.folders():
             self._add_group(folder, folder, self._library.names_in(folder))
         self._apply_search()
+        self._refresh_pictures_button()
         self.select_names([n for n in self._selected if n in self._rows])
 
     def _add_group(self, folder: str, title: str, names: list[str]) -> None:
@@ -260,25 +280,30 @@ class RecipeManagerDialog(Adw.Dialog):
             visible_in[group] = visible_in[group] or match
         for group, has_match in visible_in.items():
             group.set_visible(has_match or not query.strip())
+        if self._library.names:
+            found = any(visible_in.values()) or not query.strip()
+            self.stack.set_visible_child_name("list" if found else "nomatch")
 
     def _recipe_row(self, name: str) -> Adw.ActionRow:
         """Build one recipe row: picture, name and badges."""
         row = Adw.ActionRow()
+        row.add_css_class("recipe-row")
         row.set_use_markup(False)
         row.set_title(name)
         row.set_title_lines(1)
         row.set_subtitle_lines(1)
         recipe = self._library.get(name)
         if recipe is not None:
-            parts = [film_sim_label(recipe.film_simulation)]
-            if recipe.origin_body:
-                parts.append(f"from {recipe.origin_body}")
-            row.set_subtitle(" · ".join(parts))
+            row.set_subtitle(recipe_summary(recipe))
         comment = self._library.comment(name)
         if comment:
             row.set_tooltip_text(comment)
 
-        thumb = RecipeThumb(valign=Gtk.Align.CENTER)
+        thumb = RecipeThumb(
+            valign=Gtk.Align.CENTER,
+            tile_width=_ROW_THUMB[0],
+            tile_height=_ROW_THUMB[1],
+        )
         thumb.set_texture(self._thumb_texture(name))
         row.add_prefix(thumb)
 
@@ -313,6 +338,9 @@ class RecipeManagerDialog(Adw.Dialog):
         click = Gtk.GestureClick()
         click.connect("pressed", self._on_row_pressed, name)
         row.add_controller(click)
+        menu = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        menu.connect("pressed", self._on_row_menu, name)
+        row.add_controller(menu)
         source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
         source.connect("prepare", self._on_recipe_drag, name)
         source.connect("drag-begin", self._on_drag_begin, name)
@@ -342,12 +370,101 @@ class RecipeManagerDialog(Adw.Dialog):
             self._apply(name)
             return
         self.select(name, toggle=toggle, extend=extend)
+        self._rows[name].grab_focus()
+
+    def _on_dialog_key(
+        self, _keys: Any, keyval: int, _code: int, state: Gdk.ModifierType
+    ) -> bool:
+        """Jump into the search entry."""
+        if keyval == Gdk.KEY_f and state & Gdk.ModifierType.CONTROL_MASK:
+            self.search_entry.grab_focus()
+            return True
+        return False
+
+    def _on_row_menu(
+        self, _gesture: Any, _n_press: int, x: float, y: float, name: str
+    ) -> None:
+        """Open the context menu of the clicked recipe or the selection."""
+        if name not in self._selected:
+            self.select(name)
+        popover, box = self._popover()
+        for label, handler, destructive in self._menu_entries():
+            self._entry(box, popover, label, handler, destructive=destructive)
+        spot = Gdk.Rectangle()
+        spot.x, spot.y, spot.width, spot.height = int(x), int(y), 1, 1
+        popover.set_parent(self._rows[name])
+        popover.set_has_arrow(False)
+        popover.set_halign(Gtk.Align.START)
+        popover.set_pointing_to(spot)
+        popover.connect("closed", self._on_menu_closed)
+        popover.popup()
+
+    @staticmethod
+    def _on_menu_closed(popover: Gtk.Popover) -> None:
+        """Drop a context menu once it has closed."""
+        GLib.idle_add(popover.unparent)
+
+    def _menu_entries(self) -> list[tuple[str, Callable[[], None], bool]]:
+        """What the context menu offers for the selection."""
+        names = self.selected
+        entries: list[tuple[str, Callable[[], None], bool]] = []
+        if len(names) == 1:
+            name = names[0]
+            entries.append(
+                ("Apply to image", lambda: self._apply(name), False)
+            )
+            entries.append(("Rename…", lambda: self._rename(name), False))
+        here = {self._library.folder_of(name) for name in names}
+        for folder in [UNGROUPED, *self._library.folders()]:
+            if here == {folder}:
+                continue
+            target = "Ungrouped" if folder == UNGROUPED else f"“{folder}”"
+            entries.append((f"Move to {target}", self._mover(folder), False))
+        entries.append(
+            ("Export…", lambda: self._on_export_clicked(None), False)
+        )
+        entries.append(("Delete", lambda: self._on_delete_clicked(None), True))
+        return entries
+
+    def _on_list_key(
+        self, _keys: Any, keyval: int, _code: int, state: Gdk.ModifierType
+    ) -> bool:
+        """Drive the selection from the keyboard while a recipe has focus."""
+        if self.get_focus() not in self._rows.values():
+            return False
+        shown = [n for n in self._order if self._rows[n].get_visible()]
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        if keyval == Gdk.KEY_a and ctrl:
+            self.select_names(shown)
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if len(self._selected) == 1:
+                self._apply(self._selected[0])
+            return True
+        if keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete):
+            self._on_delete_clicked(None)
+            return True
+        last = len(shown) - 1
+        at = shown.index(self._cursor) if self._cursor in shown else 0
+        target = {
+            Gdk.KEY_Up: max(at - 1, 0),
+            Gdk.KEY_Down: min(at + 1, last),
+            Gdk.KEY_Home: 0,
+            Gdk.KEY_End: last,
+        }.get(keyval)
+        if target is None or not shown:
+            return False
+        extend = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        self.select(shown[target], extend=extend)
+        self._rows[shown[target]].grab_focus()
+        return True
 
     def select(
         self, name: str, *, toggle: bool = False, extend: bool = False
     ) -> None:
         """Select a recipe the way a click with Ctrl or Shift does."""
         order = self._order
+        self._cursor = name
         if extend and self._anchor in order and name in order:
             start, end = sorted((order.index(self._anchor), order.index(name)))
             chosen = order[start : end + 1]
@@ -373,6 +490,10 @@ class RecipeManagerDialog(Adw.Dialog):
         for widget in (self.move_button, self.export_button):
             widget.set_sensitive(count > 0)
         self.delete_button.set_sensitive(count > 0)
+        self.bulk_box.set_visible(count > 0)
+        self.camera_pane.set_candidate(
+            self._selected[0] if count == 1 else None
+        )
         self.selection_label.set_label(
             f"{count} selected" if count > 1 else ""
         )
@@ -413,7 +534,6 @@ class RecipeManagerDialog(Adw.Dialog):
                 is_baseline=self._library.baseline == name,
                 fit=fit,
                 fit_css=fit_css,
-                targets=[label for label, _ in self.camera_pane.targets()],
             )
         )
 
@@ -426,11 +546,34 @@ class RecipeManagerDialog(Adw.Dialog):
         """Set or clear the compare baseline."""
         self._host.set_baseline(name if active else None)
 
-    def _assign_target(self, name: str, index: int) -> None:
-        """Put a recipe into the camera slot of a details button."""
-        targets = self.camera_pane.targets()
-        if index < len(targets):
-            targets[index][1](name)
+    def _missing_pictures(self) -> list[str]:
+        """The recipes without a picture."""
+        return [
+            name
+            for name in self._library.names
+            if self._library.thumb_jpeg(name) is None
+        ]
+
+    def _refresh_pictures_button(self) -> None:
+        """Offer to render the missing pictures while an image is open."""
+        missing = len(self._missing_pictures())
+        current = self._host.current_raf
+        has_image = bool(current and current())
+        self.pictures_button.set_visible(missing > 0)
+        self.pictures_button.set_label(f"Make pictures ({missing})")
+        self.pictures_button.set_sensitive(has_image)
+        self.pictures_button.set_tooltip_text(
+            f"Make pictures for the {missing} recipes without one,"
+            " rendered on the open image"
+            if has_image
+            else "Open an image to make pictures for the recipes without one"
+        )
+
+    def _on_pictures_clicked(self, _button: Any) -> None:
+        """Render a picture for every recipe that has none."""
+        names = self._missing_pictures()
+        if names:
+            self._host.render_missing_thumbs(names)
 
     def _target_folder(self) -> str:
         """Where an import lands: beside the selection, else ungrouped."""
@@ -483,30 +626,9 @@ class RecipeManagerDialog(Adw.Dialog):
             self._host.export_recipes(self.selected)
 
     def _on_delete_clicked(self, _button: Any) -> None:
-        """Delete the selection after a confirmation."""
-        names = self.selected
-        if not names:
-            return
-        if len(names) == 1:
-            heading = f"Delete “{names[0]}”?"
-        else:
-            heading = f"Delete {len(names)} recipes?"
-        dialog = Adw.AlertDialog(
-            heading=heading, body="This cannot be undone."
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("delete", "Delete")
-        dialog.set_default_response("cancel")
-        dialog.set_response_appearance(
-            "delete", Adw.ResponseAppearance.DESTRUCTIVE
-        )
-
-        def on_response(_d: Any, response: str) -> None:
-            if response == "delete":
-                self._host.delete_recipes(names)
-
-        dialog.connect("response", on_response)
-        dialog.present(self)
+        """Delete the selection, which the toast offers to undo."""
+        if self._selected:
+            self._host.delete_recipes(self.selected)
 
     def _thumb_texture(self, name: str) -> Any:
         """The recipe's cached thumbnail texture, or None."""
@@ -542,13 +664,19 @@ class RecipeManagerDialog(Adw.Dialog):
 
     def set_busy(self, busy: bool) -> None:
         """Disable Transfer while a transfer runs."""
-        self.transfer_button.set_sensitive(not busy)
+        self.camera_pane.set_busy(busy)
 
-    def show_toast(self, message: str) -> None:
+    def show_toast(
+        self, message: str, undo: Callable[[], None] | None = None
+    ) -> None:
         """Show an in-dialog toast, replacing any previous one."""
         if self._toast is not None:
             self._toast.dismiss()
         self._toast = Adw.Toast.new(message)
+        if undo is not None:
+            self._toast.set_button_label("Undo")
+            self._toast.set_timeout(_UNDO_SECONDS)
+            self._toast.connect("button-clicked", lambda _toast: undo())
         self.toasts.add_toast(self._toast)
 
     def on_transfer_finished(self) -> None:
@@ -562,8 +690,8 @@ class RecipeManagerDialog(Adw.Dialog):
 
     def _take_dragged(self) -> str | None:
         """Return and consume the recipe row currently being dragged."""
-        name, self._dragged = self._dragged, None
-        return name
+        names, self._dragged = self._dragged, []
+        return names[0] if names else None
 
     def _on_transfer_clicked(self, _button: Any) -> None:
         """Hand the bank/FS assignments and renames to the controller."""
@@ -618,16 +746,18 @@ class RecipeManagerDialog(Adw.Dialog):
     def _on_recipe_drag(
         self, _source: Any, _x: float, _y: float, name: str
     ) -> Gdk.ContentProvider:
-        """Begin dragging a recipe row."""
-        self._dragged = name
+        """Begin dragging a recipe row, with the selection it belongs to."""
+        together = name in self._selected and len(self._selected) > 1
+        self._dragged = self.selected if together else [name]
         return Gdk.ContentProvider.new_for_value(name)
 
     def _on_drag_begin(self, _source: Any, drag: Any, name: str) -> None:
         """Attach a compact recipe chip as the drag icon."""
         chip = Gtk.Box()
         chip.add_css_class("card")
+        count = len(self._dragged)
         label = Gtk.Label(
-            label=name,
+            label=f"{count} recipes" if count > 1 else name,
             margin_top=8,
             margin_bottom=8,
             margin_start=14,
@@ -673,11 +803,11 @@ class RecipeManagerDialog(Adw.Dialog):
     ) -> bool:
         """Drop a recipe before target, adopting target's folder."""
         self._scroll_speed = 0.0
-        if self._dragged is not None and self._dragged != target:
-            self._host.place_recipe(
-                self._dragged, self._library.folder_of(target), target
+        names, self._dragged = self._dragged, []
+        if names and target not in names:
+            self._host.place_recipes(
+                names, self._library.folder_of(target), target
             )
-        self._dragged = None
         return True
 
     def _on_group_drop(
@@ -685,11 +815,10 @@ class RecipeManagerDialog(Adw.Dialog):
     ) -> bool:
         """Drop a recipe onto a folder's area to append it there."""
         self._scroll_speed = 0.0
-        if self._dragged is not None:
-            self._host.place_recipe(self._dragged, folder, None)
-            self._dragged = None
-            return True
-        return False
+        names, self._dragged = self._dragged, []
+        if names:
+            self._host.place_recipes(names, folder, None)
+        return bool(names)
 
     @staticmethod
     def _popover() -> tuple[Gtk.Popover, Gtk.Box]:

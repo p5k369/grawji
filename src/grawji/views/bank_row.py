@@ -48,8 +48,10 @@ class BankRow(Adw.ActionRow):
         self.edit_button.set_visible(renamable)
         self.loaded = ""
         self.dropped: str | None = None
-        self._assigned = False
-        self._show_hint()
+        self._named = renamable
+        self._recipe: str | None = None
+        self._note = ""
+        self._update()
 
     @property
     def bank_name(self) -> str:
@@ -59,29 +61,44 @@ class BankRow(Adw.ActionRow):
     def set_bank_name(self, name: str) -> None:
         """Show a bank name."""
         self.set_title(name)
-        self._show_hint()
+        self._update()
 
     def assign(self, recipe: str, note: str, texture: Any) -> None:
         """Show the recipe a transfer would write into the slot."""
-        self._assigned = True
-        text = f"→ {recipe}{note}"
-        self.set_subtitle(text)
-        self.set_tooltip_text(text)
+        self._recipe = recipe
+        self._note = note
+        if not self._named:
+            self.set_title(recipe)
         self.thumb.set_texture(texture)
         self.thumb.set_visible(texture is not None)
         self.clear_button.set_visible(True)
         self.slot_label.add_css_class("accent")
+        self._update()
 
     def clear_assignment(self) -> None:
         """Show the slot without a pending recipe."""
-        self._assigned = False
-        self._show_hint()
-        self.set_tooltip_text(None)
+        self._recipe = None
+        self._note = ""
+        if not self._named:
+            self.set_title("")
         self.thumb.set_visible(False)
         self.clear_button.set_visible(False)
         self.slot_label.remove_css_class("accent")
+        self._update()
 
-    def _show_hint(self) -> None:
-        """Say what an unnamed slot is for while nothing is assigned."""
-        if not self._assigned:
-            self.set_subtitle("" if self.bank_name else _HINT)
+    def _update(self) -> None:
+        """Say in the second line what a transfer does to the slot."""
+        recipe = self._recipe
+        if recipe is None:
+            text = "" if self.bank_name else _HINT
+            self.set_tooltip_text(None)
+        else:
+            if recipe != self.bank_name:
+                text = f"→ {recipe}"
+            elif self.loaded and self.loaded != recipe:
+                text = f"replaces {self.loaded}"
+            else:
+                text = "will be written"
+            text += self._note
+            self.set_tooltip_text(f"{recipe}{self._note}")
+        self.set_subtitle(text)
