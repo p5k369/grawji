@@ -38,6 +38,55 @@
                       <object class="GtkMenuButton" id="import_button">
                         <property name="label">Import</property>
                         <property name="tooltip-text">Add recipes to the library</property>
+                        <property name="popover">
+                          <object class="GtkPopover" id="import_popover">
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">2</property>
+                                <child>
+                                  <object class="GtkButton" id="import_files_button">
+                                    <style>
+                                      <class name="flat"/>
+                                    </style>
+                                    <property name="child">
+                                      <object class="GtkLabel">
+                                        <property name="label">Recipe files or photos…</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="import_folder_button">
+                                    <style>
+                                      <class name="flat"/>
+                                    </style>
+                                    <property name="child">
+                                      <object class="GtkLabel">
+                                        <property name="label">A folder of recipes…</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="import_clipboard_button">
+                                    <style>
+                                      <class name="flat"/>
+                                    </style>
+                                    <property name="child">
+                                      <object class="GtkLabel">
+                                        <property name="label">Recipe text from the clipboard</property>
+                                        <property name="xalign">0</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </property>
                       </object>
                     </child>
                     <child>

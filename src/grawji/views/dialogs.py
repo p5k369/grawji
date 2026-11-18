@@ -10,60 +10,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
 import grawji
-
-_SHORTCUT_GROUPS = {
-    "Files": [
-        ("Export JPEG", "<Ctrl>E"),
-        ("Move to trash", "Delete"),
-        ("Select all images", "<Ctrl>A"),
-        ("Add or remove one image (Ctrl + click)", ""),
-        ("Select a range (Shift + click)", ""),
-        ("Cancel selection", "Escape"),
-    ],
-    "Marks": [
-        ("Rate one to five stars, again to clear", "<Alt>1"),
-        ("Clear the rating", "<Alt>0"),
-        ("Reject, or take a reject back", "x"),
-        ("Mark for export", "e"),
-        ("Red label", "F1"),
-        ("Yellow label", "F2"),
-        ("Green label", "F3"),
-        ("Blue label", "F4"),
-        ("Purple label", "F5"),
-    ],
-    "Recipe": [
-        ("Save recipe", "<Ctrl>S"),
-        ("Copy recipe as text", "<Ctrl><Shift>C"),
-        ("Paste recipe from clipboard", "<Ctrl><Shift>V"),
-        ("Undo the last edit", "<Ctrl>Z"),
-        ("Redo the undone edit", "<Ctrl><Shift>Z"),
-        ("Reset to default", "<Ctrl>R"),
-        ("Apply the recipe assigned to a number key (1 to 9)", "1"),
-        ("Develop a RAW+JPEG shot from the RAW or the camera JPEG", "j"),
-    ],
-    "Navigation": [
-        ("Previous image (hold to glide)", "Left"),
-        ("Next image (hold to glide)", "Right"),
-    ],
-    "View": [
-        ("Zoom in", "<Ctrl>plus"),
-        ("Zoom out", "<Ctrl>minus"),
-        ("Zoom at the pointer (Ctrl + scroll)", ""),
-        ("Fit to window", "<Ctrl>0"),
-        ("Cycle background", "b"),
-        ("Show original (before/after)", "backslash"),
-        ("Toggle histogram", "h"),
-        ("Toggle marks bar", "m"),
-        ("Switch between developing and browsing", "g"),
-        ("Crop and straighten", "c"),
-        ("Apply crop", "Return"),
-        ("Cancel crop", "Escape"),
-    ],
-    "Application": [
-        ("Preferences", "<Ctrl>comma"),
-        ("Keyboard shortcuts", "<Ctrl>question"),
-    ],
-}
+from grawji import shortcuts
 
 
 def fit_dialog(
@@ -93,12 +40,12 @@ def app_version() -> str:
 def present_shortcuts(parent: Gtk.Widget) -> None:
     """Show a dialog listing the keyboard shortcuts."""
     page = Adw.PreferencesPage()
-    for title, items in _SHORTCUT_GROUPS.items():
+    for title, entries in shortcuts.GROUPS.items():
         group = Adw.PreferencesGroup(title=title)
-        for label, accel in items:
-            row = Adw.ActionRow(title=label)
-            if accel:
-                shortcut = Gtk.ShortcutLabel(accelerator=accel)
+        for entry in entries:
+            row = Adw.ActionRow(title=entry.label)
+            if entry.accelerator:
+                shortcut = Gtk.ShortcutLabel(accelerator=entry.accelerator)
                 shortcut.set_valign(Gtk.Align.CENTER)
                 row.add_suffix(shortcut)
             group.add(row)

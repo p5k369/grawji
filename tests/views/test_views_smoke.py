@@ -12,6 +12,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, GLib, GObject, Gtk
 
+from grawji import shortcuts
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
 from tests.gui_support import StubManagerHost, pump, walk
@@ -337,7 +338,9 @@ def test_recipe_manager_badges_duplicates(tmp_path: Any) -> None:
     labels = [
         w for w in (walk(root) if root else []) if isinstance(w, Gtk.Label)
     ]
-    dup_chips = [w for w in labels if w.get_text() == "duplicate"]
+    dup_chips = [
+        w for w in labels if w.get_text() == "duplicate" and w.get_visible()
+    ]
     assert len(dup_chips) == 2
 
 
@@ -703,3 +706,10 @@ def test_the_window_enables_undo_only_with_a_step_to_take(
     undo.activate(None)
     assert not undo.get_enabled()
     assert redo.get_enabled()
+
+
+def test_every_shortcut_names_a_window_action(window: Any) -> None:
+    """The registry binds nothing the window does not offer."""
+    for name in (*shortcuts.ACCELS, *shortcuts.BARE_KEYS):
+        base = name.split("(", 1)[0]
+        assert window.lookup_action(base) is not None, name

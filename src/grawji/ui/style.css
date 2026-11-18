@@ -1,0 +1,94 @@
+.canvas-white, .canvas-white > viewport { background-color: #ffffff; }
+.canvas-gray, .canvas-gray > viewport { background-color: #777777; }
+.canvas-black, .canvas-black > viewport { background-color: #000000; }
+.thumb {
+    padding: 2px 6px;
+    margin-top: 16px;
+    margin-bottom: 0;
+    transition: margin 120ms ease;
+}
+.thumb.thumb-selected,
+.thumb.thumb-marked {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+.thumb.thumb-selected {
+    box-shadow: inset 0 0 0 2px @accent_bg_color;
+}
+.thumb.thumb-marked {
+    background-color: alpha(@accent_bg_color, 0.30);
+}
+row.recipe-selected {
+    background-color: alpha(@accent_bg_color, 0.28);
+}
+row.recipe-row > box.header { min-height: 44px; }
+row.recipe-row:drop(active) {
+    box-shadow: inset 0 2px 0 0 @accent_color;
+}
+row .on-hover { opacity: 0; }
+row:hover .on-hover, row .on-hover:focus-visible { opacity: 1; }
+button.recipe-comment { padding: 8px 10px; font-weight: normal; }
+button.recipe-folder-toggle { padding: 4px 8px; margin-left: -8px; }
+.camera-state image { opacity: 0.4; }
+.camera-state.camera-connected image {
+    color: @accent_color;
+    opacity: 1;
+}
+.camera-state.camera-connected label {
+    color: @accent_color;
+    opacity: 1;
+}
+.grid-tile { padding: 6px 6px 3px; }
+.dim-cards .grid-tile {
+    background-color: alpha(#ffffff, 0.05);
+    box-shadow: none;
+}
+gridview.folder-grid > child,
+gridview.folder-grid > child:hover,
+gridview.folder-grid > child:selected {
+    background: none;
+}
+gridview.folder-grid > child:focus-visible,
+listview.filmstrip > row:focus-visible {
+    outline: none;
+}
+gridview.folder-grid > child:hover .grid-tile {
+    background-color: alpha(currentColor, 0.1);
+}
+gridview.folder-grid > child:selected .grid-tile {
+    background-color: alpha(@accent_bg_color, 0.25);
+    box-shadow: inset 0 0 0 2px @accent_bg_color;
+}
+.folder-tree { color: alpha(currentColor, 0.85); font-weight: normal; }
+.folder-tree image { opacity: 0.7; }
+.folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
+.filmstrip-nav-start { border-radius: 0 0 0 8px; }
+.filmstrip-nav-end { border-radius: 0 0 8px 0; }
+row.recipe-modified {
+    background-color: alpha(@accent_bg_color, 0.08);
+}
+.angle-zero-mark {
+    background-color: alpha(currentColor, 0.55);
+    border-radius: 1px;
+}
+.card-badge { opacity: 0.75; }
+.source-badge { font-size: 7pt; font-weight: bold; }
+.source-button { padding: 0 6px; min-height: 22px; font-size: 9pt; }
+.mark-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px alpha(#000000, 0.45);
+}
+.mark-red { background-color: #e01b24; }
+.mark-yellow { background-color: #f6d32d; }
+.mark-green { background-color: #33d17a; }
+.mark-blue { background-color: #3584e4; }
+.mark-purple { background-color: #9141ac; }
+.mark-rejected picture { opacity: 0.35; }
+.marks-osd { border-radius: 8px; padding: 4px 2px; }
+.mark-button { min-width: 24px; padding: 2px 3px; }
+.mark-button .mark-dot { opacity: 0.3; }
+.mark-button.mark-on .mark-dot,
+.mark-button:checked .mark-dot { opacity: 1; }
+.mark-button.mark-on image { color: @accent_color; }

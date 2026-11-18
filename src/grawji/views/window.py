@@ -21,7 +21,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import mainloop, raf, sidecar
+from grawji import mainloop, raf, shortcuts, sidecar
 from grawji.camera import camera_info
 from grawji.camera.capabilities import (
     BASELINE,
@@ -104,104 +104,6 @@ _SIDEBAR_COLLAPSED_MAX = 10
 _EV_EPSILON = 1e-6
 # A recipe's picture keeps the camera thumbnail's full size.
 _RECIPE_THUMB_EDGE = 640
-
-# App-wide CSS: preview canvas backgrounds, thumbnails, the folder tree.
-_CANVAS_CSS = """
-.canvas-white, .canvas-white > viewport { background-color: #ffffff; }
-.canvas-gray, .canvas-gray > viewport { background-color: #777777; }
-.canvas-black, .canvas-black > viewport { background-color: #000000; }
-.thumb {
-    padding: 2px 6px;
-    margin-top: 16px;
-    margin-bottom: 0;
-    transition: margin 120ms ease;
-}
-.thumb.thumb-selected,
-.thumb.thumb-marked {
-    margin-top: 0;
-    margin-bottom: 16px;
-}
-.thumb.thumb-selected {
-    box-shadow: inset 0 0 0 2px @accent_bg_color;
-}
-.thumb.thumb-marked {
-    background-color: alpha(@accent_bg_color, 0.30);
-}
-row.recipe-selected {
-    background-color: alpha(@accent_bg_color, 0.28);
-}
-row.recipe-row > box.header { min-height: 44px; }
-row.recipe-row:drop(active) {
-    box-shadow: inset 0 2px 0 0 @accent_color;
-}
-row .on-hover { opacity: 0; }
-row:hover .on-hover, row .on-hover:focus-visible { opacity: 1; }
-button.recipe-comment { padding: 8px 10px; font-weight: normal; }
-button.recipe-folder-toggle { padding: 4px 8px; margin-left: -8px; }
-.camera-state image { opacity: 0.4; }
-.camera-state.camera-connected image {
-    color: @accent_color;
-    opacity: 1;
-}
-.camera-state.camera-connected label {
-    color: @accent_color;
-    opacity: 1;
-}
-.grid-tile { padding: 6px 6px 3px; }
-.dim-cards .grid-tile {
-    background-color: alpha(#ffffff, 0.05);
-    box-shadow: none;
-}
-gridview.folder-grid > child,
-gridview.folder-grid > child:hover,
-gridview.folder-grid > child:selected {
-    background: none;
-}
-gridview.folder-grid > child:focus-visible,
-listview.filmstrip > row:focus-visible {
-    outline: none;
-}
-gridview.folder-grid > child:hover .grid-tile {
-    background-color: alpha(currentColor, 0.1);
-}
-gridview.folder-grid > child:selected .grid-tile {
-    background-color: alpha(@accent_bg_color, 0.25);
-    box-shadow: inset 0 0 0 2px @accent_bg_color;
-}
-.folder-tree { color: alpha(currentColor, 0.85); font-weight: normal; }
-.folder-tree image { opacity: 0.7; }
-.folder-tree row:selected { background-color: alpha(currentColor, 0.12); }
-.filmstrip-nav-start { border-radius: 0 0 0 8px; }
-.filmstrip-nav-end { border-radius: 0 0 8px 0; }
-row.recipe-modified {
-    background-color: alpha(@accent_bg_color, 0.08);
-}
-.angle-zero-mark {
-    background-color: alpha(currentColor, 0.55);
-    border-radius: 1px;
-}
-.card-badge { opacity: 0.75; }
-.source-badge { font-size: 7pt; font-weight: bold; }
-.source-button { padding: 0 6px; min-height: 22px; font-size: 9pt; }
-.mark-dot {
-    min-width: 8px;
-    min-height: 8px;
-    border-radius: 50%;
-    box-shadow: 0 0 0 1px alpha(#000000, 0.45);
-}
-.mark-red { background-color: #e01b24; }
-.mark-yellow { background-color: #f6d32d; }
-.mark-green { background-color: #33d17a; }
-.mark-blue { background-color: #3584e4; }
-.mark-purple { background-color: #9141ac; }
-.mark-rejected picture { opacity: 0.35; }
-.marks-osd { border-radius: 8px; padding: 4px 2px; }
-.mark-button { min-width: 24px; padding: 2px 3px; }
-.mark-button .mark-dot { opacity: 0.3; }
-.mark-button.mark-on .mark-dot,
-.mark-button:checked .mark-dot { opacity: 1; }
-.mark-button.mark-on image { color: @accent_color; }
-"""
 
 _UI = (
     resources.files("grawji")
@@ -394,53 +296,42 @@ class MainWindow(Adw.ApplicationWindow):
     def _install_actions(self) -> None:
         """Install window actions used by the menu and keyboard shortcuts."""
         view = self.preview_view
-        specs: tuple[tuple[str, Callable[[], None], tuple[str, ...]], ...] = (
-            ("export", lambda: self._on_export_clicked(None), ("<Ctrl>e",)),
-            ("save-recipe", self._library.save_current, ("<Ctrl>s",)),
-            (
-                "paste-recipe",
-                self._library.paste_text,
-                ("<Ctrl><Shift>v",),
-            ),
-            (
-                "copy-recipe",
-                self._library.copy_text,
-                ("<Ctrl><Shift>c",),
-            ),
-            ("reset", self._reset_recipe, ("<Ctrl>r",)),
-            ("undo", self._undo_edit, ("<Ctrl>z",)),
-            ("redo", self._redo_edit, ("<Ctrl><Shift>z", "<Ctrl>y")),
-            ("preferences", self._on_preferences, ("<Ctrl>comma",)),
-            ("export-marked", self._export_marked, ()),
-            ("export-shown", self._export_shown, ()),
-            ("trash-rejected", self._trash_rejected, ()),
-            ("select-all", self._filmstrip.select_all, ("<Ctrl>a",)),
-            ("cancel-selection", self._filmstrip.clear_selection, ()),
-            ("manage-recipes", self._library.manage, ()),
-            ("try-recipes", self._on_try_recipes, ()),
-            ("backup-camera", self._backup.backup, ()),
-            ("restore-camera", self._backup.restore, ()),
-            ("zoom-in", view.zoom_in, ("<Ctrl>plus", "<Ctrl>equal")),
-            ("zoom-out", view.zoom_out, ("<Ctrl>minus",)),
-            ("zoom-fit", view.zoom_fit, ("<Ctrl>0",)),
-            ("cycle-background", self._cycle_background, ()),
-            ("toggle-peek", self._toggle_peek, ()),
-            ("toggle-crop", self._toggle_crop, ()),
-            ("toggle-export", self._marks.toggle_export, ()),
-            ("toggle-reject", self._marks.toggle_reject, ()),
-            (
-                "shortcuts",
-                lambda: dialogs.present_shortcuts(self),
-                ("<Ctrl>question",),
-            ),
-            ("about", lambda: dialogs.present_about(self), ()),
+        specs: tuple[tuple[str, Callable[[], None]], ...] = (
+            ("export", lambda: self._on_export_clicked(None)),
+            ("save-recipe", self._library.save_current),
+            ("paste-recipe", self._library.paste_text),
+            ("copy-recipe", self._library.copy_text),
+            ("reset", self._reset_recipe),
+            ("undo", self._undo_edit),
+            ("redo", self._redo_edit),
+            ("preferences", self._on_preferences),
+            ("export-marked", self._export_marked),
+            ("export-shown", self._export_shown),
+            ("trash-rejected", self._trash_rejected),
+            ("select-all", self._filmstrip.select_all),
+            ("cancel-selection", self._filmstrip.clear_selection),
+            ("manage-recipes", self._library.manage),
+            ("try-recipes", self._on_try_recipes),
+            ("backup-camera", self._backup.backup),
+            ("restore-camera", self._backup.restore),
+            ("zoom-in", view.zoom_in),
+            ("zoom-out", view.zoom_out),
+            ("zoom-fit", view.zoom_fit),
+            ("cycle-background", self._cycle_background),
+            ("toggle-peek", self._toggle_peek),
+            ("toggle-crop", self._toggle_crop),
+            ("toggle-export", self._marks.toggle_export),
+            ("toggle-reject", self._marks.toggle_reject),
+            ("shortcuts", lambda: dialogs.present_shortcuts(self)),
+            ("about", lambda: dialogs.present_about(self)),
         )
-        app = self.get_application()
-        for name, callback, accels in specs:
+        for name, callback in specs:
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", partial(self._activate, callback))
             self.add_action(action)
-            if app is not None and accels:
+        app = self.get_application()
+        if app is not None:
+            for name, accels in shortcuts.ACCELS.items():
                 app.set_accels_for_action(f"win.{name}", list(accels))
         self._on_history_changed(self.recipe_panel)
 
@@ -481,7 +372,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _install_mark_actions(self) -> None:
         """The parameterized mark actions."""
-        app = self.get_application()
         rate = Gio.SimpleAction.new("rate", GLib.VariantType.new("i"))
         rate.connect("activate", lambda _a, v: self._marks.rate(v.get_int32()))
         self.add_action(rate)
@@ -496,14 +386,6 @@ class MainWindow(Adw.ApplicationWindow):
             action = self.lookup_action(name)
             if isinstance(action, Gio.SimpleAction):
                 self._mark_actions.append(action)
-        if app is None:
-            return
-        for stars in range(6):
-            app.set_accels_for_action(f"win.rate({stars})", [f"<Alt>{stars}"])
-        for index, color in enumerate(Label, start=1):
-            app.set_accels_for_action(
-                f"win.toggle-label('{color.value}')", [f"F{index}"]
-            )
 
     def _install_source_actions(self) -> None:
         """The RAW or camera file choice of the open shot."""
@@ -658,9 +540,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._install_icons()
 
     def _install_css(self) -> None:
-        """Load the app's CSS for the preview canvas and thumbnails."""
+        """Load the app's stylesheet."""
         provider = Gtk.CssProvider()
-        provider.load_from_string(_CANVAS_CSS)
+        css = resources.files("grawji").joinpath("ui", "style.css")
+        provider.load_from_string(css.read_text(encoding="utf-8"))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             provider,

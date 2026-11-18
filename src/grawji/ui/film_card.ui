@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiFilmCard" parent="GtkBox">
+    <style>
+      <class name="card"/>
+      <class name="thumb"/>
+    </style>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">1</property>
+        <property name="margin-top">2</property>
+        <property name="margin-bottom">2</property>
+        <property name="margin-start">3</property>
+        <property name="margin-end">3</property>
+        <child>
+          <object class="GtkCenterBox">
+            <property name="start-widget">
+              <object class="GrawjiRatingBadges" id="rating"/>
+            </property>
+            <property name="center-widget">
+              <object class="GtkLabel" id="camera_label">
+                <property name="halign">fill</property>
+                <property name="hexpand">true</property>
+                <property name="ellipsize">end</property>
+                <property name="max-width-chars">8</property>
+                <style>
+                  <class name="caption"/>
+                  <class name="dim-label"/>
+                </style>
+              </object>
+            </property>
+            <property name="end-widget">
+              <object class="GrawjiExportBadge" id="export"/>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkPicture" id="picture">
+            <property name="content-fit">contain</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkCenterBox">
+            <property name="center-widget">
+              <object class="GtkLabel" id="name_label">
+                <property name="halign">fill</property>
+                <property name="hexpand">true</property>
+                <property name="ellipsize">end</property>
+                <property name="max-width-chars">8</property>
+                <style>
+                  <class name="caption"/>
+                  <class name="dim-label"/>
+                </style>
+              </object>
+            </property>
+            <property name="end-widget">
+              <object class="GrawjiDetailBadges" id="details"/>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkGestureClick" id="primary_click">
+        <property name="button">1</property>
+        <property name="propagation-phase">capture</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkGestureClick" id="menu_click">
+        <property name="button">3</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkDragSource" id="drag_source">
+        <property name="actions">copy|move</property>
+        <property name="propagation-phase">capture</property>
+      </object>
+    </child>
+  </template>
+</interface>
