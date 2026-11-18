@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/p5k369/grawji/compare/v0.8.2...v0.9.0) (2026-11-18)
+
+
+### Features
+
+* **recipes:** rework the recipe manager around a selection ([#210](https://github.com/p5k369/grawji/issues/210)) ([aab087e](https://github.com/p5k369/grawji/commit/aab087e5972c48c2f293d75d80304d1c29bf7f8a))
+
 ## [0.8.2](https://github.com/p5k369/grawji/compare/v0.8.1...v0.8.2) (2026-11-04)
 
 
