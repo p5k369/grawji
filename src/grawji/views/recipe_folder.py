@@ -36,8 +36,14 @@ class RecipeFolder(Gtk.Box):
     chevron = Gtk.Template.Child()
     title_label = Gtk.Template.Child()
     count_label = Gtk.Template.Child()
-    suffix_bin = Gtk.Template.Child()
+    actions = Gtk.Template.Child()
+    up_button = Gtk.Template.Child()
+    down_button = Gtk.Template.Child()
+    menu_popover = Gtk.Template.Child()
+    rename_button = Gtk.Template.Child()
+    delete_button = Gtk.Template.Child()
     rows = Gtk.Template.Child()
+    drop_target = Gtk.Template.Child()
 
     def __init__(
         self,
@@ -76,9 +82,41 @@ class RecipeFolder(Gtk.Box):
         self._count += 1
         self._update()
 
-    def set_suffix(self, widget: Gtk.Widget) -> None:
-        """Put the folder's buttons at the end of the header."""
-        self.suffix_bin.set_child(widget)
+    def enable_actions(
+        self,
+        *,
+        can_move_up: bool,
+        can_move_down: bool,
+        on_move: Callable[[bool], None],
+        on_rename: Callable[[], None],
+        on_delete: Callable[[], None],
+    ) -> None:
+        """Offer to reorder, rename and delete the folder.
+
+        Args:
+            can_move_up: Whether a folder sits above this one.
+            can_move_down: Whether a folder sits below this one.
+            on_move: Called with True to move up, False to move down.
+            on_rename: Called to rename the folder.
+            on_delete: Called to delete the folder.
+        """
+        self.actions.set_visible(True)
+        self.up_button.set_sensitive(can_move_up)
+        self.down_button.set_sensitive(can_move_down)
+        self.up_button.connect("clicked", lambda _b: on_move(True))
+        self.down_button.connect("clicked", lambda _b: on_move(False))
+        for button, handler in (
+            (self.rename_button, on_rename),
+            (self.delete_button, on_delete),
+        ):
+            button.connect("clicked", self._on_menu_clicked, handler)
+
+    def _on_menu_clicked(
+        self, _button: Any, handler: Callable[[], None]
+    ) -> None:
+        """Close the folder menu, then act."""
+        self.menu_popover.popdown()
+        handler()
 
     def set_collapsed(self, collapsed: bool) -> None:
         """Fold the rows away."""

@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 import gi
@@ -19,7 +18,6 @@ from gi.repository import (
     GLib,
     Graphene,
     Gtk,
-    Pango,
     PangoCairo,
 )
 
@@ -29,21 +27,13 @@ from grawji.mainloop import Dispatch
 from grawji.marks import Label
 from grawji.pairs import is_companion_name
 from grawji.views import file_menu
-from grawji.views.card_badges import (
-    DetailBadges,
-    ExportBadge,
-    RatingBadges,
-    style_rejected,
-)
+from grawji.views.film_card import SLOT_RATIO, FilmCard
 from grawji.views.filter_popover import FilterPopover
 from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
 _GLIDE_AHEAD_BOOST = 1.18
-# Every card gets the same 4:3 slot with the frame centred in
-# it whole. Uniform slots keep the list's size arithmetic exact.
-_SLOT_RATIO = 4 / 3
 _GLIDE_PX_PER_S_DEFAULT = 600
 
 
@@ -143,9 +133,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._thumb_height = thumb_height
         self._scan_id = 0
         self._paths: list[str] = []
-        # The widgets of every bound tile, by its card.
-        self._cards: dict[Gtk.Widget, dict[str, Any]] = {}
-        self._card_path: dict[Gtk.Widget, str] = {}
+        self._card_path: dict[FilmCard, str] = {}
         self._current = -1
         self._selected: set[str] = set()
         self._anchor: str | None = None
@@ -593,85 +581,26 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _on_setup(self, _factory: Any, item: Gtk.ListItem) -> None:
         """Build one reusable card."""
-        picture = Gtk.Picture()
-        picture.set_size_request(
-            int(self._thumb_height * _SLOT_RATIO), self._thumb_height
-        )
-        picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-
-        def caption(text: str) -> Gtk.Label:
-            label = Gtk.Label(label=text, halign=Gtk.Align.FILL)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            # Keep the label's natural width small so the card's width is
-            # driven by the thumbnail, not by a long filename.
-            label.set_max_width_chars(8)
-            label.set_hexpand(True)
-            label.add_css_class("caption")
-            label.add_css_class("dim-label")
-            return label
-
-        camera_label = caption("")
-        name_label = caption("")
-        rating = RatingBadges()
-        export = ExportBadge()
-        details = DetailBadges()
-        top = Gtk.CenterBox(
-            start_widget=rating, center_widget=camera_label, end_widget=export
-        )
-        bottom = Gtk.CenterBox(center_widget=name_label, end_widget=details)
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        card.set_margin_top(2)
-        card.set_margin_bottom(2)
-        card.set_margin_start(3)
-        card.set_margin_end(3)
-        card.append(top)
-        card.append(picture)
-        card.append(bottom)
-
-        button = Gtk.Box()
-        button.append(card)
-        button.add_css_class("card")
-        button.add_css_class("thumb")
-        modifier_click = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY)
-        modifier_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        modifier_click.connect("pressed", self._on_tile_pressed, button)
-        button.add_controller(modifier_click)
+        card = FilmCard(self._thumb_height)
+        card.primary_click.connect("pressed", self._on_tile_pressed, card)
         if self._on_file_action is not None:
-            menu_click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-            menu_click.connect("pressed", self._on_tile_menu, button)
-            button.add_controller(menu_click)
-            drag = Gtk.DragSource(
-                actions=Gdk.DragAction.MOVE | Gdk.DragAction.COPY
-            )
-            drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            drag.connect("prepare", self._on_tile_drag_prepare, button)
-            drag.connect("drag-begin", self._on_tile_drag_begin, button)
-            button.add_controller(drag)
-        self._cards[button] = {
-            "picture": picture,
-            "camera": camera_label,
-            "name": name_label,
-            "rating": rating,
-            "export": export,
-            "details": details,
-        }
-        item.set_child(button)
+            card.menu_click.connect("pressed", self._on_tile_menu, card)
+            drag = card.drag_source
+            drag.connect("prepare", self._on_tile_drag_prepare, card)
+            drag.connect("drag-begin", self._on_tile_drag_begin, card)
+        item.set_child(card)
 
     def _on_bind(self, _factory: Any, item: Gtk.ListItem) -> None:
         """Fill a card with one entry."""
-        button = item.get_child()
+        card = item.get_child()
         entry_item = item.get_item()
-        if button is None or entry_item is None:
+        if card is None or entry_item is None:
             return
         entry = entry_item.entry
-        parts = self._cards[button]
-        self._card_path[button] = entry.path
-        parts["name"].set_text(Path(entry.path).stem)
-        parts["camera"].set_text(entry.model)
-        self._show_entry_badges(button, entry)
-        button.set_tooltip_text(Path(entry.path).name)
-        self._style_card(button, entry.path)
-        self._tiles.want(button, parts["picture"], entry.path)
+        self._card_path[card] = entry.path
+        card.show_entry(entry)
+        self._style_card(card, entry.path)
+        self._tiles.want(card, card.picture, entry.path)
 
     def _on_unbind(self, _factory: Any, item: Gtk.ListItem) -> None:
         """Let go of a recycled card."""
@@ -712,20 +641,9 @@ class FilmStrip(Gtk.ScrolledWindow):
         if reason in ("entry", "marks") and path is not None:
             # A frame's metadata can bring the camera's rating along.
             entry = self._model.entry_for(path)
-            for button, shown in self._card_path.items():
+            for card, shown in self._card_path.items():
                 if shown == path and entry is not None:
-                    self._cards[button]["camera"].set_text(entry.model)
-                    self._show_entry_badges(button, entry)
-
-    def _show_entry_badges(
-        self, button: Gtk.Widget, entry: catalog.Entry
-    ) -> None:
-        """Draw a card's marks and edit badges from its entry."""
-        parts = self._cards[button]
-        parts["rating"].show_entry(entry)
-        parts["export"].show_entry(entry)
-        parts["details"].show_entry(entry)
-        style_rejected(button, entry)
+                    card.show_marks(entry)
 
     def _path_of(self, button: Gtk.Widget) -> str | None:
         """Which frame a card currently shows."""
@@ -1146,7 +1064,7 @@ class FilmStrip(Gtk.ScrolledWindow):
 
     def _card_width(self) -> float:
         """How far one step moves."""
-        return self._thumb_height * _SLOT_RATIO + 6  # + list spacing
+        return self._thumb_height * SLOT_RATIO + 6  # + list spacing
 
     def select_path(self, path: str, *, notify: bool = True) -> bool:
         """Select the thumbnail for path."""

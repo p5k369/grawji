@@ -46,8 +46,73 @@
           </object>
         </child>
         <child>
-          <object class="AdwBin" id="suffix_bin">
+          <object class="GtkBox" id="actions">
             <property name="valign">center</property>
+            <property name="visible">false</property>
+            <child>
+              <object class="GtkButton" id="up_button">
+                <property name="icon-name">go-up-symbolic</property>
+                <property name="tooltip-text">Move the folder up</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="down_button">
+                <property name="icon-name">go-down-symbolic</property>
+                <property name="tooltip-text">Move the folder down</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkMenuButton" id="menu_button">
+                <property name="icon-name">view-more-symbolic</property>
+                <property name="tooltip-text">Folder actions</property>
+                <style>
+                  <class name="flat"/>
+                </style>
+                <property name="popover">
+                  <object class="GtkPopover" id="menu_popover">
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">2</property>
+                        <child>
+                          <object class="GtkButton" id="rename_button">
+                            <style>
+                              <class name="flat"/>
+                            </style>
+                            <property name="child">
+                              <object class="GtkLabel">
+                                <property name="label">Rename Folder…</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="delete_button">
+                            <style>
+                              <class name="flat"/>
+                              <class name="destructive-action"/>
+                            </style>
+                            <property name="child">
+                              <object class="GtkLabel">
+                                <property name="label">Delete Folder</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </property>
+              </object>
+            </child>
           </object>
         </child>
       </object>
@@ -58,6 +123,12 @@
         <style>
           <class name="boxed-list"/>
         </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkDropTarget" id="drop_target">
+        <property name="actions">move</property>
+        <property name="formats">gchararray</property>
       </object>
     </child>
   </template>

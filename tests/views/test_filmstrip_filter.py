@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -234,12 +235,12 @@ def test_a_saved_crop_lights_the_badge_on_the_card(
     strip = window._filmstrip
     target = strip.paths[0]
     card = next(b for b, path in strip._card_path.items() if path == target)
-    assert not strip._cards[card]["details"].crop_icon.get_visible()
+    assert not card.details.crop_icon.get_visible()
     sidecar_path(target).write_text(
         json.dumps({"crop": {"angle": 1.0, "rect": [0, 0, 1, 1]}})
     )
     strip.refresh_badges(target)
-    assert strip._cards[card]["details"].crop_icon.get_visible()
+    assert card.details.crop_icon.get_visible()
 
 
 def test_a_stale_glide_cannot_fight_the_next_scroll(
@@ -320,7 +321,6 @@ def test_the_current_card_is_marked_and_the_css_can_reach_it(
     gi.require_version("Gtk", "4.0")
     from gi.repository import Gtk
 
-    from grawji.views.window import _CANVAS_CSS
     from tests.gui_support import pump
 
     holder = Gtk.Window()
@@ -339,8 +339,13 @@ def test_the_current_card_is_marked_and_the_css_can_reach_it(
         if card.has_css_class("thumb-selected")
     ]
     assert [strip._card_path[card] for card in marked] == [strip.paths[1]]
-    assert "button.thumb" not in _CANVAS_CSS
-    assert ".thumb.thumb-selected" in _CANVAS_CSS
+    css = (
+        resources.files("grawji")
+        .joinpath("ui", "style.css")
+        .read_text(encoding="utf-8")
+    )
+    assert "button.thumb" not in css
+    assert ".thumb.thumb-selected" in css
 
 
 def test_selecting_a_far_frame_brings_the_strip_to_it(

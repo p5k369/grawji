@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiRecipeRow" parent="AdwActionRow">
+    <property name="use-markup">false</property>
+    <property name="title-lines">1</property>
+    <property name="subtitle-lines">1</property>
+    <style>
+      <class name="recipe-row"/>
+    </style>
+    <child type="prefix">
+      <object class="GrawjiRecipeThumb" id="thumb">
+        <property name="valign">center</property>
+        <property name="tile-width">54</property>
+        <property name="tile-height">36</property>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkLabel" id="baseline_chip">
+        <property name="label">baseline</property>
+        <property name="tooltip-text">The split view compares against this recipe</property>
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="caption"/>
+          <class name="accent"/>
+        </style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkLabel" id="fit_chip">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="caption"/>
+        </style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkLabel" id="duplicate_chip">
+        <property name="label">duplicate</property>
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="caption"/>
+          <class name="dim-label"/>
+        </style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkLabel" id="hotkey_chip">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="caption"/>
+          <class name="accent"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkGestureClick" id="click"/>
+    </child>
+    <child>
+      <object class="GtkGestureClick" id="menu_click">
+        <property name="button">3</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkDragSource" id="drag_source">
+        <property name="actions">move</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkDropTarget" id="drop_target">
+        <property name="actions">move</property>
+        <property name="formats">gchararray</property>
+      </object>
+    </child>
+  </template>
+</interface>
