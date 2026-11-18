@@ -581,3 +581,70 @@ def test_delete_goes_straight_to_the_host(tmp_path: Any) -> None:
     dialog.show_toast("Deleted.", undo=lambda: undone.append(True))
     dialog._toast.emit("button-clicked")
     assert undone == [True]
+
+
+def _folded(tmp_path: Any) -> Any:
+    """A dialog whose Acros recipe sits in a folder of its own."""
+    dialog = _dialog(tmp_path, model="X-E5")
+    dialog._library.move("Acros look", "Mono")
+    dialog.refresh()
+    return dialog
+
+
+def _group(dialog: Any, folder: str) -> Any:
+    """The list section of a folder."""
+    return next(g for g in dialog._groups if g.folder == folder)
+
+
+def test_folding_a_folder_hides_and_deselects_its_recipes(
+    tmp_path: Any,
+) -> None:
+    """A folded folder shows no rows and holds no selection."""
+    dialog = _folded(tmp_path)
+    dialog.select_names(["Velvia look", "Acros look"])
+    group = _group(dialog, "Mono")
+    group.toggle_button.emit("clicked")
+    assert not group.rows.get_visible()
+    assert group.count_label.get_label() == "1"
+    assert dialog.selected == ["Velvia look"]
+    assert dialog._library.is_collapsed("Mono")
+    dialog.refresh()
+    assert not _group(dialog, "Mono").rows.get_visible()
+
+
+def test_the_keyboard_skips_a_folded_folder(tmp_path: Any) -> None:
+    """Arrows and Ctrl+A only reach the recipes on show."""
+    dialog = _folded(tmp_path)
+    _group(dialog, "Mono").toggle_button.emit("clicked")
+    dialog.get_focus = lambda: dialog._rows["Velvia look"]
+    dialog.select("Velvia look")
+    assert dialog._on_list_key(None, Gdk.KEY_Down, 0, Gdk.ModifierType(0))
+    assert dialog.selected == ["Velvia look"]
+    ctrl = Gdk.ModifierType.CONTROL_MASK
+    assert dialog._on_list_key(None, Gdk.KEY_a, 0, ctrl)
+    assert dialog.selected == ["Velvia look"]
+
+
+def test_a_search_opens_a_folded_folder(tmp_path: Any) -> None:
+    """Matches show whatever the fold, which returns after the search."""
+    dialog = _folded(tmp_path)
+    group = _group(dialog, "Mono")
+    group.toggle_button.emit("clicked")
+    dialog.search_entry.set_text("acros")
+    dialog._apply_search()
+    assert group.rows.get_visible()
+    group.toggle_button.emit("clicked")
+    assert dialog._library.is_collapsed("Mono")
+    dialog.search_entry.set_text("")
+    dialog._apply_search()
+    assert not group.rows.get_visible()
+
+
+def test_selecting_a_recipe_opens_its_folder(tmp_path: Any) -> None:
+    """A recipe selected from outside the list is never out of sight."""
+    dialog = _folded(tmp_path)
+    group = _group(dialog, "Mono")
+    group.toggle_button.emit("clicked")
+    dialog.select_names(["Acros look"])
+    assert group.rows.get_visible()
+    assert not dialog._library.is_collapsed("Mono")

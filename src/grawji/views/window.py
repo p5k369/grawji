@@ -137,6 +137,7 @@ row.recipe-row:drop(active) {
 row .on-hover { opacity: 0; }
 row:hover .on-hover, row .on-hover:focus-visible { opacity: 1; }
 button.recipe-comment { padding: 8px 10px; font-weight: normal; }
+button.recipe-folder-toggle { padding: 4px 8px; margin-left: -8px; }
 .camera-state image { opacity: 0.4; }
 .camera-state.camera-connected image {
     color: @accent_color;

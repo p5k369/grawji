@@ -20,6 +20,7 @@ from grawji.recipe_text import recipe_summary
 from grawji.recipes import HOTKEYS, UNGROUPED, RecipeLibrary, recipe_matches
 from grawji.views.camera_pane import CameraPane, CarrierHooks
 from grawji.views.recipe_details import DetailActions, RecipeDetails, Shown
+from grawji.views.recipe_folder import RecipeFolder
 from grawji.views.recipe_thumb import RecipeThumb, thumb_texture
 
 _UI = (
@@ -152,10 +153,8 @@ class RecipeManagerDialog(Adw.Dialog):
         self._caps = host.get_capabilities() if host.get_capabilities else None
         self._dragged: list[str] = []
         self._cursor: str | None = None
-        self._groups: list[Adw.PreferencesGroup] = []
-        self._search_rows: list[
-            tuple[Adw.PreferencesGroup, Adw.ActionRow, str]
-        ] = []
+        self._groups: list[RecipeFolder] = []
+        self._search_rows: list[tuple[RecipeFolder, Adw.ActionRow, str]] = []
         self._rows: dict[str, Adw.ActionRow] = {}
         self._order: list[str] = []
         self._selected: list[str] = []
@@ -246,9 +245,14 @@ class RecipeManagerDialog(Adw.Dialog):
 
     def _add_group(self, folder: str, title: str, names: list[str]) -> None:
         """Add a titled folder section holding the given recipe rows."""
-        group = Adw.PreferencesGroup(title=GLib.markup_escape_text(title))
+        group = RecipeFolder(
+            folder,
+            title,
+            collapsed=self._library.is_collapsed(folder),
+            on_toggled=self._on_folder_toggled,
+        )
         if folder != UNGROUPED:
-            group.set_header_suffix(self._folder_header(folder))
+            group.set_suffix(self._folder_header(folder))
         for name in names:
             row = self._recipe_row(name)
             group.add(row)
@@ -262,6 +266,25 @@ class RecipeManagerDialog(Adw.Dialog):
         self.content.append(group)
         self._groups.append(group)
 
+    def _on_folder_toggled(self, folder: str, collapsed: bool) -> None:
+        """Remember the fold, and let go of the recipes it hides."""
+        self._library.set_collapsed(folder, collapsed)
+        if collapsed:
+            hidden = set(self._library.names_in(folder))
+            self.select_names([n for n in self._selected if n not in hidden])
+
+    def _shown(self) -> list[str]:
+        """The recipes on show, in list order."""
+        hidden: set[str] = set()
+        for group in self._groups:
+            if not group.is_open:
+                hidden.update(self._library.names_in(group.folder))
+        return [
+            name
+            for name in self._order
+            if name not in hidden and self._rows[name].get_visible()
+        ]
+
     def _search_text(self, name: str) -> str:
         """The text a recipe is searched by."""
         recipe = self._library.get(name)
@@ -271,7 +294,8 @@ class RecipeManagerDialog(Adw.Dialog):
     def _apply_search(self, *_args: object) -> None:
         """Show only recipes and folders matching the search entry."""
         query = self.search_entry.get_text()
-        visible_in: dict[Adw.PreferencesGroup, bool] = dict.fromkeys(
+        searching = bool(query.strip())
+        visible_in: dict[RecipeFolder, bool] = dict.fromkeys(
             self._groups, False
         )
         for group, row, text in self._search_rows:
@@ -279,9 +303,10 @@ class RecipeManagerDialog(Adw.Dialog):
             row.set_visible(match)
             visible_in[group] = visible_in[group] or match
         for group, has_match in visible_in.items():
-            group.set_visible(has_match or not query.strip())
+            group.set_visible(has_match or not searching)
+            group.force_open(searching)
         if self._library.names:
-            found = any(visible_in.values()) or not query.strip()
+            found = any(visible_in.values()) or not searching
             self.stack.set_visible_child_name("list" if found else "nomatch")
 
     def _recipe_row(self, name: str) -> Adw.ActionRow:
@@ -432,7 +457,7 @@ class RecipeManagerDialog(Adw.Dialog):
         """Drive the selection from the keyboard while a recipe has focus."""
         if self.get_focus() not in self._rows.values():
             return False
-        shown = [n for n in self._order if self._rows[n].get_visible()]
+        shown = self._shown()
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         if keyval == Gdk.KEY_a and ctrl:
             self.select_names(shown)
@@ -463,7 +488,7 @@ class RecipeManagerDialog(Adw.Dialog):
         self, name: str, *, toggle: bool = False, extend: bool = False
     ) -> None:
         """Select a recipe the way a click with Ctrl or Shift does."""
-        order = self._order
+        order = self._shown()
         self._cursor = name
         if extend and self._anchor in order and name in order:
             start, end = sorted((order.index(self._anchor), order.index(name)))
@@ -481,6 +506,11 @@ class RecipeManagerDialog(Adw.Dialog):
     def select_names(self, names: list[str]) -> None:
         """Make exactly these recipes the selection."""
         self._selected = [n for n in self._order if n in set(names)]
+        folders = {self._library.folder_of(n) for n in self._selected}
+        for group in self._groups:
+            if group.folder in folders and not group.is_open:
+                group.set_collapsed(False)
+                self._library.set_collapsed(group.folder, False)
         for name, row in self._rows.items():
             if name in self._selected:
                 row.add_css_class(_SELECTED_CSS)

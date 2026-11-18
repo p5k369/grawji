@@ -7,6 +7,7 @@
   <ui filename="grawji.ui" sha256="bc22cfc5dd47c3fccbd08eac3bed166ba4d263b91c50a191778972d27007b3cb"/>
   <ui filename="batch_export.ui" sha256="a2179fe58eb83df67efeb1f81836592aadcbb6564009d891ecb6f0c076dfd5b3"/>
   <ui filename="preferences.ui" sha256="6cfecdc8b2f0a37852eb9becd218b5e9ea1e3490afad948283bcb75708b96881"/>
+  <ui filename="recipe_folder.ui" sha256="c41af4b7bf80fcdbc807262022dd4c9c998686225458ab71d947baa8a7fc425a"/>
   <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
   <ui filename="camera_pane.ui" sha256="e08b0bdf9ba9c7c8044d224a66ac7348285c3fa250df88db004e19c62b825ae8"/>
   <ui filename="recipe_manager.ui" sha256="bf046e0b90fdfe452521cc7ceca065da43dab5559c334dff932d622b5a50b2f8"/>

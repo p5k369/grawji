@@ -78,6 +78,7 @@ class RecipeLibrary:
         self._comment_of: dict[str, str] = {}
         self._hotkey_of: dict[str, int] = {}
         self._folders: list[str] = []
+        self._collapsed: set[str] = set()
         self._baseline: str | None = None
         self._load()
 
@@ -341,6 +342,20 @@ class RecipeLibrary:
         self._save()
         return True
 
+    def is_collapsed(self, folder: str) -> bool:
+        """Whether the manager shows a folder folded away."""
+        return folder in self._collapsed
+
+    def set_collapsed(self, folder: str, collapsed: bool) -> None:
+        """Remember a folder as folded away."""
+        if collapsed == (folder in self._collapsed):
+            return
+        if collapsed:
+            self._collapsed.add(folder)
+        else:
+            self._collapsed.discard(folder)
+        self._save()
+
     def create_folder(self, name: str) -> bool:
         """Create an empty folder; False if blank or already present."""
         if not name or name in self._folders:
@@ -357,6 +372,9 @@ class RecipeLibrary:
         for name, folder in self._folder_of.items():
             if folder == old:
                 self._folder_of[name] = new
+        if old in self._collapsed:
+            self._collapsed.discard(old)
+            self._collapsed.add(new)
         self._save()
         return True
 
@@ -365,6 +383,7 @@ class RecipeLibrary:
         if name not in self._folders:
             return False
         self._folders.remove(name)
+        self._collapsed.discard(name)
         for recipe, folder in self._folder_of.items():
             if folder == name:
                 self._folder_of[recipe] = UNGROUPED
@@ -432,6 +451,9 @@ class RecipeLibrary:
         self._folders = [
             f for f in data.get("folders", []) if isinstance(f, str)
         ]
+        self._collapsed = {
+            f for f in data.get("collapsed", []) if isinstance(f, str)
+        }
         baseline = data.get("baseline")
         self._baseline = baseline if isinstance(baseline, str) else None
 
@@ -439,6 +461,7 @@ class RecipeLibrary:
         """Make folders self-consistent after loading."""
         for folder in self._folder_of.values():
             self._ensure_folder(folder)
+        self._collapsed &= {UNGROUPED, *self._folders}
         if self._baseline not in self._recipes:
             self._baseline = None
 
@@ -464,6 +487,7 @@ class RecipeLibrary:
             "version": 2,
             "baseline": self._baseline,
             "folders": self._folders,
+            "collapsed": sorted(self._collapsed),
             "recipes": encoded,
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)

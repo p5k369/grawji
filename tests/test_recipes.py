@@ -381,3 +381,19 @@ def test_restore_leaves_what_was_given_away(tmp_path) -> None:
     assert library.restore(removed) == ["a"]
     assert library.hotkey_of("a") is None
     assert library.get("b") == Recipe(film_simulation="Provia")
+
+
+def test_library_remembers_folded_folders(tmp_path):
+    """A folded folder stays folded, through a rename and a reload."""
+    library = _library(tmp_path)
+    library.move("Punchy", "Film")
+    library.set_collapsed("Film", True)
+    assert library.is_collapsed("Film")
+    assert library.rename_folder("Film", "Bold") is True
+    assert library.is_collapsed("Bold")
+    assert not library.is_collapsed("Film")
+    again = RecipeLibrary(tmp_path / "recipes.json")
+    assert again.is_collapsed("Bold")
+    again.delete_folder("Bold")
+    assert not again.is_collapsed("Bold")
+    assert not RecipeLibrary(tmp_path / "recipes.json").is_collapsed("Bold")
