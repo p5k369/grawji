@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +22,12 @@ from grawji.camera.fp_xml import parse_fp, serialize_fp
 from grawji.imaging import imagemeta
 from grawji.photo_recipe import PhotoRecipe, recipe_from_tags
 from grawji.recipe import Recipe
+from grawji.recipe_import import ImportReport
 from grawji.recipe_text import format_recipe_text, parse_recipe_text
-from grawji.recipes import UNGROUPED, RecipeLibrary
+from grawji.recipes import UNGROUPED, RecipeLibrary, Removed
 from grawji.settings import FROM_IMAGE_LABEL
 from grawji.views import dialogs
+from grawji.views.recipe_bulk import RecipeBulk
 from grawji.views.recipe_manager import RecipeManagerDialog
 from grawji.views.recipe_panel import RecipePanel
 
@@ -43,6 +46,7 @@ class RecipeLibraryController:
         get_iopcode: Callable[[], int | None],
         on_baseline_changed: Callable[[], None] = lambda: None,
         on_closed: Callable[[], None] = lambda: None,
+        on_apply_saved: Callable[[str], None] | None = None,
         get_capabilities: Callable[[], Any] | None = None,
         get_model: Callable[[], str | None] | None = None,
         load_bank_names: (
@@ -71,6 +75,8 @@ class RecipeLibraryController:
                 or cleared, so the window can update the compare state.
             on_closed: Called when the manager dialog is dismissed, so the
                 window can re-open a session the bank pane closed.
+            on_apply_saved: Applies a saved recipe the way the panel's
+                picker does.
             get_capabilities: Returns the connected body's Capabilities for
                 recipe-compatibility badges, or None to disable them.
             get_model: Returns the connected body's model, used to tag a
@@ -94,6 +100,7 @@ class RecipeLibraryController:
         self._get_iopcode = get_iopcode
         self._on_baseline_changed = on_baseline_changed
         self._on_closed = on_closed
+        self._on_apply_saved = on_apply_saved
         self.get_capabilities = get_capabilities
         self.get_model = get_model
         self.load_bank_names = load_bank_names
@@ -104,6 +111,13 @@ class RecipeLibraryController:
         self._run_transfer = run_transfer
         self._render_thumb = render_thumb
         self._manager: RecipeManagerDialog | None = None
+        self._bulk = RecipeBulk(
+            parent=parent,
+            library=library,
+            get_iopcode=get_iopcode,
+            on_imported=self._on_imported,
+            on_message=self._toast,
+        )
         self._refresh()
 
     def manage(self) -> None:
@@ -171,6 +185,13 @@ class RecipeLibraryController:
         known = self._library.get(label) is not None
         default = label if known or self._panel.active_unsaved else ""
         self._prompt_save(self._panel.get_recipe(), default)
+
+    def apply_saved(self, name: str) -> None:
+        """Apply a saved recipe as the user's choice for this image."""
+        if self._on_apply_saved is not None:
+            self._on_apply_saved(name)
+        else:
+            self.apply(name)
 
     def apply(self, name: str) -> None:
         """Apply a saved recipe to the controls and re-render."""
@@ -331,11 +352,77 @@ class RecipeLibraryController:
         self._manager = None
         self._on_closed()
 
-    def delete_recipe(self, name: str) -> None:
-        """Remove a saved recipe and persist the change."""
-        if self._library.delete(name):
+    def import_files(self, folder: str) -> None:
+        """Pick recipe files and photos and store them in a folder."""
+        self._bulk.import_files(folder)
+
+    def import_folder(self, folder: str) -> None:
+        """Pick a directory and store every recipe below it."""
+        self._bulk.import_folder(folder)
+
+    def import_clipboard(self, folder: str) -> None:
+        """Store the recipe text on the clipboard in a folder."""
+
+        def done(clipboard: Any, result: Any) -> None:
+            try:
+                text = clipboard.read_text_finish(result)
+            except GLib.Error:
+                text = None
+            self._bulk.import_text(text or "", folder)
+
+        self._parent.get_clipboard().read_text_async(None, done)
+
+    def _on_imported(self, report: ImportReport) -> None:
+        """Show what an import added and select it in the manager."""
+        self._refresh()
+        self._toast(report.summary())
+        if self._manager is not None and report.added:
+            self._manager.select_names(report.added)
+
+    def export_recipes(self, names: list[str]) -> None:
+        """Export one recipe to a file, or several into a directory."""
+        if len(names) == 1:
+            self.export_recipe(names[0])
+        elif names:
+            self._bulk.export(names)
+
+    def copy_recipe_text(self, name: str) -> None:
+        """Copy a saved recipe to the clipboard as shareable text."""
+        recipe = self._library.get(name)
+        if recipe is None:
+            return
+        self._parent.get_clipboard().set(format_recipe_text(recipe, name))
+        self._toast(f"Copied “{name}” as text.")
+
+    def delete_recipes(self, names: list[str]) -> None:
+        """Remove saved recipes and persist the change."""
+        removed = self._library.remove(names)
+        if not removed:
+            return
+        self._refresh()
+        if len(removed) == 1:
+            message = f"Deleted recipe “{removed[0].name}”."
+        else:
+            message = f"Deleted {len(removed)} recipes."
+        if self._manager is not None:
+            self._manager.show_toast(
+                message, undo=partial(self._restore, removed)
+            )
+        else:
+            self._on_status(message)
+
+    def _restore(self, removed: list[Removed]) -> None:
+        """Bring deleted recipes back and select them."""
+        restored = self._library.restore(removed)
+        self._refresh()
+        if restored and self._manager is not None:
+            self._manager.select_names(restored)
+
+    def move_recipes(self, names: list[str], folder: str) -> None:
+        """Move recipes into a folder and refresh."""
+        moved = [name for name in names if self._library.move(name, folder)]
+        if moved:
             self._refresh()
-            self._on_status(f"Deleted recipe “{name}”.")
 
     def rename_recipe(self, old: str, new: str) -> None:
         """Rename a saved recipe, keeping its position, and persist."""
@@ -347,14 +434,16 @@ class RecipeLibraryController:
             if renamed is not None:
                 self._panel.set_active(renamed, new)
 
-    def move_recipe(self, name: str, folder: str) -> None:
-        """Move a recipe into a folder and refresh."""
-        if self._library.move(name, folder):
-            self._refresh()
-
-    def place_recipe(self, name: str, folder: str, before: str | None) -> None:
-        """Place a dragged recipe into folder before another, and refresh."""
-        if self._library.place_recipe(name, folder, before):
+    def place_recipes(
+        self, names: list[str], folder: str, before: str | None
+    ) -> None:
+        """Place dragged recipes into folder before another, and refresh."""
+        placed = [
+            name
+            for name in names
+            if self._library.place_recipe(name, folder, before)
+        ]
+        if placed:
             self._refresh()
 
     def reorder_folder(self, folder: str, up: bool) -> None:
@@ -404,6 +493,38 @@ class RecipeLibraryController:
                 self._toast("Open an image to generate a recipe picture.")
 
         self._render_thumb(recipe, done)
+
+    def render_missing_thumbs(self, names: list[str]) -> None:
+        """Render a picture for each named recipe."""
+        if self._render_thumb is None:
+            return
+        self._render_next_thumb(list(names), 0, len(names))
+
+    def _render_next_thumb(
+        self, pending: list[str], made: int, total: int
+    ) -> None:
+        """Render the next pending picture."""
+        render = self._render_thumb
+        while pending and self._library.get(pending[0]) is None:
+            pending.pop(0)
+        if not pending or render is None or self._manager is None:
+            self._refresh()
+            self._toast(f"Made {made} recipe pictures.")
+            return
+        name = pending.pop(0)
+        recipe = self._library.get(name)
+        self._toast(f"Making picture {made + 1} of {total}…")
+
+        def done(jpeg: bytes | None) -> None:
+            if jpeg is None:
+                self._refresh()
+                self._toast(f"Stopped after {made} recipe pictures.")
+                return
+            stored = self._library.set_thumb(name, jpeg)
+            self._render_next_thumb(pending, made + int(stored), total)
+
+        if recipe is not None:
+            render(recipe, done)
 
     def _toast(self, message: str) -> None:
         """Report to the manager toast if open, else the status line."""

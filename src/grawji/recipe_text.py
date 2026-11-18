@@ -178,6 +178,22 @@ def film_sim_label(name: str) -> str:
     return _FILM_SIM_LABELS.get(name, name)
 
 
+def recipe_summary(recipe: Recipe) -> str:
+    """A recipe in one line: its film simulation and what stands out."""
+    parts = [film_sim_label(recipe.film_simulation)]
+    if recipe.dynamic_range in ("DR200", "DR400"):
+        parts.append(recipe.dynamic_range)
+    if recipe.grain != "Off":
+        parts.append(f"Grain {recipe.grain}")
+    if recipe.color_chrome != "Off":
+        parts.append(f"Chrome {recipe.color_chrome}")
+    if recipe.white_balance == "Temperature":
+        parts.append(f"{recipe.color_temp}K")
+    elif recipe.white_balance not in ("Auto", "AsShot"):
+        parts.append(recipe.white_balance)
+    return " · ".join(parts)
+
+
 def _key(text: str) -> str:
     """Normalize a label or value word: lowercase alphanumerics only."""
     joined = "".join(c for c in text.lower() if c.isalnum())

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,31 @@ def recipe_matches(query: str, *fields: str) -> bool:
     return all(term in haystack for term in query.casefold().split())
 
 
+@dataclass(frozen=True)
+class Removed:
+    """A deleted recipe with everything needed to bring it back.
+
+    Attributes:
+        name: The name it was stored under.
+        recipe: The recipe.
+        index: Its position in the display order.
+        folder: The folder it was in.
+        thumb: Its picture as stored, or None.
+        comment: Its comment.
+        hotkey: Its number key, or None.
+        baseline: Whether it was the compare baseline.
+    """
+
+    name: str
+    recipe: Recipe
+    index: int
+    folder: str
+    thumb: str | None
+    comment: str
+    hotkey: int | None
+    baseline: bool
+
+
 class RecipeLibrary:
     """Saved recipes plus their folders and the compare baseline."""
 
@@ -52,6 +78,7 @@ class RecipeLibrary:
         self._comment_of: dict[str, str] = {}
         self._hotkey_of: dict[str, int] = {}
         self._folders: list[str] = []
+        self._collapsed: set[str] = set()
         self._baseline: str | None = None
         self._load()
 
@@ -179,6 +206,62 @@ class RecipeLibrary:
         self._save()
         return True
 
+    def remove(self, names: list[str]) -> list[Removed]:
+        """Delete the named recipes and return what restore needs."""
+        order = list(self._recipes)
+        removed = [
+            Removed(
+                name=name,
+                recipe=self._recipes[name],
+                index=order.index(name),
+                folder=self._folder_of.get(name, UNGROUPED),
+                thumb=self._thumb_of.get(name),
+                comment=self._comment_of.get(name, ""),
+                hotkey=self._hotkey_of.get(name),
+                baseline=self._baseline == name,
+            )
+            for name in dict.fromkeys(names)
+            if name in self._recipes
+        ]
+        for entry in removed:
+            del self._recipes[entry.name]
+            self._folder_of.pop(entry.name, None)
+            self._thumb_of.pop(entry.name, None)
+            self._comment_of.pop(entry.name, None)
+            self._hotkey_of.pop(entry.name, None)
+            if entry.baseline:
+                self._baseline = None
+        if removed:
+            self._save()
+        return removed
+
+    def restore(self, removed: list[Removed]) -> list[str]:
+        """Bring deleted recipes back to where they were."""
+        order = list(self._recipes)
+        recipes = dict(self._recipes)
+        restored: list[str] = []
+        for entry in sorted(removed, key=lambda entry: entry.index):
+            if entry.name in recipes:
+                continue
+            order.insert(min(entry.index, len(order)), entry.name)
+            recipes[entry.name] = entry.recipe
+            self._folder_of[entry.name] = entry.folder
+            self._ensure_folder(entry.folder)
+            if entry.thumb is not None:
+                self._thumb_of[entry.name] = entry.thumb
+            if entry.comment:
+                self._comment_of[entry.name] = entry.comment
+            taken = self._hotkey_of.values()
+            if entry.hotkey is not None and entry.hotkey not in taken:
+                self._hotkey_of[entry.name] = entry.hotkey
+            if entry.baseline and self._baseline is None:
+                self._baseline = entry.name
+            restored.append(entry.name)
+        if restored:
+            self._recipes = {name: recipes[name] for name in order}
+            self._save()
+        return restored
+
     def rename(self, old: str, new: str) -> bool:
         """Rename a recipe, keeping its place and folder, False if invalid.
 
@@ -259,6 +342,20 @@ class RecipeLibrary:
         self._save()
         return True
 
+    def is_collapsed(self, folder: str) -> bool:
+        """Whether the manager shows a folder folded away."""
+        return folder in self._collapsed
+
+    def set_collapsed(self, folder: str, collapsed: bool) -> None:
+        """Remember a folder as folded away."""
+        if collapsed == (folder in self._collapsed):
+            return
+        if collapsed:
+            self._collapsed.add(folder)
+        else:
+            self._collapsed.discard(folder)
+        self._save()
+
     def create_folder(self, name: str) -> bool:
         """Create an empty folder; False if blank or already present."""
         if not name or name in self._folders:
@@ -275,6 +372,9 @@ class RecipeLibrary:
         for name, folder in self._folder_of.items():
             if folder == old:
                 self._folder_of[name] = new
+        if old in self._collapsed:
+            self._collapsed.discard(old)
+            self._collapsed.add(new)
         self._save()
         return True
 
@@ -283,6 +383,7 @@ class RecipeLibrary:
         if name not in self._folders:
             return False
         self._folders.remove(name)
+        self._collapsed.discard(name)
         for recipe, folder in self._folder_of.items():
             if folder == name:
                 self._folder_of[recipe] = UNGROUPED
@@ -350,6 +451,9 @@ class RecipeLibrary:
         self._folders = [
             f for f in data.get("folders", []) if isinstance(f, str)
         ]
+        self._collapsed = {
+            f for f in data.get("collapsed", []) if isinstance(f, str)
+        }
         baseline = data.get("baseline")
         self._baseline = baseline if isinstance(baseline, str) else None
 
@@ -357,6 +461,7 @@ class RecipeLibrary:
         """Make folders self-consistent after loading."""
         for folder in self._folder_of.values():
             self._ensure_folder(folder)
+        self._collapsed &= {UNGROUPED, *self._folders}
         if self._baseline not in self._recipes:
             self._baseline = None
 
@@ -382,6 +487,7 @@ class RecipeLibrary:
             "version": 2,
             "baseline": self._baseline,
             "folders": self._folders,
+            "collapsed": sorted(self._collapsed),
             "recipes": encoded,
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)

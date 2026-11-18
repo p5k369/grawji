@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from grawji.camera.core import FILM_SIM_CODES
 from grawji.recipe import Recipe
-from grawji.recipe_text import format_recipe_text, parse_recipe_text
+from grawji.recipe_text import (
+    format_recipe_text,
+    parse_recipe_text,
+    recipe_summary,
+)
 
 _KODACHROME = """Kodachrome 64
 Film Simulation: Classic Chrome
@@ -529,3 +533,20 @@ def test_format_round_trips_every_film_simulation():
         parsed = parse_recipe_text(format_recipe_text(recipe))
         assert parsed is not None, name
         assert parsed.recipe.film_simulation == name
+
+
+def test_summary_names_the_sim_and_what_stands_out() -> None:
+    """Defaults stay out of the one-line summary."""
+    plain = Recipe(film_simulation="ClassicNeg")
+    assert recipe_summary(plain) == "Classic Neg"
+    rich = Recipe(
+        film_simulation="ClassicChrome",
+        dynamic_range="DR400",
+        grain="Strong",
+        color_chrome="Weak",
+        white_balance="Temperature",
+        color_temp=5500,
+    )
+    assert recipe_summary(rich) == (
+        "Classic Chrome · DR400 · Grain Strong · Chrome Weak · 5500K"
+    )

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="libadwaita" version="1.0"/>
+  <template class="GrawjiBankRow" parent="AdwActionRow">
+    <property name="use-markup">false</property>
+    <property name="title-lines">1</property>
+    <property name="subtitle-lines">1</property>
+    <child type="prefix">
+      <object class="GtkLabel" id="slot_label">
+        <property name="width-chars">3</property>
+        <property name="xalign">0</property>
+        <style>
+          <class name="heading"/>
+        </style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GrawjiRecipeThumb" id="thumb">
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkButton" id="clear_button">
+        <property name="icon-name">edit-undo-symbolic</property>
+        <property name="tooltip-text">Do not write this recipe</property>
+        <property name="valign">center</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="flat"/>
+        </style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkButton" id="edit_button">
+        <property name="icon-name">document-edit-symbolic</property>
+        <property name="tooltip-text">Rename this bank</property>
+        <property name="valign">center</property>
+        <style>
+          <class name="flat"/>
+          <class name="on-hover"/>
+        </style>
+      </object>
+    </child>
+  </template>
+</interface>
