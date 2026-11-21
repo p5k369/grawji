@@ -23,7 +23,7 @@ _PROP_NAMES = {
     preset_recipe.PROP_IMAGE_SIZE: "image size",
     preset_recipe.PROP_IMAGE_QUALITY: "image quality",
     preset_recipe.PROP_DYNAMIC_RANGE: "dynamic range %",
-    preset_recipe.PROP_UNKNOWN_D191: "unknown d191",
+    preset_recipe.PROP_D_RANGE_PRIORITY: "d-range priority",
     preset_recipe.PROP_FILM_SIMULATION: "film simulation",
     preset_recipe.PROP_MONO_WC: "mono warm-cool x10",
     preset_recipe.PROP_MONO_MG: "mono magenta-green x10",
@@ -41,7 +41,7 @@ _PROP_NAMES = {
     preset_recipe.PROP_SHARPNESS: "sharpness x10",
     preset_recipe.PROP_NOISE_REDUCTION: "noise reduction",
     preset_recipe.PROP_CLARITY: "clarity x10",
-    preset_recipe.PROP_LONG_EXPOSURE_NR: "long exposure NR",
+    preset_recipe.PROP_LENS_MODULATION_OPT: "lens modulation optimizer",
     preset_recipe.PROP_COLOR_SPACE: "color space",
     preset_recipe.PROP_UNKNOWN_D1A5: "unknown d1a5",
 }

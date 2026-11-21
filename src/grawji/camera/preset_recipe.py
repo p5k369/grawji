@@ -28,7 +28,7 @@ PROP_PRESET_NAME = 0xD18D
 PROP_IMAGE_SIZE = 0xD18E
 PROP_IMAGE_QUALITY = 0xD18F
 PROP_DYNAMIC_RANGE = 0xD190
-PROP_UNKNOWN_D191 = 0xD191
+PROP_D_RANGE_PRIORITY = 0xD191
 PROP_FILM_SIMULATION = 0xD192
 PROP_MONO_WC = 0xD193
 PROP_MONO_MG = 0xD194
@@ -46,20 +46,21 @@ PROP_COLOR = 0xD19F
 PROP_SHARPNESS = 0xD1A0
 PROP_NOISE_REDUCTION = 0xD1A1
 PROP_CLARITY = 0xD1A2
-PROP_LONG_EXPOSURE_NR = 0xD1A3
+PROP_LENS_MODULATION_OPT = 0xD1A3
 PROP_COLOR_SPACE = 0xD1A4
 PROP_UNKNOWN_D1A5 = 0xD1A5
 
 # Number of C1..Cn banks a gen5 body exposes over these properties.
 NUM_SLOTS = 7
 
-# Properties whose meaning is unknown or not a recipe field (image size,
-# image quality, long-exposure NR, color space, two unknowns).
+# Properties that are not a recipe field (image size, image quality,
+# D-Range Priority, lens modulation optimizer, color space) and one whose
+# meaning is unknown.
 PASSTHROUGH_DEFAULTS: dict[int, int] = {
     PROP_IMAGE_SIZE: 7,  # L 3:2
     PROP_IMAGE_QUALITY: 4,
-    PROP_UNKNOWN_D191: 0,
-    PROP_LONG_EXPOSURE_NR: 1,  # on
+    PROP_D_RANGE_PRIORITY: 0,
+    PROP_LENS_MODULATION_OPT: 1,  # on
     PROP_COLOR_SPACE: 1,  # sRGB
     PROP_UNKNOWN_D1A5: 7,
 }
@@ -151,7 +152,7 @@ def encode_recipe(
         passthrough(PROP_IMAGE_SIZE),
         passthrough(PROP_IMAGE_QUALITY),
         (PROP_DYNAMIC_RANGE, dr),
-        passthrough(PROP_UNKNOWN_D191),
+        passthrough(PROP_D_RANGE_PRIORITY),
         (PROP_FILM_SIMULATION, _film_sim_code(sim)),
     ]
 
@@ -189,7 +190,7 @@ def encode_recipe(
     )
     props.append((PROP_CLARITY, _x10(recipe.clarity)))
 
-    props.append(passthrough(PROP_LONG_EXPOSURE_NR))
+    props.append(passthrough(PROP_LENS_MODULATION_OPT))
     props.append(passthrough(PROP_COLOR_SPACE))
     props.append(passthrough(PROP_UNKNOWN_D1A5))
     return props
