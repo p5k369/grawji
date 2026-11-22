@@ -21,6 +21,7 @@
 row.recipe-selected {
     background-color: alpha(@accent_bg_color, 0.28);
 }
+.tryout-card { padding: 8px; }
 row.recipe-row > box.header { min-height: 44px; }
 row.recipe-row:drop(active) {
     box-shadow: inset 0 2px 0 0 @accent_color;

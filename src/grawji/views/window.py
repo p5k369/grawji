@@ -301,12 +301,9 @@ class MainWindow(Adw.ApplicationWindow):
                 library=self._recipe_library,
                 exposure=self._exposure,
                 profile=lambda: self._session.profile,
-                is_open=lambda: self._session.is_open,
-                open_path=lambda: self._raf_path,
                 uses_camera_file=lambda: (
                     self._camera_file_of(self._raf_path) is not None
                 ),
-                render_thumb=self._worker.render_thumb,
                 render_if_open=self._render.render_if_open,
                 persist_exposure=self._persist_exposure,
                 set_status=self.preview_view.set_status,
@@ -380,7 +377,6 @@ class MainWindow(Adw.ApplicationWindow):
             ("select-all", self._filmstrip.select_all),
             ("cancel-selection", self._filmstrip.clear_selection),
             ("manage-recipes", self._library.manage),
-            ("try-recipes", self._recipes.try_out),
             ("backup-camera", self._backup.backup),
             ("restore-camera", self._backup.restore),
             ("zoom-in", view.zoom_in),

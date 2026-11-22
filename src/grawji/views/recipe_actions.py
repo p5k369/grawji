@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 import gi
@@ -18,12 +17,9 @@ from gi.repository import Adw, Gdk, Gtk
 
 from grawji.camera.core import recipe_from_profile
 from grawji.image_exposure import ImageExposure
-from grawji.imaging import imagemeta
 from grawji.recipe import Recipe
 from grawji.recipes import RecipeLibrary
 from grawji.settings import FROM_IMAGE, FROM_IMAGE_LABEL, Settings
-from grawji.views import dialogs
-from grawji.views.recipe_grid import RecipeGridDialog
 from grawji.views.recipe_library import RecipeLibraryController
 from grawji.views.recipe_panel import RecipePanel
 
@@ -48,11 +44,8 @@ class RecipeHost:
         library: The saved recipes.
         exposure: The open image's exposure.
         profile: The open image's camera profile.
-        is_open: Whether an image is open on the camera.
-        open_path: The image the window has open.
         uses_camera_file: Whether the open shot is developed from its
             camera file instead of its RAW.
-        render_thumb: Queues a small render of a recipe.
         render_if_open: Renders the preview if an image is open.
         persist_exposure: Stores the image's exposure when it changed.
         set_status: Takes a line for the status bar.
@@ -62,10 +55,7 @@ class RecipeHost:
     library: RecipeLibrary
     exposure: ImageExposure
     profile: Callable[[], bytes | None]
-    is_open: Callable[[], bool]
-    open_path: Callable[[], Path | None]
     uses_camera_file: Callable[[], bool]
-    render_thumb: Callable[..., None]
     render_if_open: Callable[[], None]
     persist_exposure: Callable[[], None]
     set_status: Callable[[str], None]
@@ -161,39 +151,6 @@ class RecipeActions:
             return True
         self.apply(name)
         return True
-
-    def try_out(self) -> None:
-        """Render the open image once per saved recipe."""
-        if not self._host.is_open():
-            self._host.set_status("Open an image first.")
-            return
-        groups = self._host.library.tryout_groups(
-            self._panel.get_recipe().exposure
-        )
-        if not groups:
-            self._host.set_status("No saved recipes to try.")
-            return
-
-        def render(
-            recipe: Recipe,
-            on_done: Callable[[bytes], None],
-            on_error: Callable[[Exception], None],
-        ) -> None:
-            self._host.render_thumb(recipe, on_done=on_done, on_error=on_error)
-
-        path = self._host.open_path()
-        dialog = RecipeGridDialog(
-            groups=groups,
-            render=render,
-            on_pick=self.apply,
-            orientation=imagemeta.exif_orientation(str(path)) if path else 1,
-        )
-        # Re-render on close so the preview matches the panel again
-        dialog.connect("closed", lambda *_a: self._host.render_if_open())
-        dialogs.fit_dialog(
-            dialog, self._parent, width_fraction=0.55, height_fraction=0.85
-        )
-        dialog.present(self._parent)
 
     def _apply_choice(self, name: str) -> None:
         """Apply and remember the recipe chosen in the panel's picker."""

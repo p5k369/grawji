@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -106,20 +106,6 @@ class RecipeLibrary:
             for name in self._recipes
             if self._folder_of.get(name, UNGROUPED) == folder
         ]
-
-    def tryout_groups(
-        self, exposure: float
-    ) -> list[tuple[str, list[tuple[str, str, Recipe]]]]:
-        """Every recipe by folder, set to one exposure, for trying out."""
-        groups: list[tuple[str, list[tuple[str, str, Recipe]]]] = []
-        for folder in (UNGROUPED, *self._folders):
-            members = [
-                (name, name, replace(self._recipes[name], exposure=exposure))
-                for name in self.names_in(folder)
-            ]
-            if members:
-                groups.append((folder or "Recipes", members))
-        return groups
 
     @property
     def baseline(self) -> str | None:
