@@ -48,26 +48,29 @@ PROP_NOISE_REDUCTION = 0xD1A1
 PROP_CLARITY = 0xD1A2
 PROP_LENS_MODULATION_OPT = 0xD1A3
 PROP_COLOR_SPACE = 0xD1A4
-PROP_UNKNOWN_D1A5 = 0xD1A5
+PROP_LIVE_IMAGE_SIZE = 0xD1A5
 
 # Number of C1..Cn banks a gen5 body exposes over these properties.
 NUM_SLOTS = 7
 
 # Properties that are not a recipe field (image size, image quality,
-# D-Range Priority, lens modulation optimizer, color space) and one whose
-# meaning is unknown.
+# lens modulation optimizer, color space).
 PASSTHROUGH_DEFAULTS: dict[int, int] = {
     PROP_IMAGE_SIZE: 7,  # L 3:2
     PROP_IMAGE_QUALITY: 4,
-    PROP_D_RANGE_PRIORITY: 0,
     PROP_LENS_MODULATION_OPT: 1,  # on
     PROP_COLOR_SPACE: 1,  # sRGB
-    PROP_UNKNOWN_D1A5: 7,
+    PROP_LIVE_IMAGE_SIZE: 7,
 }
 
-# The tone/NR reads on some bodies return 0x8000 for a value the slot
-# never stored
+# The tone reads on some bodies return 0x8000 for a value the slot never
+# stored.
 UNSET_SENTINEL = 0x8000
+
+D_RANGE_PRIORITY_OFF = 0
+PRIORITY_LOCKED_PROPS = frozenset(
+    {PROP_DYNAMIC_RANGE, PROP_HIGHLIGHT, PROP_SHADOW}
+)
 
 # Grain Off writes as code 1, but gen5 bodies store an Off code that
 # keeps the grain-size half: the X-E5's factory slots hold 6 (Off after
@@ -151,14 +154,13 @@ def encode_recipe(
     props = [
         passthrough(PROP_IMAGE_SIZE),
         passthrough(PROP_IMAGE_QUALITY),
+        (PROP_D_RANGE_PRIORITY, D_RANGE_PRIORITY_OFF),
         (PROP_DYNAMIC_RANGE, dr),
-        passthrough(PROP_D_RANGE_PRIORITY),
         (PROP_FILM_SIMULATION, _film_sim_code(sim)),
     ]
 
-    if is_mono_toning and recipe.mono_warm_cool:
+    if is_mono_toning:
         props.append((PROP_MONO_WC, _x10(recipe.mono_warm_cool)))
-    if is_mono_toning and recipe.mono_magenta_green:
         props.append((PROP_MONO_MG, _x10(recipe.mono_magenta_green)))
 
     grain = grain_effect_code(
@@ -192,7 +194,7 @@ def encode_recipe(
 
     props.append(passthrough(PROP_LENS_MODULATION_OPT))
     props.append(passthrough(PROP_COLOR_SPACE))
-    props.append(passthrough(PROP_UNKNOWN_D1A5))
+    props.append(passthrough(PROP_LIVE_IMAGE_SIZE))
     return props
 
 
@@ -250,7 +252,6 @@ def readback_matches(prop: int, wrote: int, read: int) -> bool:
         PROP_SHADOW,
         PROP_COLOR,
         PROP_SHARPNESS,
-        PROP_NOISE_REDUCTION,
         PROP_CLARITY,
     )
     return prop in sentinel_props and read == UNSET_SENTINEL

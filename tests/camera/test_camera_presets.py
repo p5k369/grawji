@@ -16,14 +16,19 @@ from grawji.camera.camera_presets import (
     transfer_presets,
 )
 from grawji.camera.preset_recipe import (
+    PRIORITY_LOCKED_PROPS,
     PROP_CLARITY,
     PROP_COLOR,
+    PROP_D_RANGE_PRIORITY,
+    PROP_DYNAMIC_RANGE,
     PROP_FILM_SIMULATION,
     PROP_GRAIN,
+    PROP_HIGHLIGHT,
     PROP_MONO_MG,
     PROP_MONO_WC,
     PROP_PRESET_NAME,
     PROP_PRESET_SLOT,
+    PROP_SHADOW,
     PROP_SMOOTH_SKIN,
     PROP_WB_SHIFT_R,
     PROP_WHITE_BALANCE,
@@ -98,9 +103,16 @@ class FakePresetCamera:
             else list(advertised)
         )
         self.reject_code = reject_code
+        self.priority_interlock = False
 
     def _slot(self):
         return self.slots[self.active - 1]
+
+    def _locked(self, prop):
+        """Whether D-Range Priority keeps the camera from taking prop."""
+        if not self.priority_interlock or prop not in PRIORITY_LOCKED_PROPS:
+            return False
+        return bool(self._slot().props.get(PROP_D_RANGE_PRIORITY))
 
     def send_command(self, code, params=None):
         """Serve DeviceInfo and property reads."""
@@ -131,7 +143,7 @@ class FakePresetCamera:
             text = data[1 : 1 + count * 2].decode("utf-16-le")
             self._slot().name = text.rstrip("\x00")
             return _PTP_OK, []
-        if prop in self.reject:
+        if prop in self.reject or self._locked(prop):
             return self.reject_code, []
         if prop in self.ignore:
             return _PTP_OK, []  # ACK without storing
@@ -229,6 +241,66 @@ def test_rejected_mono_toning_is_dropped_not_fatal():
     assert result.slots == (0,)
     assert "monochromatic color toning" in " ".join(result.dropped[0])
     assert cam.slots[0].props[PROP_FILM_SIMULATION] == 14
+
+
+def test_stale_mono_toning_is_reported_when_zero_is_refused():
+    """A refused zero leaves the bank's old toning, which is worth a note."""
+    cam = FakePresetCamera(reject={PROP_MONO_WC, PROP_MONO_MG})
+    cam.slots[0].props[PROP_MONO_WC] = (-10) & 0xFFFF
+    cam.slots[0].props[PROP_MONO_MG] = 0
+    result = transfer_presets(cam, {0: Recipe(film_simulation="Acros")})
+    assert result.dropped[0] == [
+        "monochromatic color toning (set it on the camera)"
+    ]
+
+
+def test_refused_zero_toning_is_silent_when_the_bank_holds_zero():
+    """The X-E5 refuses every toning write, a matching zero needs no note."""
+    cam = FakePresetCamera(reject={PROP_MONO_WC, PROP_MONO_MG})
+    cam.slots[0].props[PROP_MONO_WC] = 0
+    cam.slots[0].props[PROP_MONO_MG] = 0
+    result = transfer_presets(cam, {0: Recipe(film_simulation="Acros")})
+    assert 0 not in result.dropped
+
+
+def test_priority_is_switched_off_so_the_tones_apply():
+    """A bank with D-Range Priority on takes the recipe after all."""
+    cam = FakePresetCamera()
+    cam.priority_interlock = True
+    cam.slots[0].props[PROP_D_RANGE_PRIORITY] = 1
+    result = transfer_presets(
+        cam, {0: Recipe(dynamic_range="DR200", highlights=1)}
+    )
+    assert 0 not in result.dropped
+    assert cam.slots[0].props[PROP_D_RANGE_PRIORITY] == 0
+    assert cam.slots[0].props[PROP_DYNAMIC_RANGE] == 200
+    assert cam.slots[0].props[PROP_HIGHLIGHT] == 10
+
+
+def test_a_locked_priority_is_a_note_not_a_failure():
+    """When the priority cannot be switched off, the rest still lands."""
+    cam = FakePresetCamera(reject={PROP_D_RANGE_PRIORITY})
+    cam.priority_interlock = True
+    cam.slots[0].props[PROP_D_RANGE_PRIORITY] = 2
+    cam.slots[0].props[PROP_DYNAMIC_RANGE] = 100
+    cam.slots[0].props[PROP_HIGHLIGHT] = 0
+    cam.slots[0].props[PROP_SHADOW] = 0
+    result = transfer_presets(
+        cam, {0: Recipe(film_simulation="Velvia", highlights=2, shadows=1)}
+    )
+    assert len(result.dropped[0]) == 1
+    assert "D-Range Priority is on" in result.dropped[0][0]
+    assert cam.slots[0].props[PROP_FILM_SIMULATION] == 2
+    assert cam.slots[0].props[PROP_HIGHLIGHT] == 0
+
+
+def test_a_refused_priority_that_is_already_off_is_silent():
+    """At base ISO the camera refuses the write of the value it holds."""
+    cam = FakePresetCamera(reject={PROP_D_RANGE_PRIORITY})
+    cam.slots[0].props[PROP_D_RANGE_PRIORITY] = 0
+    result = transfer_presets(cam, {0: Recipe(highlights=1)})
+    assert 0 not in result.dropped
+    assert cam.slots[0].props[PROP_HIGHLIGHT] == 10
 
 
 def test_other_rejections_are_fatal():
