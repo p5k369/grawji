@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/p5k369/grawji/compare/v0.8.2...v0.9.0) (2026-11-22)
+
+
+### Features
+
+* **recipes:** rework the recipe manager around a selection ([#210](https://github.com/p5k369/grawji/issues/210)) ([aab087e](https://github.com/p5k369/grawji/commit/aab087e5972c48c2f293d75d80304d1c29bf7f8a))
+* **recipes:** try the selected recipes on the open image ([#216](https://github.com/p5k369/grawji/issues/216)) ([aa5e5a6](https://github.com/p5k369/grawji/commit/aa5e5a6d912742301bfda393109b51d7ab234c13))
+
+
+### Bug Fixes
+
+* **camera:** transfer into banks with D-Range Priority on ([#214](https://github.com/p5k369/grawji/issues/214)) ([4ea402e](https://github.com/p5k369/grawji/commit/4ea402ecd38683314eea999043a0393fc6956b7c))
+
 ## [0.8.2](https://github.com/p5k369/grawji/compare/v0.8.1...v0.8.2) (2026-11-04)
 
 

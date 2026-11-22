@@ -49,6 +49,16 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.9.0" date="2026-11-22">
+      <description>
+        <p>This release brings a reworked recipe manager and broader camera support.</p>
+        <ul>
+          <li>The recipe manager is now built around a selection, making it easier to work with several recipes at once</li>
+          <li>Try your selected recipes directly on the image you have open</li>
+          <li>Recipes can now be transferred to camera banks when D-Range Priority is turned on</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-11-04">
       <description>
         <p>This release improves the Debian package.</p>
