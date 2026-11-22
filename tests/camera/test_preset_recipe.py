@@ -4,11 +4,13 @@ import pytest
 
 from grawji.camera.backup_recipe import BackupWriteError
 from grawji.camera.preset_recipe import (
+    D_RANGE_PRIORITY_OFF,
     PASSTHROUGH_DEFAULTS,
     PROP_CLARITY,
     PROP_COLOR,
     PROP_COLOR_CHROME,
     PROP_COLOR_CHROME_BLUE,
+    PROP_D_RANGE_PRIORITY,
     PROP_DYNAMIC_RANGE,
     PROP_FILM_SIMULATION,
     PROP_GRAIN,
@@ -122,10 +124,19 @@ def test_mono_sims_swap_color_for_the_toning_axes():
     assert PROP_COLOR not in got
     assert got[PROP_MONO_WC] == 40
     assert got[PROP_MONO_MG] == (-20) & 0xFFFF
-    # A zero axis is omitted: the camera rejects a write of 0.
+    # A zero axis is written too, or the bank keeps its old toning.
     got = _as_dict(encode_recipe(Recipe(film_simulation="Monochrome")))
-    assert PROP_MONO_WC not in got
-    assert PROP_MONO_MG not in got
+    assert got[PROP_MONO_WC] == 0
+    assert got[PROP_MONO_MG] == 0
+
+
+def test_d_range_priority_is_switched_off_before_the_dynamic_range():
+    """The priority locks dynamic range and tones, so it goes off first."""
+    order = [prop for prop, _value in encode_recipe(Recipe())]
+    got = _as_dict(encode_recipe(Recipe(), {PROP_D_RANGE_PRIORITY: 2}))
+    assert got[PROP_D_RANGE_PRIORITY] == D_RANGE_PRIORITY_OFF
+    assert order.index(PROP_D_RANGE_PRIORITY) < order.index(PROP_DYNAMIC_RANGE)
+    assert order.index(PROP_D_RANGE_PRIORITY) < order.index(PROP_HIGHLIGHT)
 
 
 def test_sepia_locks_color_but_takes_no_toning():
@@ -173,12 +184,13 @@ def test_unsupported_fields_reports_exposure_only():
 
 
 def test_readback_matches_accepts_the_storage_quirks():
-    """Grain Off 1->6 and the 0x8000 unset sentinel count as applied."""
+    """Grain Off 1->6 and the 0x8000 tone sentinel count as applied."""
     assert readback_matches(PROP_FILM_SIMULATION, 2, 2)
     assert not readback_matches(PROP_FILM_SIMULATION, 2, 3)
     assert readback_matches(PROP_GRAIN, 1, 6)
     assert readback_matches(PROP_GRAIN, 1, 7)  # Off after Large (X-E5)
     assert not readback_matches(PROP_GRAIN, 2, 6)
-    assert readback_matches(PROP_NOISE_REDUCTION, 0x1000, UNSET_SENTINEL)
+    assert not readback_matches(PROP_NOISE_REDUCTION, 0x1000, 0x8000)
+    assert readback_matches(PROP_NOISE_REDUCTION, 0x8000, 0x8000)
     assert readback_matches(PROP_HIGHLIGHT, 15, UNSET_SENTINEL)
     assert not readback_matches(PROP_FILM_SIMULATION, 2, UNSET_SENTINEL)

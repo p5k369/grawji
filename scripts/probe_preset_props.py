@@ -43,7 +43,7 @@ _PROP_NAMES = {
     preset_recipe.PROP_CLARITY: "clarity x10",
     preset_recipe.PROP_LENS_MODULATION_OPT: "lens modulation optimizer",
     preset_recipe.PROP_COLOR_SPACE: "color space",
-    preset_recipe.PROP_UNKNOWN_D1A5: "unknown d1a5",
+    preset_recipe.PROP_LIVE_IMAGE_SIZE: "live image size",
 }
 
 _FILM_SIMS = {int(e): e.name for e in rawji.FilmSimulation}
@@ -72,6 +72,8 @@ def _decorate(prop: int, value: int) -> str:
         return str(_WB_MODES.get(value, "?"))
     if prop == preset_recipe.PROP_DYNAMIC_RANGE and value == _DR_AUTO:
         return "Auto"
+    if prop == preset_recipe.PROP_NOISE_REDUCTION:
+        return ""
     if value == preset_recipe.UNSET_SENTINEL:
         return "(unset sentinel)"
     signed = value - 0x10000 if value >= _SIGN_BIT else value

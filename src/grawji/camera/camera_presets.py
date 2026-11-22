@@ -24,8 +24,10 @@ from grawji.camera.camera_types import (
 from grawji.camera.preset_recipe import (
     NUM_SLOTS,
     PASSTHROUGH_DEFAULTS,
+    PRIORITY_LOCKED_PROPS,
     PROP_CLARITY,
     PROP_COLOR_CHROME_BLUE,
+    PROP_D_RANGE_PRIORITY,
     PROP_MONO_MG,
     PROP_MONO_WC,
     PROP_PRESET_NAME,
@@ -43,11 +45,16 @@ from grawji.recipe import Recipe
 
 _FEATURE_PROPS: dict[int, tuple[str, int | None]] = {
     PROP_CLARITY: ("clarity", 0),
-    PROP_MONO_WC: ("monochromatic color toning", None),
-    PROP_MONO_MG: ("monochromatic color toning", None),
+    PROP_MONO_WC: ("monochromatic color toning", 0),
+    PROP_MONO_MG: ("monochromatic color toning", 0),
     PROP_COLOR_CHROME_BLUE: ("Color Chrome FX Blue", 1),
     PROP_SMOOTH_SKIN: ("smooth skin", 1),
 }
+
+_PRIORITY_NOTE = (
+    "dynamic range and tone curves (D-Range Priority is on in this bank, "
+    "switch it off on the camera)"
+)
 
 _log = logging.getLogger(__name__)
 
@@ -200,6 +207,17 @@ def _skip_unadvertised(
     return True
 
 
+def _refusal_note(prop: int, priority_locked: bool) -> str | None:
+    """The note for a refused write the transfer can go on without."""
+    if prop == PROP_D_RANGE_PRIORITY:
+        return _PRIORITY_NOTE
+    if priority_locked and prop in PRIORITY_LOCKED_PROPS:
+        return _PRIORITY_NOTE
+    if prop in _FEATURE_PROPS:
+        return f"{_FEATURE_PROPS[prop][0]} (set it on the camera)"
+    return None
+
+
 def _write_slot(
     cam: Camera,
     slot: int,
@@ -226,6 +244,7 @@ def _write_slot(
             base[prop] = value
 
     ignored = []
+    priority_locked = False
     for prop, value in encode_recipe(recipe, base):
         if _skip_unadvertised(prop, value, props, notes):
             continue
@@ -244,15 +263,16 @@ def _write_slot(
                     prop,
                     value,
                 )
-        elif code != _PTP_OK and prop in _FEATURE_PROPS:
-            note = f"{_FEATURE_PROPS[prop][0]} (set it on the camera)"
+        elif code != _PTP_OK:
+            note = _refusal_note(prop, priority_locked)
+            if note is None:
+                raise BackupTransferError(
+                    f"camera rejected property 0x{prop:04x}=0x{value:04x} "
+                    f"on bank C{slot + 1} (0x{code:04x})"
+                )
+            priority_locked |= prop == PROP_D_RANGE_PRIORITY
             if note not in notes:
                 notes.append(note)
-        elif code != _PTP_OK:
-            raise BackupTransferError(
-                f"camera rejected property 0x{prop:04x}=0x{value:04x} "
-                f"on bank C{slot + 1} (0x{code:04x})"
-            )
         else:
             ignored.append(prop)
 
