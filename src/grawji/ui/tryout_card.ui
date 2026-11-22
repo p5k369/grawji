@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <template class="GrawjiTryoutCard" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="halign">center</property>
+    <property name="valign">start</property>
+    <style>
+      <class name="card"/>
+      <class name="tryout-card"/>
+    </style>
+    <child>
+      <object class="GrawjiRecipeThumb" id="thumb">
+        <property name="halign">center</property>
+        <property name="tile-width">320</property>
+        <property name="tile-height">213</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">8</property>
+        <property name="margin-start">6</property>
+        <property name="margin-top">8</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="hexpand">true</property>
+            <property name="valign">center</property>
+            <child>
+              <object class="GtkLabel" id="title">
+                <property name="xalign">0</property>
+                <property name="ellipsize">end</property>
+                <property name="width-chars">8</property>
+                <property name="max-width-chars">8</property>
+                <style>
+                  <class name="heading"/>
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="summary">
+                <property name="xalign">0</property>
+                <property name="ellipsize">end</property>
+                <property name="width-chars">8</property>
+                <property name="max-width-chars">8</property>
+                <style>
+                  <class name="caption"/>
+                  <class name="dim-label"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="apply_button">
+            <property name="label">Apply</property>
+            <property name="valign">center</property>
+            <property name="tooltip-text">Apply this recipe to the open image</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

@@ -26,6 +26,7 @@ from grawji.recipe_import import ImportReport
 from grawji.recipe_text import format_recipe_text, parse_recipe_text
 from grawji.recipes import UNGROUPED, RecipeLibrary, Removed
 from grawji.settings import FROM_IMAGE_LABEL
+from grawji.tryout import Tryout
 from grawji.views import dialogs
 from grawji.views.recipe_bulk import RecipeBulk
 from grawji.views.recipe_manager import RecipeManagerDialog
@@ -110,6 +111,7 @@ class RecipeLibraryController:
         self.current_raf = current_raf
         self._run_transfer = run_transfer
         self._render_thumb = render_thumb
+        self._tryout = Tryout(render_thumb) if render_thumb else None
         self._manager: RecipeManagerDialog | None = None
         self._bulk = RecipeBulk(
             parent=parent,
@@ -525,6 +527,30 @@ class RecipeLibraryController:
 
         if recipe is not None:
             render(recipe, done)
+
+    def try_recipes(
+        self,
+        names: list[str],
+        on_picture: Callable[[str, bytes], None],
+        on_settled: Callable[[], None],
+    ) -> None:
+        """Render the open image with each named recipe at its exposure."""
+        image = self.current_raf() if self.current_raf is not None else None
+        if self._tryout is None or image is None:
+            on_settled()
+            return
+        exposure = self._panel.get_recipe().exposure
+        entries = [
+            (name, replace(recipe, exposure=exposure))
+            for name in names
+            if (recipe := self._library.get(name)) is not None
+        ]
+        self._tryout.show(image, entries, on_picture, on_settled)
+
+    def stop_tryout(self) -> None:
+        """Stop rendering the open image with recipes."""
+        if self._tryout is not None:
+            self._tryout.stop()
 
     def _toast(self, message: str) -> None:
         """Report to the manager toast if open, else the status line."""

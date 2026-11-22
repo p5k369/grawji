@@ -93,12 +93,15 @@ not possible yet on the X-H1, the X-Processor 4 bodies from the X-Pro3
 to the X-T30 II, and the GFX models before the GFX100 II. You can help
 enable your body, see [enable-bank-writing.md](enable-bank-writing.md).
 
-### Try Recipes
+### Try recipes on the open image
 
-![Try Recipes renders the open shot once per recipe](images/try-recipes.webp)
+![The recipe manager showing the open shot once per recipe](images/try-recipes.webp)
 
-Try Recipes renders the open image with every recipe you tick, side by
-side. Click one to apply it.
+Select recipes in the recipe manager and switch on "Try on image": the
+area beside the list shows the open image once per selected recipe.
+Change the selection and the pictures follow. Each has an Apply button.
+The renders are kept while the image stays open, so coming back to a
+recipe costs nothing.
 
 ## Recipe from an edit
 

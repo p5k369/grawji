@@ -397,30 +397,3 @@ def test_library_remembers_folded_folders(tmp_path):
     again.delete_folder("Bold")
     assert not again.is_collapsed("Bold")
     assert not RecipeLibrary(tmp_path / "recipes.json").is_collapsed("Bold")
-
-
-def test_tryout_groups_follow_the_folders_at_one_exposure(tmp_path):
-    """Recipes come by folder, empty folders left out, all at one EV."""
-    library = _library(tmp_path)
-    library.create_folder("Street")
-    library.create_folder("Empty")
-    library.add("Night", Recipe(film_simulation="Eterna"), "Street")
-
-    groups = library.tryout_groups(0.67)
-
-    assert [title for title, _members in groups] == ["Recipes", "Street"]
-    assert [name for name, _label, _recipe in groups[0][1]] == [
-        "Punchy",
-        "Mono",
-    ]
-    assert all(
-        recipe.exposure == 0.67
-        for _title, members in groups
-        for _name, _label, recipe in members
-    )
-    assert library.get("Punchy").exposure == 0.0
-
-
-def test_tryout_groups_are_empty_without_recipes(tmp_path):
-    """An empty library offers nothing to try."""
-    assert RecipeLibrary(tmp_path / "recipes.json").tryout_groups(0.0) == []

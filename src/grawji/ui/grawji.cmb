@@ -4,13 +4,12 @@
 <cambalache-project version="1.0.0" target_tk="gtk-4.0" depends="libadwaita-1">
   <ui filename="preview_view.ui" sha256="bd0666386118ef6e349033c34b049caa18899029dbe981d4205880a112945458"/>
   <ui filename="recipe_panel.ui" sha256="23b424bac0d383e93161561d2a10332a31d1ff9d48404616a685800a2ce2ffc9"/>
-  <ui filename="grawji.ui" sha256="bc22cfc5dd47c3fccbd08eac3bed166ba4d263b91c50a191778972d27007b3cb"/>
+  <ui filename="grawji.ui" sha256="cf9aaf73c3ecf4563878de8c8e0119903cdb5b49c6343152221fef149d7ff1b9"/>
   <ui filename="batch_export.ui" sha256="a2179fe58eb83df67efeb1f81836592aadcbb6564009d891ecb6f0c076dfd5b3"/>
   <ui filename="preferences.ui" sha256="6cfecdc8b2f0a37852eb9becd218b5e9ea1e3490afad948283bcb75708b96881"/>
   <ui filename="recipe_folder.ui" sha256="7abae1d36ee4b88755f17d5c9be402da8ef50af705b5e2e51bf1090cf68e601d"/>
-  <ui filename="recipe_grid.ui" sha256="35df52d0a9b83c7b649169aa36dc53491f6be08e047d4c5e1108c288fef4cf05"/>
   <ui filename="camera_pane.ui" sha256="e08b0bdf9ba9c7c8044d224a66ac7348285c3fa250df88db004e19c62b825ae8"/>
-  <ui filename="recipe_manager.ui" sha256="a1478b1bab6ac65864dffe1291be2313890c383f06078d016ededbb92929e1b1"/>
+  <ui filename="recipe_manager.ui" sha256="2c352b4802f2ddc1c3ada9a419ade8591c17fc5e1d9fe4496814b4127be7a5d3"/>
   <ui filename="marks_bar.ui" sha256="7a025ea24fdf7691485fb6f78bf17028700b1b959d39887b3d8736f35880eb7b"/>
   <ui filename="rating_badges.ui" sha256="bfcb271d7e0ce49798eb113c85adeb489bc49c2974804794b6e65cf5e2624151"/>
   <ui filename="detail_badges.ui" sha256="480f1b6ce9fbe1d5456dc29e8da219d65c30afc42db9fce9d3c2da21b41046ae"/>
@@ -22,4 +21,5 @@
   <ui filename="recipe_details.ui" sha256="a38353358875763be76815b23c83d225effc3d477e1a630ba603240678767993"/>
   <ui filename="film_card.ui" sha256="f72dc70afb3febb230c28135b6972f2cd795b75f6fd50306b67238da52b1d3f3"/>
   <ui filename="recipe_row.ui" sha256="67b77b3282ab46e4cd68434250eba44aee7f523fdfdcce41e1f815b1d28a1fac"/>
+  <ui filename="tryout_card.ui" sha256="4a4d35ca4a91f1576f2fafce484628ba07590ecbc8d64ab03dc4f443a028970b"/>
 </cambalache-project>

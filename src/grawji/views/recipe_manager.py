@@ -24,6 +24,7 @@ from grawji.views.recipe_details import DetailActions, RecipeDetails, Shown
 from grawji.views.recipe_folder import RecipeFolder
 from grawji.views.recipe_row import Fit, RecipeRow, RowContent
 from grawji.views.recipe_thumb import thumb_texture
+from grawji.views.tryout_card import TryoutCard
 
 _UI = (
     resources.files("grawji")
@@ -38,6 +39,12 @@ _DOUBLE_CLICK = 2
 _SCROLL_EDGE = 56
 _SCROLL_STEP = 18.0
 _UNDO_SECONDS = 8
+_CARD_MIN_WIDTH = 280
+_CARD_MAX_WIDTH = 640
+_CARD_PADDING = 28
+_CARD_GAP = 6
+_GRID_MARGIN = 20
+_LIST_WIDTH = 420
 
 
 class RecipeManagerHost(Protocol):
@@ -123,6 +130,17 @@ class RecipeManagerHost(Protocol):
     def edit_comment(self, name: str) -> None:
         """Prompt for the recipe's hover comment."""
 
+    def try_recipes(
+        self,
+        names: list[str],
+        on_picture: Callable[[str, bytes], None],
+        on_settled: Callable[[], None],
+    ) -> None:
+        """Render the open image with each named recipe."""
+
+    def stop_tryout(self) -> None:
+        """Stop rendering the open image with recipes."""
+
 
 @Gtk.Template(string=_UI)
 class RecipeManagerDialog(Adw.Dialog):
@@ -138,6 +156,13 @@ class RecipeManagerDialog(Adw.Dialog):
     import_clipboard_button = Gtk.Template.Child()
     new_folder_button = Gtk.Template.Child()
     pictures_button = Gtk.Template.Child()
+    tryout_button = Gtk.Template.Child()
+    tryout_spinner = Gtk.Template.Child()
+    tryout_grid = Gtk.Template.Child()
+    tryout_scroll = Gtk.Template.Child()
+    tryout_stack = Gtk.Template.Child()
+    side_stack = Gtk.Template.Child()
+    list_pane = Gtk.Template.Child()
     bulk_box = Gtk.Template.Child()
     selection_label = Gtk.Template.Child()
     move_button = Gtk.Template.Child()
@@ -165,6 +190,8 @@ class RecipeManagerDialog(Adw.Dialog):
         self._anchor: str | None = None
         self._toast: Adw.Toast | None = None
         self._thumb_textures: dict[str, Any] = {}
+        self._cards: dict[str, TryoutCard] = {}
+        self._tried: dict[str, tuple[bytes, Any]] = {}
         self.transfer_button = self.camera_pane.transfer_button
 
         self.new_folder_button.connect("clicked", self._on_new_folder)
@@ -173,6 +200,11 @@ class RecipeManagerDialog(Adw.Dialog):
         self.export_button.connect("clicked", self._on_export_clicked)
         self.delete_button.connect("clicked", self._on_delete_clicked)
         self.pictures_button.connect("clicked", self._on_pictures_clicked)
+        self.tryout_button.connect("toggled", self._on_tryout_toggled)
+        self.tryout_scroll.get_hadjustment().connect(
+            "notify::page-size", self._size_cards
+        )
+        self.connect("closed", lambda *_a: host.stop_tryout())
         for button, importer in (
             (self.import_files_button, host.import_files),
             (self.import_folder_button, host.import_folder),
@@ -248,6 +280,7 @@ class RecipeManagerDialog(Adw.Dialog):
             self._add_group(UNGROUPED, title, ungrouped)
         for folder in self._library.folders():
             self._add_group(folder, folder, self._library.names_in(folder))
+        self._refresh_tryout_button()
         self._apply_search()
         self._refresh_pictures_button()
         self.select_names([n for n in self._selected if n in self._rows])
@@ -490,6 +523,7 @@ class RecipeManagerDialog(Adw.Dialog):
             f"{count} selected" if count > 1 else ""
         )
         self._show_details()
+        self._fill_tryout()
 
     @property
     def selected(self) -> list[str]:
@@ -537,6 +571,102 @@ class RecipeManagerDialog(Adw.Dialog):
     def _set_baseline(self, name: str, active: bool) -> None:
         """Set or clear the compare baseline."""
         self._host.set_baseline(name if active else None)
+
+    @property
+    def _trying(self) -> bool:
+        """Whether the selection is shown on the open image."""
+        return bool(self.tryout_button.get_active())
+
+    def _refresh_tryout_button(self) -> None:
+        """Offer the open image as the recipes picture while there is one."""
+        current = self._host.current_raf
+        has_image = bool(current and current())
+        self.tryout_button.set_sensitive(has_image)
+        self.tryout_button.set_tooltip_text(
+            "Show the selected recipes on the open image"
+            if has_image
+            else "Open an image to see the selected recipes on it"
+        )
+
+    def _on_tryout_toggled(self, _button: Any) -> None:
+        """Swap the details and the banks for the selection on the image."""
+        trying = self._trying
+        self.side_stack.set_visible_child_name(
+            "tryout" if trying else "manage"
+        )
+        self.side_stack.set_hexpand(trying)
+        self.list_pane.set_hexpand(not trying)
+        self.list_pane.set_size_request(_LIST_WIDTH if trying else -1, -1)
+        if trying:
+            self._fill_tryout()
+        else:
+            self._host.stop_tryout()
+            self._settle_tryout()
+            self._clear_tryout()
+
+    def _clear_tryout(self) -> None:
+        """Take every card off the grid."""
+        for card in self._cards.values():
+            self.tryout_grid.remove(card.get_parent())
+        self._cards = {}
+
+    def _fill_tryout(self) -> None:
+        """Show a card for each selected recipe and render the missing."""
+        if not self._trying:
+            return
+        self._clear_tryout()
+        for name in self._selected:
+            recipe = self._library.get(name)
+            summary = recipe_summary(recipe) if recipe is not None else ""
+            card = TryoutCard(name, summary)
+            card.apply_button.connect("clicked", self._on_card_apply, name)
+            self._cards[name] = card
+            self.tryout_grid.append(card)
+        self.tryout_stack.set_visible_child_name(
+            "cards" if self._cards else "none"
+        )
+        self._size_cards()
+        self.tryout_spinner.set_visible(True)
+        self.tryout_spinner.start()
+        self._host.try_recipes(
+            list(self._cards), self._on_tried, self._settle_tryout
+        )
+
+    def _on_card_apply(self, _button: Any, name: str) -> None:
+        """Apply the recipe of a card to the open image."""
+        self._apply(name)
+
+    def _size_cards(self, *_args: Any) -> None:
+        """Fit the cards into the grid's width, as large as they go."""
+        page = int(self.tryout_scroll.get_hadjustment().get_page_size())
+        room = page - _GRID_MARGIN
+        slot = _CARD_MIN_WIDTH + _CARD_PADDING
+        fitting = max(1, (room + _CARD_GAP) // (slot + _CARD_GAP))
+        columns = max(1, min(fitting, len(self._cards)))
+        width = (room - (columns - 1) * _CARD_GAP) // columns - _CARD_PADDING
+        width = max(_CARD_MIN_WIDTH, min(width, _CARD_MAX_WIDTH))
+        self.tryout_grid.set_max_children_per_line(columns)
+        for card in self._cards.values():
+            card.set_width(width)
+
+    def _on_tried(self, name: str, jpeg: bytes) -> None:
+        """Put a finished render on its card."""
+        card = self._cards.get(name)
+        if card is None:
+            return
+        known = self._tried.get(name)
+        if known is None or known[0] is not jpeg:
+            try:
+                texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(jpeg))
+            except GLib.Error:
+                return
+            known = self._tried[name] = (jpeg, texture)
+        card.set_picture(known[1])
+
+    def _settle_tryout(self) -> None:
+        """Stop showing that pictures are on their way."""
+        self.tryout_spinner.stop()
+        self.tryout_spinner.set_visible(False)
 
     def _missing_pictures(self) -> list[str]:
         """The recipes without a picture."""

@@ -18,13 +18,23 @@
                 <property name="tooltip-text">Filter recipes by name, comment or film simulation (Ctrl+F)</property>
               </object>
             </child>
+            <child type="end">
+              <object class="GtkToggleButton" id="tryout_button">
+                <property name="label">Try on image</property>
+              </object>
+            </child>
+            <child type="end">
+              <object class="GtkSpinner" id="tryout_spinner">
+                <property name="visible">false</property>
+              </object>
+            </child>
           </object>
         </child>
         <property name="content">
           <object class="GtkBox">
             <property name="orientation">horizontal</property>
             <child>
-              <object class="GtkBox">
+              <object class="GtkBox" id="list_pane">
                 <property name="orientation">vertical</property>
                 <property name="hexpand">true</property>
                 <child>
@@ -198,15 +208,74 @@
               </object>
             </child>
             <child>
-              <object class="GrawjiRecipeDetails" id="details"/>
-            </child>
-            <child>
-              <object class="GtkSeparator">
-                <property name="orientation">vertical</property>
+              <object class="GtkStack" id="side_stack">
+                <property name="hhomogeneous">false</property>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">manage</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <child>
+                          <object class="GrawjiRecipeDetails" id="details"/>
+                        </child>
+                        <child>
+                          <object class="GtkSeparator">
+                            <property name="orientation">vertical</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GrawjiCameraPane" id="camera_pane"/>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">tryout</property>
+                    <property name="child">
+                      <object class="GtkStack" id="tryout_stack">
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">none</property>
+                            <property name="child">
+                              <object class="AdwStatusPage">
+                                <property name="icon-name">image-x-generic-symbolic</property>
+                                <property name="title">Select recipes to try</property>
+                                <property name="description">Each selected recipe is shown on the open image. Ctrl and Shift select several, Ctrl+A selects all.</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">cards</property>
+                            <property name="child">
+                              <object class="GtkScrolledWindow" id="tryout_scroll">
+                                <property name="hscrollbar-policy">never</property>
+                                <property name="vexpand">true</property>
+                                <property name="child">
+                                  <object class="GtkFlowBox" id="tryout_grid">
+                                    <property name="selection-mode">none</property>
+                                    <property name="max-children-per-line">8</property>
+                                    <property name="row-spacing">6</property>
+                                    <property name="column-spacing">6</property>
+                                    <property name="margin-start">10</property>
+                                    <property name="margin-end">10</property>
+                                    <property name="margin-top">12</property>
+                                    <property name="margin-bottom">16</property>
+                                    <property name="valign">start</property>
+                                  </object>
+                                </property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
               </object>
-            </child>
-            <child>
-              <object class="GrawjiCameraPane" id="camera_pane"/>
             </child>
           </object>
         </property>
