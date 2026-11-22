@@ -331,3 +331,63 @@ def test_a_full_render_carries_the_donor_exif(monkeypatch, tmp_path):
     assert seen == {}
     assert prepared.finish(b"jpeg", full_resolution=True) == b"PIC+EXIF"
     assert seen == {"jpeg": b"PIC", "source": b"SRC", "size": (30, 20)}
+
+
+def _accept_carriers(monkeypatch, dynamic_ranges):
+    """Let every file pass as a carrier of the dynamic range given for it."""
+    monkeypatch.setattr(opener, "check_carrier", lambda path, model: None)
+    monkeypatch.setattr(
+        opener, "dynamic_range_of", lambda path: dynamic_ranges[str(path)]
+    )
+
+
+def test_a_carrier_is_registered_under_its_dynamic_range(monkeypatch):
+    """Two carriers of one body sit side by side, keyed by their range."""
+    _accept_carriers(monkeypatch, {"/c/a.RAF": 100, "/c/b.RAF": 400})
+    settings = Settings()
+
+    assert opener.add_carrier(settings, "X-E5", "/c/a.RAF") is None
+    assert opener.add_carrier(settings, "X-E5", "/c/b.RAF") is None
+
+    assert settings.carriers == {
+        "X-E5": {"100": "/c/a.RAF", "400": "/c/b.RAF"}
+    }
+    assert opener.listed_carriers(settings, "X-E5") == {
+        100: "/c/a.RAF",
+        400: "/c/b.RAF",
+    }
+
+
+def test_a_refused_carrier_is_not_registered(monkeypatch):
+    """The reason comes back and the settings stay as they were."""
+    monkeypatch.setattr(
+        opener, "check_carrier", lambda path, model: "has a lens"
+    )
+    settings = Settings()
+
+    assert opener.add_carrier(settings, "X-E5", "/c/a.RAF") == "has a lens"
+    assert settings.carriers == {}
+
+
+def test_a_body_keeps_one_entry_whatever_its_spelling(monkeypatch):
+    """A carrier added under another spelling joins the same body."""
+    _accept_carriers(monkeypatch, {"/c/a.RAF": 100, "/c/b.RAF": 200})
+    settings = Settings(carriers={"FUJIFILM X-E5": {"100": "/c/a.RAF"}})
+
+    opener.add_carrier(settings, "X-E5", "/c/b.RAF")
+
+    assert settings.carriers == {
+        "X-E5": {"100": "/c/a.RAF", "200": "/c/b.RAF"}
+    }
+
+
+def test_forgetting_the_last_carrier_drops_the_body(monkeypatch):
+    """A body without carriers leaves no empty entry behind."""
+    _accept_carriers(monkeypatch, {})
+    settings = Settings(carriers={"X-E5": {"100": "/c/a.RAF"}})
+
+    opener.forget_carrier(settings, "X-E5", 400)
+    assert settings.carriers == {"X-E5": {"100": "/c/a.RAF"}}
+
+    opener.forget_carrier(settings, "X-E5", 100)
+    assert settings.carriers == {}

@@ -253,12 +253,12 @@ def test_modified_recipe_survives_image_open(
     from dataclasses import replace
 
     renders: list[int] = []
-    monkeypatch.setattr(window, "_render_preview", lambda: renders.append(1))
+    monkeypatch.setattr(window._render, "render", lambda: renders.append(1))
     panel = window.recipe_panel
     panel.set_active(panel.get_recipe(), "Summer")
     panel.set_recipe(replace(panel.get_recipe(), film_simulation="Acros"))
     assert panel.is_modified
-    window._on_opened(window._generation, None)
+    window._on_opened()
     assert panel.active_label == "Summer"
     assert panel.is_modified
     assert renders == [1]
@@ -587,17 +587,17 @@ def test_compare_guard_drops_stale_and_toggled_off(
     window._generation = 5
 
     # Stale generation: dropped outright.
-    window._on_baseline_rendered(4, b"jpeg")
+    window._render._on_baseline_rendered(4, b"jpeg")
     assert calls == []
 
     # Current generation but compare toggled off: still dropped.
     window._compare_action.set_state(GLib.Variant.new_boolean(False))
-    window._on_baseline_rendered(5, b"jpeg")
+    window._render._on_baseline_rendered(5, b"jpeg")
     assert calls == []
 
     # Current and enabled: the baseline is fed into the split view.
     window._compare_action.set_state(GLib.Variant.new_boolean(True))
-    window._on_baseline_rendered(5, b"jpeg")
+    window._render._on_baseline_rendered(5, b"jpeg")
     assert ("baseline", b"jpeg") in calls
     assert ("compare", True) in calls
 

@@ -64,7 +64,7 @@ def test_a_camera_file_opens_without_the_camera(
     assert window.export_button.get_sensitive()
 
     _plug_camera(window, monkeypatch)
-    window._toggle_source()
+    window._source.toggle()
     _settle(0.6)
     window._refresh_camera_status()
     _settle(0.2)
@@ -84,7 +84,7 @@ def test_a_lone_raf_offers_no_switch(window: Any, tmp_path: Path) -> None:
     window._filmstrip.select_path(str(raf))
     _settle(0.3)
     assert not window.preview_view.source_switch.get_visible()
-    window._toggle_source()
+    window._source.toggle()
     assert sidecar.summary(raf).source is None
 
 
@@ -102,7 +102,7 @@ def test_without_a_camera_a_raf_browses_quietly(
     window._filmstrip.select_path(str(raf))
     _settle(0.3)
     assert opened == []
-    assert not window._error_showing
+    assert not window._notices.showing
     assert "No camera" in window.preview_view.status.get_label()
 
 

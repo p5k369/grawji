@@ -4,6 +4,7 @@ import usb.core
 
 from grawji.camera.camera_info import (
     detect_camera,
+    error_text,
     is_camera_disconnected,
     is_camera_stuck,
     is_foreign_raf,
@@ -89,3 +90,33 @@ def test_not_foreign_raf_on_other_errors():
     """Other PTP failures are not misread as a foreign RAF."""
     busy = RuntimeError("StartRawConversion failed: 0x2019")
     assert is_foreign_raf(busy) is False
+
+
+def test_a_stuck_camera_is_told_to_power_cycle():
+    """A wedged body gets the power cycle advice."""
+    heading, detail = error_text(TimeoutError("conversion timed out"))
+    assert heading == "Camera not responding"
+    assert "off and on again" in detail
+
+
+def test_an_unplugged_camera_is_told_to_reconnect(monkeypatch):
+    """Outside Flatpak a replug is enough."""
+    monkeypatch.setattr("grawji.camera.camera_info.IN_FLATPAK", False)
+    heading, detail = error_text(OSError("[Errno 19] No such device"))
+    assert heading == "Camera disconnected"
+    assert "Reconnect it" in detail
+
+
+def test_an_unplugged_camera_in_flatpak_needs_a_restart(monkeypatch):
+    """The sandbox does not see a replugged camera."""
+    monkeypatch.setattr("grawji.camera.camera_info.IN_FLATPAK", True)
+    _heading, detail = error_text(OSError("[Errno 19] No such device"))
+    assert "must be restarted" in detail
+
+
+def test_any_other_error_shows_its_own_text():
+    """An unclassified failure is shown as it is."""
+    assert error_text(ValueError("bad profile")) == (
+        "Camera error",
+        "bad profile",
+    )

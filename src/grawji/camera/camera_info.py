@@ -90,6 +90,32 @@ def is_camera_disconnected(exc: Exception) -> bool:
     return "No such device" in text or "could not connect" in text
 
 
+_STUCK_TEXT = (
+    "The camera stopped responding during conversion and appears to be "
+    "stuck. Turn it off and on again - if it will not turn off, briefly "
+    "remove the battery - then reconnect and try the image again."
+)
+_GONE_TEXT = (
+    "The camera was disconnected. Reconnect it, then select an image "
+    "again to continue."
+)
+_GONE_FLATPAK_TEXT = (
+    "grawji must be restarted to use a camera that was unplugged and "
+    "reconnected: the Flatpak sandbox does not pick up the reconnected "
+    "camera on its own."
+)
+
+
+def error_text(exc: Exception) -> tuple[str, str]:
+    """The heading and the explanation for a failed camera operation."""
+    if is_camera_stuck(exc):
+        return "Camera not responding", _STUCK_TEXT
+    if is_camera_disconnected(exc):
+        detail = _GONE_FLATPAK_TEXT if IN_FLATPAK else _GONE_TEXT
+        return "Camera disconnected", detail
+    return "Camera error", str(exc)
+
+
 def is_foreign_raf(exc: Exception) -> bool:
     """Whether exc signals a RAF shot by a different camera body."""
     return _ptp_code_in(exc, PTPResponseCode.GeneralError)
