@@ -203,6 +203,47 @@ def carriers_for(settings: Settings, model: str) -> dict[int, Path]:
     return found
 
 
+def listed_carriers(settings: Settings, model: str) -> dict[int, str]:
+    """A body's carrier files by dynamic range."""
+    return {
+        dr: str(path) for dr, path in carriers_for(settings, model).items()
+    }
+
+
+def add_carrier(
+    settings: Settings, model: str, path: Path | str
+) -> str | None:
+    """Register a RAF as a body's carrier under its shot dynamic range."""
+    problem = check_carrier(path, model)
+    if problem is not None:
+        return problem
+    registered = listed_carriers(settings, model)
+    registered[dynamic_range_of(path)] = str(path)
+    _store_carriers(settings, model, registered)
+    return None
+
+
+def forget_carrier(settings: Settings, model: str, dynamic_range: int) -> None:
+    """Drop a body's carrier of one dynamic range."""
+    registered = listed_carriers(settings, model)
+    registered.pop(dynamic_range, None)
+    _store_carriers(settings, model, registered)
+
+
+def _store_carriers(
+    settings: Settings, model: str, registered: dict[int, str]
+) -> None:
+    """Keep a body's carrier set under one spelling of its model."""
+    key = normalize_model(model)
+    for name in list(settings.carriers):
+        if normalize_model(name) == key:
+            del settings.carriers[name]
+    if registered:
+        settings.carriers[model] = {
+            str(dr): registered[dr] for dr in sorted(registered)
+        }
+
+
 def normalize_model(model: str) -> str:
     """A model name as a comparison key."""
     return "".join(

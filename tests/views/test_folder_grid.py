@@ -126,7 +126,7 @@ def _pixbuf() -> Any:
 
 def toggle(window: Any, wanted: bool) -> None:
     """Drive the window action the button and the key both use."""
-    window._set_grid_open(open_it=wanted)
+    window._browse.set_open(open_it=wanted)
 
 
 def test_the_window_swaps_the_preview_for_the_grid(

@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
-import logging
 import os
-import threading
 from collections.abc import Callable
-from dataclasses import replace
 from functools import partial
 from importlib import resources
 from pathlib import Path
@@ -21,20 +17,17 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from grawji import mainloop, raf, shortcuts, sidecar
+from grawji import mainloop, shortcuts, sidecar
 from grawji.camera import camera_info
 from grawji.camera.capabilities import (
     BASELINE,
     Capabilities,
-    can_carry,
     capabilities_for,
     capabilities_for_model,
-    is_known_model,
     read_iopcode,
 )
 from grawji.camera.core import (
     CameraSession,
-    ForeignRafError,
     recipe_from_profile,
     shot_dynamic_range,
 )
@@ -42,33 +35,33 @@ from grawji.camera.preview import CameraWorker
 from grawji.controllers.backup import BackupController
 from grawji.controllers.camera_ops import CameraOpsController
 from grawji.controllers.edit_match import (
-    EditMatchCallbacks,
     EditMatchController,
-    EditMatchError,
-    EditMatchRequest,
-    edit_preview,
 )
 from grawji.controllers.exports import (
     BatchController,
     SingleExportController,
 )
 from grawji.controllers.fileops import FileOpsController
-from grawji.controllers.marks import MarksController
-from grawji.imaging import imagemeta
-from grawji.imaging.pixbufs import trim_letterbox
-from grawji.imaging.render import (
-    oriented_jpeg,
-    thumb_jpeg,
+from grawji.controllers.image_load import (
+    Decoded,
+    ImageLoadController,
+    LoadHost,
 )
+from grawji.controllers.marks import MarksController
+from grawji.controllers.preview_render import (
+    PreviewHost,
+    PreviewRenderController,
+)
+from grawji.image_exposure import ImageExposure
+from grawji.imaging import imagemeta
 from grawji.imaging.thumbnails import ThumbnailLoader
-from grawji.look_match import SearchCancelledError
 from grawji.marks import Label
-from grawji.pairs import Source, companion_label
+from grawji.open_plan import plan_open
+from grawji.pairs import Source
 from grawji.recipe import Recipe
-from grawji.recipes import UNGROUPED, RecipeLibrary, recipes_path
+from grawji.recipes import RecipeLibrary, recipes_path
 from grawji.settings import (
     FROM_IMAGE,
-    FROM_IMAGE_LABEL,
     cache_dir,
     load_settings,
     save_settings,
@@ -76,34 +69,30 @@ from grawji.settings import (
 )
 from grawji.transplant import opener
 from grawji.views import dialogs
-from grawji.views.edit_match import EditMatchDialog
+from grawji.views.browse_page import BrowseHost, BrowsePage, BrowseWidgets
+from grawji.views.camera_notices import CameraNotices, NoticeHost
+from grawji.views.edit_match_flow import EditMatchFlow, EditMatchHost
 from grawji.views.filmstrip import FilmStrip
 from grawji.views.filmstrip_nav import FilmStripNav
 from grawji.views.folder_grid import FolderGrid
 from grawji.views.folder_model import FolderModel
 from grawji.views.foldertree import FolderTree
+from grawji.views.info_panel import InfoPanel
 from grawji.views.navigator import Navigator
 from grawji.views.preferences import PreferencesDialog
-from grawji.views.preview_view import BACKGROUNDS, PreviewView, oriented_pixbuf
-from grawji.views.recipe_grid import RecipeGridDialog
+from grawji.views.preview_view import PreviewView
+from grawji.views.recipe_actions import RecipeActions, RecipeHost
 from grawji.views.recipe_library import RecipeLibraryController
 from grawji.views.recipe_panel import RecipePanel
-from grawji.views.textures import texture_for_pixbuf
+from grawji.views.source_switch import SourceHost, SourceSwitch
 
 _CAMERA_POLL_SECONDS = 3
-# Debounce a selection's load so fast scrubbing does not spawn a decode per
-# image passed over, the decode then runs off-thread and never blocks the UI.
-_LOAD_DELAY_MS = 50
 # The status while browsing without a camera on USB.
 _NO_CAMERA = "No camera connected, showing the in-camera JPEG."
 # Default side-panel width, used to restore it after a collapse.
 _DEFAULT_SIDEBAR_WIDTH = 240
 # Pane positions at or below this count as collapsed.
 _SIDEBAR_COLLAPSED_MAX = 10
-# EVs are thirds of a stop, anything closer than this is the same EV.
-_EV_EPSILON = 1e-6
-# A recipe's picture keeps the camera thumbnail's full size.
-_RECIPE_THUMB_EDGE = 640
 
 _UI = (
     resources.files("grawji")
@@ -138,10 +127,6 @@ class MainWindow(Adw.ApplicationWindow):
 
     _marks: MarksController
     _mark_actions: list[Gio.SimpleAction]
-    _exif_rows: list[Any]
-    _exif_pairs: list[tuple[str, str]]
-    _notified_models: set[str]
-    _foreign_warned: set[str]
 
     def __init__(self, **kwargs: object) -> None:
         """Wire up the worker, the composite widgets and the controllers."""
@@ -154,20 +139,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
         self._raf_path: Path | None = None
-        self._stored_ev: float | None = None
-        self._image_ev: float | None = None
-        self._shot_ev: float | None = None
+        self._exposure = ImageExposure()
         self._current_folder: str | None = None
-        self._notified_models, self._foreign_warned = set(), set()
-        self._exif_rows, self._exif_pairs = [], []
-        self._render_pending_id = self._load_pending_id = 0
-        self._error_showing = False
         self._close_confirmed = self._camera_seen = False
         # Bumped on every image selection. Async open/preview callbacks carry
         # the value they were issued under and ignore themselves if a newer
         # selection has superseded them (fast filmstrip scrubbing).
         self._generation = 0
-        self._preview_seq = 0
 
         self._settings = load_settings(settings_path())
         self._apply_color_scheme()
@@ -178,11 +156,29 @@ class MainWindow(Adw.ApplicationWindow):
         self._init_sidebar()
         self._install_assets()
 
+        self._notices = CameraNotices(
+            self,
+            self._session,
+            self._settings,
+            NoticeHost(
+                current_raf=lambda: self._raf_path,
+                set_busy=lambda busy, status: self._set_busy(
+                    busy=busy, status=status
+                ),
+                abort_batch=lambda: self._batch.abort(),  # noqa: PLW0108
+                add_toast=lambda toast: self.toast_overlay.add_toast(  # noqa: PLW0108
+                    toast
+                ),
+                manage_carriers=lambda: self._library.manage(),  # noqa: PLW0108
+            ),
+        )
         self._init_preview_wiring()
+        self._recipe_library = RecipeLibrary(recipes_path())
+        self._init_render()
         self._connect_recipe_panel()
         self.export_button.connect("clicked", self._on_export_clicked)
 
-        self._init_navigator()
+        self._init_info()
 
         self._fileops = FileOpsController(
             parent=self,
@@ -209,6 +205,56 @@ class MainWindow(Adw.ApplicationWindow):
         self._foldertree.set_vexpand(True)
         self.foldertree_slot.append(self._foldertree)
 
+        self._init_library()
+        self._init_recipes()
+        self._init_exports()
+        self._install_actions()
+        self._refresh_camera_status()
+        GLib.timeout_add_seconds(
+            _CAMERA_POLL_SECONDS, self._refresh_camera_status
+        )
+
+        self._restore_last()
+
+    def _init_render(self) -> None:
+        """Build the controllers that load and render the open image."""
+        self._render = PreviewRenderController(
+            self._session,
+            self._worker,
+            PreviewHost(
+                generation=lambda: self._generation,
+                recipe=self.recipe_panel.get_recipe,
+                baseline=self._recipe_library.baseline_recipe,
+                comparing=self._compare_wanted,
+                on_settled=self._persist_exposure,
+                show_preview=self.preview_view.show_pixbuf,
+                show_baseline=self._show_baseline,
+                set_busy=lambda busy, status: self._set_busy(
+                    busy=busy, status=status
+                ),
+                on_error=self._notices.report,
+            ),
+        )
+        self._load = ImageLoadController(
+            self._session,
+            self._worker,
+            LoadHost(
+                generation=lambda: self._generation,
+                camera_file=self._camera_file_of,
+                camera_present=self._camera_present,
+                on_begin=self._begin_load,
+                on_decoded=self._show_decoded,
+                on_opened=self._on_opened,
+                on_no_camera=lambda: self._set_busy(
+                    busy=False, status=_NO_CAMERA
+                ),
+                on_error=self._notices.report,
+                on_quiet_error=self._notices.report_quietly,
+            ),
+        )
+
+    def _init_library(self) -> None:
+        """Build the camera operations and the recipe library."""
         self._camera_ops = CameraOpsController(self._session)
         self._backup = BackupController(
             parent=self,
@@ -221,12 +267,11 @@ class MainWindow(Adw.ApplicationWindow):
             set_status=self.preview_view.set_status,
             add_toast=self.toast_overlay.add_toast,
         )
-        self._recipe_library = RecipeLibrary(recipes_path())
         self._library = RecipeLibraryController(
             parent=self,
             library=self._recipe_library,
             panel=self.recipe_panel,
-            on_render=self._render_if_open,
+            on_render=self._render.render_if_open,
             on_status=self.preview_view.set_status,
             get_iopcode=self._read_iopcode,
             on_baseline_changed=self._on_baseline_changed,
@@ -242,8 +287,35 @@ class MainWindow(Adw.ApplicationWindow):
             run_transfer=self._camera_ops.run_bank_transfer,
             render_thumb=self._render_recipe_thumb,
             on_closed=self._on_recipe_manager_closed,
-            on_apply_saved=partial(self._on_apply_recipe, None),
+            on_apply_saved=lambda name: self._recipes.apply(name),  # noqa: PLW0108
         )
+
+    def _init_recipes(self) -> None:
+        """Build what applies recipes to the controls."""
+        self._recipes = RecipeActions(
+            self,
+            self.recipe_panel,
+            self._library,
+            self._settings,
+            RecipeHost(
+                library=self._recipe_library,
+                exposure=self._exposure,
+                profile=lambda: self._session.profile,
+                is_open=lambda: self._session.is_open,
+                open_path=lambda: self._raf_path,
+                uses_camera_file=lambda: (
+                    self._camera_file_of(self._raf_path) is not None
+                ),
+                render_thumb=self._worker.render_thumb,
+                render_if_open=self._render.render_if_open,
+                persist_exposure=self._persist_exposure,
+                set_status=self.preview_view.set_status,
+                save_settings=self._save_settings,
+            ),
+        )
+
+    def _init_exports(self) -> None:
+        """Build the single and the batch export."""
         self._single_export = SingleExportController(
             parent=self,
             worker=self._worker,
@@ -258,7 +330,7 @@ class MainWindow(Adw.ApplicationWindow):
             base_identity=self.preview_view.geometry_is_identity,
             get_crop=lambda: self.preview_view.crop_rotate,
             set_busy=self._set_busy,
-            on_error=self._on_error,
+            on_error=self._notices.report,
             on_status_link=self.preview_view.set_status_link,
             get_camera_file=lambda: self._camera_file_of(self._raf_path),
         )
@@ -274,16 +346,13 @@ class MainWindow(Adw.ApplicationWindow):
             ),
             set_busy=self._set_busy,
             on_status=self.preview_view.set_status,
-            on_error=self._on_error,
+            on_error=self._notices.report,
             on_status_link=self.preview_view.set_status_link,
             camera_file=self._camera_file_of,
         )
-        self._install_actions()
-        self._refresh_camera_status()
-        GLib.timeout_add_seconds(
-            _CAMERA_POLL_SECONDS, self._refresh_camera_status
-        )
 
+    def _restore_last(self) -> None:
+        """Reopen the folder and the image of the last session."""
         self._foldertree.restore_expanded(self._settings.expanded_folders)
         last = self._settings.last_folder
         if last and Path(last).is_dir():
@@ -301,9 +370,9 @@ class MainWindow(Adw.ApplicationWindow):
             ("save-recipe", self._library.save_current),
             ("paste-recipe", self._library.paste_text),
             ("copy-recipe", self._library.copy_text),
-            ("reset", self._reset_recipe),
-            ("undo", self._undo_edit),
-            ("redo", self._redo_edit),
+            ("reset", self._recipes.reset),
+            ("undo", self._recipes.undo),
+            ("redo", self._recipes.redo),
             ("preferences", self._on_preferences),
             ("export-marked", self._export_marked),
             ("export-shown", self._export_shown),
@@ -311,7 +380,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("select-all", self._filmstrip.select_all),
             ("cancel-selection", self._filmstrip.clear_selection),
             ("manage-recipes", self._library.manage),
-            ("try-recipes", self._on_try_recipes),
+            ("try-recipes", self._recipes.try_out),
             ("backup-camera", self._backup.backup),
             ("restore-camera", self._backup.restore),
             ("zoom-in", view.zoom_in),
@@ -335,40 +404,37 @@ class MainWindow(Adw.ApplicationWindow):
                 app.set_accels_for_action(f"win.{name}", list(accels))
         self._on_history_changed(self.recipe_panel)
 
-        grid = Gio.SimpleAction.new_stateful(
-            "toggle-grid", None, GLib.Variant.new_boolean(False)
-        )
-        grid.connect("change-state", self._on_toggle_grid)
-        self.add_action(grid)
-
-        histogram = Gio.SimpleAction.new_stateful(
+        self._add_toggle("toggle-grid", self._on_toggle_grid, on=False)
+        self._add_toggle(
             "toggle-histogram",
-            None,
-            GLib.Variant.new_boolean(self._settings.show_histogram),
+            self._on_toggle_histogram,
+            on=self._settings.show_histogram,
         )
-        histogram.connect("change-state", self._on_toggle_histogram)
-        self.add_action(histogram)
-
-        marks_bar = Gio.SimpleAction.new_stateful(
+        self._add_toggle(
             "toggle-marks-bar",
-            None,
-            GLib.Variant.new_boolean(self._settings.show_marks_bar),
+            self._on_toggle_marks_bar,
+            on=self._settings.show_marks_bar,
         )
-        marks_bar.connect("change-state", self._on_toggle_marks_bar)
-        self.add_action(marks_bar)
-
         self._install_mark_actions()
-        self._install_source_actions()
 
         # Compare is available only once a recipe is marked as baseline.
-        self._compare_action = Gio.SimpleAction.new_stateful(
-            "toggle-compare", None, GLib.Variant.new_boolean(False)
+        self._compare_action = self._add_toggle(
+            "toggle-compare", self._on_toggle_compare, on=False
         )
-        self._compare_action.connect("change-state", self._on_toggle_compare)
         self._compare_action.set_enabled(
             self._recipe_library.baseline is not None
         )
-        self.add_action(self._compare_action)
+
+    def _add_toggle(
+        self, name: str, on_change: Callable[[Any, Any], None], *, on: bool
+    ) -> Gio.SimpleAction:
+        """Add a stateful on/off action to the window."""
+        action = Gio.SimpleAction.new_stateful(
+            name, None, GLib.Variant.new_boolean(on)
+        )
+        action.connect("change-state", on_change)
+        self.add_action(action)
+        return action
 
     def _install_mark_actions(self) -> None:
         """The parameterized mark actions."""
@@ -387,79 +453,16 @@ class MainWindow(Adw.ApplicationWindow):
             if isinstance(action, Gio.SimpleAction):
                 self._mark_actions.append(action)
 
-    def _install_source_actions(self) -> None:
-        """The RAW or camera file choice of the open shot."""
-        self._source_action = Gio.SimpleAction.new_stateful(
-            "source",
-            GLib.VariantType.new("s"),
-            GLib.Variant.new_string(Source.RAW.value),
-        )
-        self._source_action.connect("change-state", self._on_source_picked)
-        self._source_action.set_enabled(False)
-        self.add_action(self._source_action)
-        toggle = Gio.SimpleAction.new("toggle-source", None)
-        toggle.connect("activate", lambda *_a: self._toggle_source())
-        self.add_action(toggle)
-
     def _camera_file_of(self, raf_path: str | Path | None) -> str | None:
         """The camera file a shot is developed from."""
-        if raf_path is None:
-            return None
-        entry = self._folder_model.entry_for(str(raf_path))
-        if entry is None or not entry.uses_camera_file:
-            return None
-        return entry.companion
+        return self._source.camera_file_of(raf_path)
 
-    def _camera_file_status(self) -> str:
-        """Say which camera file the open shot is developed from."""
-        companion = self._camera_file_of(self._raf_path)
-        label = companion_label(companion) if companion else "file"
-        return f"Developed from the camera {label}."
-
-    def _toggle_source(self) -> None:
-        """Switch the open shot between its RAW and its camera file."""
-        if not self._source_action.get_enabled():
-            return
-        current = Source(self._source_action.get_state().get_string())
-        other = Source.RAW if current is Source.CAMERA else Source.CAMERA
-        self._source_action.change_state(GLib.Variant.new_string(other))
-
-    def _on_source_picked(
-        self, action: Gio.SimpleAction, value: GLib.Variant
-    ) -> None:
-        """Store the picked source and open the shot from it."""
-        if self._raf_path is None or value.equal(action.get_state()):
-            return
-        action.set_state(value)
-        path = str(self._raf_path)
-        source = Source(value.get_string())
-        sidecar.save_source(path, source)
-        self._folder_model.set_source(path, source)
-        self._on_raf_selected(path)
-
-    def _show_current_source(self) -> None:
-        """Offer the RAW or camera file switch for a pair."""
-        path = self._filmstrip.current_path
-        entry = self._folder_model.entry_for(path) if path else None
-        companion = entry.companion if entry is not None else None
-        paired = companion is not None
-        if companion is not None:
-            self.preview_view.camera_source_button.set_label(
-                companion_label(companion)
-            )
-        self.preview_view.source_switch.set_visible(paired)
-        self._source_action.set_enabled(paired)
-        source = entry.source if entry is not None else Source.RAW
-        self._source_action.set_state(GLib.Variant.new_string(source))
-        if entry is not None and entry.uses_camera_file:
-            compare = self._compare_action.get_state().get_boolean()
-            if compare:
-                self._compare_action.change_state(
-                    GLib.Variant.new_boolean(False)
-                )
+    def _gate_compare(self, uses_camera_file: bool) -> None:
+        """Keep the split view to shots developed from their RAW."""
+        if uses_camera_file and self._compare_wanted():
+            self._compare_action.change_state(GLib.Variant.new_boolean(False))
         self._compare_action.set_enabled(
-            self._recipe_library.baseline is not None
-            and not (entry is not None and entry.uses_camera_file)
+            self._recipe_library.baseline is not None and not uses_camera_file
         )
 
     def _on_card_mark(
@@ -506,7 +509,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _init_preview_wiring(self) -> None:
         """Apply preview settings and hook up its crop editor."""
-        self._set_canvas_background(self._settings.canvas_background)
+        self.preview_view.set_background(self._settings.canvas_background)
         self.preview_view.set_show_histogram(self._settings.show_histogram)
         self.preview_view.set_show_marks_bar(self._settings.show_marks_bar)
         self.preview_view.connect(
@@ -570,6 +573,20 @@ class MainWindow(Adw.ApplicationWindow):
             on_mark_action=self._on_card_mark,
             drag_action=lambda: self._settings.drag_action,
         )
+        self._source = SourceSwitch(
+            self,
+            self._folder_model,
+            (
+                self.preview_view.source_switch,
+                self.preview_view.camera_source_button,
+            ),
+            SourceHost(
+                open_path=lambda: self._raf_path,
+                selected_path=lambda: self._filmstrip.current_path,
+                reload=self._on_raf_selected,
+                on_shown=self._gate_compare,
+            ),
+        )
         self._mark_actions = []
         self._marks = MarksController(
             folder=self._folder_model,
@@ -584,7 +601,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.filmstrip_slot.append(self._filmstrip)
         self.filmstrip_slot.append(self._nav.next_button)
         self._filmstrip.adopt_filter_button(self.filter_button)
-        self._tile_save_id = 0
         self._init_grid()
 
     def _init_grid(self) -> None:
@@ -607,119 +623,48 @@ class MainWindow(Adw.ApplicationWindow):
             on_select=self._on_grid_selected,
             stand_in=self._filmstrip.texture_for,
         )
-        self.grid_slot.append(self._grid)
-        self.grid_size.set_value(self._settings.grid_tile_px)
-        self.grid_size.connect("value-changed", self._on_tile_size)
-        style = Adw.StyleManager.get_default()
-        style.connect("notify::dark", self._on_dark_changed)
-        self._on_dark_changed(style)
-        self.view_stack.connect(
-            "notify::visible-child-name", self._on_view_changed
+        self._browse = BrowsePage(
+            self._grid,
+            BrowseWidgets(
+                slot=self.grid_slot,
+                size=self.grid_size,
+                count=self.grid_count,
+                stack=self.view_stack,
+            ),
+            self._settings,
+            BrowseHost(
+                current_path=lambda: self._filmstrip.current_path,
+                has_folder=lambda: self._current_folder is not None,
+                on_page=self._on_page_changed,
+                save_settings=self._save_settings,
+            ),
         )
-        # Browse is the first tab, but grawji opens on one image.
-        self.view_stack.set_visible_child_name("preview")
-        self._style_grid_canvas(self._settings.canvas_background)
-
-    def _on_dark_changed(
-        self, style: Adw.StyleManager, *_args: object
-    ) -> None:
-        """Soften the grid cards when the theme goes dark."""
-        if style.get_dark():
-            self._grid.add_css_class("dim-cards")
-        else:
-            self._grid.remove_css_class("dim-cards")
-
-    def _on_tile_size(self, scale: Gtk.Scale) -> None:
-        """Resize the grid's tiles and remember the choice."""
-        size = int(scale.get_value())
-        self._grid.set_tile(size)
-        self._update_grid_count()
-        self._settings.grid_tile_px = size
-        if self._tile_save_id:
-            GLib.source_remove(self._tile_save_id)
-        self._tile_save_id = GLib.timeout_add(500, self._save_tile_size)
-
-    def _save_tile_size(self) -> bool:
-        """Write the tile size once the slider stops moving."""
-        self._tile_save_id = 0
-        self._save_settings()
-        return GLib.SOURCE_REMOVE
 
     def _on_toggle_grid(self, action: Any, value: Any) -> None:
         """Flip between developing one frame and browsing the folder."""
         action.set_state(value)
-        self.view_stack.set_visible_child_name(
-            "grid" if value.get_boolean() else "preview"
-        )
+        self._browse.set_open(open_it=value.get_boolean())
 
-    def _on_view_changed(self, *_args: object) -> None:
-        """React to the page the tabs, the key or the code chose."""
-        grid = self._grid_is_open()
+    def _on_page_changed(self, browsing: bool) -> None:
+        """Follow the page the tabs, the key or the code chose."""
         action = self.lookup_action("toggle-grid")
         if action is not None:
-            action.set_state(GLib.Variant.new_boolean(grid))
+            action.set_state(GLib.Variant.new_boolean(browsing))
         self._nav.cancel_hold()
-        if grid:
-            self._fill_grid()
-        else:
+        if not browsing:
             self._develop_current()
-
-    def _set_canvas_background(self, css_class: str) -> None:
-        """Give the preview and the grid the same canvas color."""
-        self.preview_view.set_background(css_class)
-        self._style_grid_canvas(css_class)
-
-    def _style_grid_canvas(self, css_class: str) -> None:
-        """Paint the grid's canvas like the preview's."""
-        if getattr(self, "_grid", None) is None:
-            return
-        for name in BACKGROUNDS:
-            if name:
-                self._grid.remove_css_class(name)
-        if css_class:
-            self._grid.add_css_class(css_class)
-
-    def _update_grid_count(self) -> None:
-        """Say how many frames the grid shows, and of how many."""
-        shown, held = self._grid.shown, self._grid.held
-        if not held:
-            self.grid_count.set_label("")
-        elif shown == held:
-            self.grid_count.set_label(f"{held} frames")
-        else:
-            self.grid_count.set_label(f"{shown} of {held} frames")
-
-    def _fill_grid(self) -> bool:
-        """Line the grid up with the strip. False with no folder."""
-        if self._current_folder is None:
-            return False
-        current = self._filmstrip.current_path
-        if current is not None:
-            self._grid.select_path(current)
-        self._update_grid_count()
-        return True
 
     def _browse_folder(self, path: str) -> None:
         """Open a folder in Browse, which is what a double click asks."""
         self._scan_folder(path)
-        self._set_grid_open(open_it=True)
+        self._browse.set_open(open_it=True)
 
     def _on_folder_event(self, reason: str, _path: str | None) -> None:
         """Keep the frame count and the marks bar fresh."""
-        if reason in ("folder", "filter", "trimmed") and self._grid_is_open():
-            self._update_grid_count()
+        if reason in ("folder", "filter", "trimmed") and self._browse.is_open:
+            self._browse.update_count()
         if reason in ("folder", "trimmed"):
             self._show_current_marks()
-
-    def _set_grid_open(self, *, open_it: bool) -> None:
-        """Show one of the two views."""
-        self.view_stack.set_visible_child_name(
-            "grid" if open_it else "preview"
-        )
-
-    def _grid_is_open(self) -> bool:
-        """Whether the grid is the visible page right now."""
-        return bool(self.view_stack.get_visible_child_name() == "grid")
 
     def _on_grid_selected(self, path: str) -> None:
         """Mark the grid's pick in the strip, without developing it."""
@@ -730,7 +675,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_grid_activated(self, path: str) -> None:
         """Open a frame picked in the grid and go back to the preview."""
         self._filmstrip.select_path(path, notify=False)
-        self._set_grid_open(open_it=False)
+        self._browse.set_open(open_it=False)
 
     def _develop_current(self) -> None:
         """Load whatever Browse left selected, unless it is loaded."""
@@ -750,8 +695,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         self._current_folder = path
         self._filmstrip.scan(path)
-        if self._grid_is_open():
-            self._fill_grid()
+        if self._browse.is_open:
+            self._browse.fill()
         self._nav.update()
         self._settings.last_folder = path
         self._save_settings()
@@ -769,249 +714,97 @@ class MainWindow(Adw.ApplicationWindow):
                 dialog.
         """
         self._nav.update()
-        self._flush_pending_exposure()
+        self._render.flush()
         self._generation += 1
         self._raf_path = Path(raf_path)
         self._show_current_marks()
-        self._show_current_source()
+        self._source.show_current()
         self._settings.last_image = raf_path
         self.set_title(f"grawji — {Path(raf_path).name}")
         self._set_busy(busy=True, status="Loading RAF…")
-        if self._load_pending_id:
-            GLib.source_remove(self._load_pending_id)
-        self._load_pending_id = GLib.timeout_add(
-            _LOAD_DELAY_MS,
-            self._load_selected,
-            self._generation,
-            raf_path,
-            quiet,
-        )
+        self._load.select(raf_path, quiet=quiet)
 
-    def _load_selected(
-        self, generation: int, raf_path: str, quiet: bool = False
-    ) -> bool:
-        """Read the embedded preview + EXIF and open the RAF.
-
-        Skips itself if a newer selection has already superseded it, so fast
-        scrubbing does not pile up decodes.
-        """
-        self._load_pending_id = 0
-        if generation != self._generation:
-            return GLib.SOURCE_REMOVE
+    def _begin_load(self, raf_path: str) -> None:
+        """Take the image's stored crop and exposure as its load starts."""
         self.preview_view.set_crop(sidecar.load_crop(raf_path))
-        self._stored_ev = sidecar.load_exposure(raf_path)
-        self._image_ev = None
-        self._shot_ev = None
-        # The camera open runs on its own worker. The embedded-preview read
-        # and decode run on a short-lived thread. Neither blocks the UI, so
-        # the filmstrip animation stays smooth and the image appears as soon
-        # as it is decoded.
-        jpeg = self._camera_file_of(raf_path)
-        if jpeg is not None:
-            self._worker.submit(self._session.close)
-        elif self._session.is_open or camera_info.detect_camera():
-            self._worker.open(
-                raf_path,
-                on_done=partial(self._on_opened, generation),
-                on_error=self._on_quiet_error if quiet else self._on_error,
-            )
-        else:
-            self._set_busy(busy=False, status=_NO_CAMERA)
-        threading.Thread(
-            target=self._decode_selection,
-            args=(generation, raf_path, jpeg),
-            name="grawji-decode",
-            daemon=True,
-        ).start()
-        return GLib.SOURCE_REMOVE
+        self._exposure.begin(sidecar.load_exposure(raf_path))
 
-    def _decode_selection(
-        self, generation: int, raf_path: str, source: str | None = None
-    ) -> None:
-        """Read and decode the preview."""
-        native = imagemeta.native_size(source or raf_path)
-        try:
-            jpeg = (
-                Path(source).read_bytes()
-                if source is not None
-                else raf.embedded_jpeg(raf_path)
-            )
-            pixbuf = oriented_pixbuf(jpeg)
-            rows = imagemeta.exif_rows(jpeg)
-        except (ValueError, OSError, GLib.Error):
-            mainloop.call(
-                self._apply_selection, generation, None, None, [], native
-            )
-            return
-        mainloop.call(
-            self._apply_selection, generation, jpeg, pixbuf, rows, native
-        )
+    def _camera_present(self) -> bool:
+        """Whether a camera is there to open a RAF on."""
+        return self._session.is_open or bool(camera_info.detect_camera())
 
-    def _apply_selection(
-        self,
-        generation: int,
-        jpeg: bytes | None,
-        pixbuf: Any,
-        rows: list[tuple[str, str]],
-        native: tuple[int, int] | None,
-    ) -> bool:
-        """Show the decoded embedded preview + EXIF."""
-        if generation != self._generation:
-            return GLib.SOURCE_REMOVE
-        self.preview_view.set_embedded_jpeg(jpeg)
-        self.preview_view.set_native_size(native)
-        if pixbuf is not None:
-            self.preview_view.show_pixbuf(pixbuf)
+    def _show_decoded(self, decoded: Decoded) -> None:
+        """Show the image's own picture and its EXIF."""
+        self.preview_view.set_embedded_jpeg(decoded.jpeg)
+        self.preview_view.set_native_size(decoded.native)
+        if decoded.pixbuf is not None:
+            self.preview_view.show_pixbuf(decoded.pixbuf)
         else:
             self.preview_view.clear_source()
-        self._set_navigator_pixbuf(pixbuf)
-        self._populate_exif_rows(rows)
+        self._info.show_original(decoded.pixbuf)
+        self._info.show_exif(decoded.rows)
         if self._camera_file_of(self._raf_path) is not None:
-            self._set_busy(busy=False, status=self._camera_file_status())
-        return GLib.SOURCE_REMOVE
+            self._set_busy(busy=False, status=self._source.status())
 
-    def _init_navigator(self) -> None:
-        """Wire the Info-tab original thumbnail and its lazy texture."""
-        self._navigator = Navigator(
-            area=self.nav_overlay,
-            scroll=self.preview_view.scroll,
+    def _init_info(self) -> None:
+        """Wire the Info tab's original thumbnail and EXIF rows."""
+        self._info = InfoPanel(
+            stack=self.left_stack,
             picture=self.original_picture,
-            get_rotation=lambda: self.preview_view.rotation,
+            group=self.exif_group,
+            navigator=Navigator(
+                area=self.nav_overlay,
+                scroll=self.preview_view.scroll,
+                picture=self.original_picture,
+                get_rotation=lambda: self.preview_view.rotation,
+            ),
         )
-        self._navigator_pixbuf: Any | None = None
-        self._navigator_dirty = False
-        self.left_stack.connect(
-            "notify::visible-child", self._on_left_page_changed
-        )
 
-    def _info_visible(self) -> bool:
-        """Whether the sidebar's Info tab (the navigator) is showing."""
-        return self.left_stack.get_visible_child_name() == "info"
-
-    def _set_navigator_pixbuf(self, pixbuf: Any) -> None:
-        """Feed the Info-tab original, building its texture only if shown."""
-        self._navigator_pixbuf = pixbuf
-        if pixbuf is None:
-            self.original_picture.set_paintable(None)
-            self._navigator_dirty = False
-        elif self._info_visible():
-            self.original_picture.set_paintable(texture_for_pixbuf(pixbuf))
-            self._navigator_dirty = False
-        else:
-            self._navigator_dirty = True
-
-    def _on_left_page_changed(self, *_args: object) -> None:
-        """Build the deferred navigator texture when Info becomes visible."""
-        if (
-            self._navigator_dirty
-            and self._navigator_pixbuf is not None
-            and self._info_visible()
-        ):
-            self.original_picture.set_paintable(
-                texture_for_pixbuf(self._navigator_pixbuf)
-            )
-            self._navigator_dirty = False
-            self._navigator.queue_draw()
-
-    def _on_opened(self, generation: int, _result: object) -> None:
+    def _on_opened(self) -> None:
         """Show the first preview, applying the sticky recipe selection."""
-        if generation != self._generation:
-            return  # a newer selection has superseded this open
-        carry = (
-            self.recipe_panel.get_recipe()
-            if self.recipe_panel.needs_save
-            else None
-        )
+        panel = self.recipe_panel
+        carry = panel.get_recipe() if panel.needs_save else None
         profile = self._session.profile
         if profile is not None:
             model = self._rendering_model()
-            self._populate_exif_rows(
-                self._exif_pairs + self._developed_by_row()
+            foreign = self._session.foreign is not None
+            self._info.set_developed_by(
+                self._session.model if foreign else None
             )
-            self.recipe_panel.apply_capabilities(
-                capabilities_for(profile, model=model)
-            )
-            self.recipe_panel.set_dr_ceiling(shot_dynamic_range(profile))
-            self._notify_unverified(model)
+            panel.apply_capabilities(capabilities_for(profile, model=model))
+            panel.set_dr_ceiling(shot_dynamic_range(profile))
+            self._notices.notify_unverified(model)
         else:
-            self.recipe_panel.set_dr_ceiling(None)
-        render_working = True
-        shot_recipe = (
-            recipe_from_profile(profile) if profile is not None else Recipe()
-        )
-        # EV is per image: the stored override wins, else the shot EV.
-        self._shot_ev = shot_recipe.exposure
-        ev = (
-            self._stored_ev
-            if self._stored_ev is not None
-            else shot_recipe.exposure
-        )
-        if carry is not None:
-            self.recipe_panel.set_recipe(carry)
-            self.recipe_panel.set_exposure(ev)
-            self._image_ev = ev
-            self.recipe_panel.reset_history()
-            self._render_preview()
-            if self.preview_view.comparing:
-                self._render_baseline(self._generation)
-            return
+            panel.set_dr_ceiling(None)
+        shot = recipe_from_profile(profile) if profile is not None else None
         selection = self._settings.open_recipe
-        saved = (
-            None
-            if selection == FROM_IMAGE
-            else self._recipe_library.get(selection)
+        plan = plan_open(
+            shot=shot,
+            stored_ev=self._exposure.stored,
+            carry=carry,
+            selection=selection,
+            saved=(
+                None
+                if selection == FROM_IMAGE
+                else self._recipe_library.get(selection)
+            ),
+            has_embedded=self.preview_view.has_embedded_jpeg,
         )
-        from_image = selection == FROM_IMAGE or saved is None
-        if profile is not None and from_image:
-            self.recipe_panel.set_active(shot_recipe, FROM_IMAGE_LABEL)
-            # The loaded recipe is the image's own, so the embedded JPEG
-            # already shown is exactly what a render would produce - skip the
-            # slow conversion round-trip until the user actually edits. A
-            # stored EV override changes the result, so it must render.
-            if (
-                self.preview_view.has_embedded_jpeg
-                and ev == shot_recipe.exposure
-            ):
-                self._set_busy(busy=False, status="Ready.")
-                render_working = False
-        elif saved is not None:
-            self.recipe_panel.set_active(saved, selection)
-        self.recipe_panel.set_exposure(ev)
-        self._image_ev = ev
-        self.recipe_panel.reset_history()
-        if render_working:
-            self._render_preview()
+        if plan.recipe is not None:
+            if plan.label is None:
+                panel.set_recipe(plan.recipe)
+            else:
+                panel.set_active(plan.recipe, plan.label)
+        panel.set_exposure(plan.exposure)
+        self._exposure.opened((shot or Recipe()).exposure, plan.exposure)
+        panel.reset_history()
+        if plan.render:
+            self._render.render()
+        else:
+            self._set_busy(busy=False, status="Ready.")
         # Comparing carries across images: refresh the baseline for this one.
         if self.preview_view.comparing:
-            self._render_baseline(self._generation)
-
-    def _notify_unverified(self, model: str | None) -> None:
-        """Toast once per session when the body is not in the table.
-
-        An unknown model gets the conservative baseline, so controls the
-        body may well support stay hidden. Say so instead of looking
-        broken, and invite the report that gets the body added.
-        """
-        if model is None or is_known_model(model):
-            return
-        if model in self._notified_models:
-            return
-        self._notified_models.add(model)
-        toast = Adw.Toast.new(
-            f"The {model} is not in grawji's capability table yet - "
-            "showing the safe baseline. Please report your body!"
-        )
-        toast.set_timeout(0)  # stays until dismissed, it is actionable
-        toast.set_button_label("Report…")
-        toast.connect("button-clicked", self._on_report_body)
-        self.toast_overlay.add_toast(toast)
-
-    def _on_report_body(self, _toast: Any) -> None:
-        """Open the new-body issue template in the browser."""
-        Gtk.UriLauncher.new(
-            "https://github.com/p5k369/grawji/issues/new"
-            "?template=new-body-report.yml"
-        ).launch(self, None, None)
+            self._render.render_baseline()
 
     def open_raf(self, path: str) -> None:
         """Open a RAF or a folder from outside."""
@@ -1041,7 +834,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._compare_action.set_state(GLib.Variant.new_boolean(False))
             self.preview_view.set_compare(on=False)
         elif self.preview_view.comparing:
-            self._render_baseline(self._generation)  # baseline recipe changed
+            self._render.render_baseline()  # baseline recipe changed
 
     def _on_toggle_compare(self, action: Any, value: Any) -> None:
         """Start or stop the baseline split-compare view."""
@@ -1052,115 +845,46 @@ class MainWindow(Adw.ApplicationWindow):
             ):
                 return  # nothing to compare, leave the toggle off
             action.set_state(value)
-            self._render_baseline(self._generation)
+            self._render.render_baseline()
         else:
             action.set_state(value)
             self.preview_view.set_compare(on=False)
 
-    def _render_baseline(self, generation: int) -> None:
-        """Render the marked baseline recipe for the current image."""
-        baseline = self._recipe_library.baseline_recipe()
-        if baseline is None:
-            return
-        baseline = replace(
-            baseline, exposure=self.recipe_panel.get_recipe().exposure
-        )
-        # Rendering the baseline is a camera round-trip. Show progress so
-        # the wait before the split appears is not a dead moment.
-        self._set_busy(busy=True, status="Preparing comparison…")
-        self._worker.submit(
-            partial(self._session.render, baseline, full_resolution=False),
-            on_done=partial(self._on_baseline_rendered, generation),
-            on_error=self._on_error,
-        )
+    def _compare_wanted(self) -> bool:
+        """Whether the split-compare toggle is switched on."""
+        return bool(self._compare_action.get_state().get_boolean())
 
-    def _on_baseline_rendered(self, generation: int, jpeg: bytes) -> None:
-        """Feed the baseline render into the split view."""
-        if generation != self._generation:
-            return  # a newer selection has superseded this baseline
-        if not self._compare_action.get_state().get_boolean():
-            # Compare was toggled off while this baseline was rendering,
-            # dropping it keeps the split and the button state in sync.
-            self._set_busy(busy=False, status="Ready.")
-            return
+    def _show_baseline(self, jpeg: bytes) -> None:
+        """Open the split view on a rendered baseline."""
         self.preview_view.set_compare_baseline(jpeg)
         self.preview_view.set_compare(on=True)
-        self._set_busy(busy=False, status="Comparing with baseline.")
 
     def _on_recipe_changed(self, _panel: Any) -> None:
         """Re-render after a recipe edit."""
         if not self._session.is_open:
             return
-        self._schedule_render()
+        self._render.schedule()
 
     def _persist_exposure(self) -> None:
         """Store the image's EV in its sidecar when it changed."""
         if self._raf_path is None:
             return
-        ev = self.recipe_panel.get_recipe().exposure
-        if self._image_ev is not None and ev == self._image_ev:
-            return
-        self._image_ev = ev
-        back_to_shot = (
-            self._shot_ev is not None and abs(ev - self._shot_ev) < _EV_EPSILON
+        changed, value = self._exposure.settle(
+            self.recipe_panel.get_recipe().exposure
         )
-        sidecar.save_exposure(self._raf_path, None if back_to_shot else ev)
+        if not changed:
+            return
+        sidecar.save_exposure(self._raf_path, value)
         self._filmstrip.refresh_badges(str(self._raf_path))
-
-    def _on_try_recipes(self) -> None:
-        """Render the open image once per saved recipe, pick from a grid."""
-        if not self._session.is_open:
-            self.preview_view.set_status("Open an image first.")
-            return
-        exposure = self.recipe_panel.get_recipe().exposure
-        groups: list[tuple[str, list[tuple[str, str, Recipe]]]] = []
-        folders = [UNGROUPED, *self._recipe_library.folders()]
-        for folder in folders:
-            members: list[tuple[str, str, Recipe]] = []
-            for name in self._recipe_library.names_in(folder):
-                recipe = self._recipe_library.get(name)
-                if recipe is not None:
-                    members.append(
-                        (name, name, replace(recipe, exposure=exposure))
-                    )
-            if members:
-                groups.append((folder or "Recipes", members))
-        if not any(members for _t, members in groups):
-            self.preview_view.set_status("No saved recipes to try.")
-            return
-
-        def render(
-            recipe: Recipe,
-            on_done: Callable[[bytes], None],
-            on_error: Callable[[Exception], None],
-        ) -> None:
-            self._worker.render_thumb(
-                recipe, on_done=on_done, on_error=on_error
-            )
-
-        dialog = RecipeGridDialog(
-            groups=groups,
-            render=render,
-            on_pick=lambda name: self._on_apply_recipe(None, name),
-            orientation=(
-                imagemeta.exif_orientation(str(self._raf_path))
-                if self._raf_path
-                else 1
-            ),
-        )
-        # Re-render on close so the preview matches the panel again
-        dialog.connect("closed", lambda *_a: self._render_if_open())
-        dialogs.fit_dialog(
-            dialog, self, width_fraction=0.55, height_fraction=0.85
-        )
-        dialog.present(self)
 
     def _connect_recipe_panel(self) -> None:
         """Wire the recipe panel's settings and signals."""
         self.recipe_panel.set_wb_grid_tint(self._settings.wb_grid_tint)
         self.recipe_panel.connect("changed", self._on_recipe_changed)
         self.recipe_panel.connect("history-changed", self._on_history_changed)
-        self.recipe_panel.connect("apply-recipe", self._on_apply_recipe)
+        self.recipe_panel.connect(
+            "apply-recipe", lambda _panel, name: self._recipes.apply(name)
+        )
         self.recipe_panel.connect(
             "paste-recipe", lambda *_a: self._library.paste_text()
         )
@@ -1173,184 +897,34 @@ class MainWindow(Adw.ApplicationWindow):
         self.recipe_panel.connect(
             "import-fp", lambda *_a: self._library.import_recipe()
         )
-        self._edit_match = EditMatchController(self._session, self._worker)
-        self.recipe_panel.connect(
-            "import-edit", lambda *_a: self._recipe_from_edit()
-        )
-
-    def _on_apply_recipe(self, _panel: Any, name: str) -> None:
-        """Apply the picker's choice, guarding unsaved recipe edits."""
-        self._confirm_recipe_discard(partial(self._apply_choice, name))
-
-    def _apply_choice(self, name: str) -> None:
-        """Apply and remember the recipe chosen in the panel's picker."""
-        self._settings.open_recipe = name
-        self._save_settings()
-        if name == FROM_IMAGE:
-            self._apply_from_image()
-        else:
-            self._library.apply(name)
-
-    def _recipe_from_edit(self) -> None:
-        """Pick an edited export of the open shot and match its look."""
-        if self._raf_path is None or not self._session.is_open:
-            self.preview_view.set_status(
-                "Open an image with its camera connected first."
-            )
-            return
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Choose an edited version of this image")
-        images = Gtk.FileFilter()
-        images.set_name("Images")
-        images.add_pixbuf_formats()
-        filters = Gio.ListStore.new(Gtk.FileFilter)
-        filters.append(images)
-        dialog.set_filters(filters)
-        dialog.set_default_filter(images)
-        dialog.open(self, None, self._on_edit_picked)
-
-    def _on_edit_picked(self, dialog: Any, result: Any) -> None:
-        """Start the search for the picked edit."""
-        try:
-            gfile = dialog.open_finish(result)
-        except GLib.Error:
-            return
-        path = gfile.get_path()
-        if path is None or self._raf_path is None:
-            return
-        raf_path = str(self._raf_path)
-        title = Path(path).stem
-        orientation = imagemeta.exif_orientation(raf_path)
-        start = self.recipe_panel.get_recipe()
-        capabilities = self.recipe_panel.capabilities or BASELINE
-
-        def failed(error: Exception) -> None:
-            if isinstance(error, SearchCancelledError):
-                return
-            if isinstance(error, EditMatchError):
-                match_dialog.fail(str(error))
-                return
-            logging.getLogger("grawji").warning(
-                "recipe from an edit failed: %s", error
-            )
-            match_dialog.fail(
-                f"The camera stopped the search: {error}", retry=True
-            )
-
-        def run(
-            skin_priority: bool, texture: bool, budget: int | None
-        ) -> None:
-            self._settings.edit_match_budget = budget or 0
-            cancel = self._edit_match.start(
-                EditMatchRequest(
-                    raf_path=raf_path,
-                    edit_path=path,
-                    orientation=orientation,
-                    start=start,
-                    capabilities=capabilities,
-                    skin_priority=skin_priority,
-                    texture=texture,
-                    budget=budget,
+        self._edit_flow = EditMatchFlow(
+            self,
+            EditMatchController(self._session, self._worker),
+            self._settings,
+            EditMatchHost(
+                open_raf=self._open_raf,
+                recipe=self.recipe_panel.get_recipe,
+                capabilities=lambda: (
+                    self.recipe_panel.capabilities or BASELINE
                 ),
-                EditMatchCallbacks(
-                    on_edit=match_dialog.show_edit,
-                    on_view=match_dialog.show_view,
-                    on_progress=match_dialog.set_progress,
-                    on_stage=match_dialog.set_stage,
-                    on_estimate=match_dialog.set_estimate,
-                    on_done=match_dialog.finish,
-                    on_error=failed,
+                set_status=self.preview_view.set_status,
+                confirm_discard=lambda proceed: self._recipes.confirm_discard(  # noqa: PLW0108
+                    proceed
                 ),
-            )
-            match_dialog.set_cancel(cancel)
-
-        match_dialog = EditMatchDialog(
-            on_apply=lambda recipe: self._confirm_recipe_discard(
-                partial(self._apply_edit_recipe, recipe, title)
+                apply=lambda recipe, title: self._recipes.apply_found(  # noqa: PLW0108
+                    recipe, title
+                ),
             ),
-            on_start=run,
-            budget=self._settings.edit_match_budget or None,
+        )
+        self.recipe_panel.connect(
+            "import-edit", lambda *_a: self._edit_flow.begin()
         )
 
-        def preview() -> None:
-            try:
-                pixels = edit_preview(path)
-            except EditMatchError as error:
-                mainloop.call(match_dialog.fail, str(error))
-                return
-            mainloop.call(match_dialog.show_edit, pixels)
-
-        threading.Thread(
-            target=preview, name="grawji-edit-preview", daemon=True
-        ).start()
-        dialogs.fit_dialog(
-            match_dialog, self, width_fraction=0.85, height_fraction=0.85
-        )
-        match_dialog.present(self)
-
-    def _apply_edit_recipe(self, recipe: Recipe, title: str) -> None:
-        """Apply a recipe found for an edit, its exposure as the image EV."""
-        self._library.apply_unsaved(recipe, title)
-        self._image_ev = recipe.exposure
-        self._persist_exposure()
-
-    def _confirm_recipe_discard(self, proceed: Callable[[], None]) -> None:
-        """Run proceed, first asking about unsaved recipe edits."""
-        if not self.recipe_panel.needs_save:
-            proceed()
-            return
-        label = self.recipe_panel.active_label
-        body = (
-            f"The controls changed since “{label}” was applied."
-            if self.recipe_panel.is_modified
-            else f"“{label}” has not been saved yet."
-        )
-        dialog = Adw.AlertDialog(heading="Unsaved recipe changes", body=body)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("discard", "Discard")
-        dialog.add_response("save", "Save…")
-        dialog.set_response_appearance(
-            "discard", Adw.ResponseAppearance.DESTRUCTIVE
-        )
-        dialog.set_default_response("save")
-
-        def on_response(_dialog: Any, response: str) -> None:
-            if response == "discard":
-                proceed()
-            elif response == "save":
-                self._library.save_current()
-
-        dialog.connect("response", on_response)
-        dialog.present(self)
-
-    def _apply_from_image(self) -> None:
-        """Load the open image's own in-camera recipe into the controls."""
-        profile = self._session.profile
-        if profile is None:
-            return
-        self.recipe_panel.set_active(
-            recipe_from_profile(profile), FROM_IMAGE_LABEL
-        )
-        if self._image_ev is not None:
-            self.recipe_panel.set_exposure(self._image_ev)
-        self._render_if_open()
-
-    def _reset_recipe(self) -> None:
-        """Reset all controls to the default recipe, keeping the EV."""
-        exposure = self.recipe_panel.get_recipe().exposure
-        self.recipe_panel.set_active(Recipe(), "Default")
-        self.recipe_panel.set_exposure(exposure)
-        self._render_if_open()
-
-    def _undo_edit(self) -> None:
-        """Take the last recipe edit back."""
-        if not self.recipe_panel.undo():
-            self.preview_view.set_status("Nothing to undo.")
-
-    def _redo_edit(self) -> None:
-        """Bring the last undone recipe edit back."""
-        if not self.recipe_panel.redo():
-            self.preview_view.set_status("Nothing to redo.")
+    def _open_raf(self) -> str | None:
+        """The image open on the camera, None when there is none."""
+        if self._raf_path is None or not self._session.is_open:
+            return None
+        return str(self._raf_path)
 
     def _on_history_changed(self, panel: Any) -> None:
         """Enable undo and redo only while there is a step to take."""
@@ -1362,128 +936,14 @@ class MainWindow(Adw.ApplicationWindow):
             if action is not None:
                 action.set_enabled(enabled)
 
-    def _render_if_open(self) -> None:
-        """Re-render the preview if an image is open."""
-        if self._session.is_open:
-            self._render_preview()
-
-    def _schedule_render(self) -> None:
-        """Debounce preview renders so a slider drag fires only one.
-
-        Without this, every intermediate slider value queues a camera
-        render; the preview then lags behind the control and shows a
-        stale result. Coalesce to a single render once edits settle.
-        """
-        if self._render_pending_id:
-            GLib.source_remove(self._render_pending_id)
-        self._render_pending_id = GLib.timeout_add(150, self._render_now)
-
-    def _render_now(self) -> bool:
-        """Persist the settled EV and fire the debounced preview render."""
-        self._render_pending_id = 0
-        # Persisting here (not per edit) writes the sidecar once a slider
-        # drag settles, instead of once per intermediate EV value.
-        self._persist_exposure()
-        self._render_if_open()
-        return GLib.SOURCE_REMOVE
-
-    def _flush_pending_exposure(self) -> None:
-        """Persist a pending debounced EV now and cancel the timer."""
-        if self._render_pending_id:
-            GLib.source_remove(self._render_pending_id)
-            self._render_pending_id = 0
-            self._persist_exposure()
-
-    def _render_preview(self) -> None:
-        """Queue a fast (non-full-resolution) preview render."""
-        self._set_busy(busy=True, status="Rendering preview…")
-        self._worker.render(
-            self.recipe_panel.get_recipe(),
-            full_resolution=False,
-            on_done=partial(self._on_preview, self._generation),
-            on_error=self._on_error,
-        )
-
-    def _on_preview(self, generation: int, jpeg: bytes) -> None:
-        """Decode a finished preview render off-thread, then show it."""
-        if generation != self._generation:
-            return  # a newer selection has superseded this render
-        self._preview_seq += 1
-        threading.Thread(
-            target=self._decode_preview,
-            args=(generation, self._preview_seq, jpeg),
-            name="grawji-preview-decode",
-            daemon=True,
-        ).start()
-
-    def _decode_preview(self, generation: int, seq: int, jpeg: bytes) -> None:
-        """Decode the preview jpeg off the main thread."""
-        try:
-            pixbuf = oriented_pixbuf(jpeg)
-        except GLib.Error as exc:
-            mainloop.call(self._apply_preview, generation, seq, None, str(exc))
-            return
-        mainloop.call(self._apply_preview, generation, seq, pixbuf, "")
-
-    def _apply_preview(
-        self,
-        generation: int,
-        seq: int,
-        pixbuf: Any,
-        error: str,
-    ) -> bool:
-        """Show a decoded preview render."""
-        if generation != self._generation or seq != self._preview_seq:
-            return GLib.SOURCE_REMOVE  # superseded while decoding
-        if pixbuf is None:
-            self._set_busy(busy=False, status=f"Cannot display image: {error}")
-            return GLib.SOURCE_REMOVE
-        self.preview_view.show_pixbuf(pixbuf)
-        self._set_busy(busy=False, status="Ready.")
-        return GLib.SOURCE_REMOVE
-
     def _render_recipe_thumb(
         self, recipe: Recipe, on_done: Callable[[bytes | None], None]
     ) -> None:
-        """Render a recipe against the current RAF into a small thumbnail.
-
-        Renders the given recipe (not the panel's current controls) so a
-        saved recipe's picture always matches the recipe itself. The
-        manager's bank pane closes the live session on open, so the job
-        re-opens the RAF first when needed.
-        """
+        """Render a recipe against the open RAF into a small thumbnail."""
         if self._raf_path is None:
             on_done(None)
             return
-        generation = self._generation
-        raf = str(self._raf_path)
-        # The camera thumbnail carries no EXIF orientation, so fall back
-        # to the RAF's own so portrait shots are not stored sideways.
-        orientation = imagemeta.exif_orientation(raf)
-
-        def task() -> bytes:
-            if not self._session.is_open:
-                self._session.open(raf)
-            return self._session.render_thumb(recipe)
-
-        def finished(jpeg: bytes) -> None:
-            if generation != self._generation:
-                return
-            try:
-                upright = oriented_jpeg(jpeg, orientation)
-                on_done(
-                    thumb_jpeg(
-                        trim_letterbox(upright), max_edge=_RECIPE_THUMB_EDGE
-                    )
-                )
-            except GLib.Error:
-                on_done(None)
-
-        def failed(exc: Exception) -> None:
-            self._on_error(exc)
-            on_done(None)
-
-        self._worker.submit(task, on_done=finished, on_error=failed)
+        self._render.render_thumb(str(self._raf_path), recipe, on_done)
 
     def _on_recipe_manager_closed(self) -> None:
         """Re-open the current RAF if the manager closed its session."""
@@ -1542,7 +1002,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _cycle_background(self) -> None:
         """Cycle the preview background and remember the choice."""
         self._settings.canvas_background = self.preview_view.cycle_background()
-        self._style_grid_canvas(self._settings.canvas_background)
+        self._browse.set_canvas(self._settings.canvas_background)
         self._save_settings()
 
     def _toggle_peek(self) -> None:
@@ -1565,7 +1025,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         if keyval == Gdk.KEY_Delete:
             return self._fileops.handle_delete()
-        return self._on_recipe_key(keyval, state)
+        return self._recipes.on_key(keyval, state)
 
     def _on_crop_key(self, keyval: int) -> bool:
         """Escape cancels and Return commits the crop being edited."""
@@ -1576,34 +1036,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.preview_view.apply_crop()
             return True
         return False
-
-    def _on_recipe_key(self, keyval: int, state: Any) -> bool:
-        """Apply the recipe assigned to a bare number key, if any."""
-        hotkey = self._recipe_hotkey(keyval, state)
-        if hotkey is None:
-            return False
-        name = self._recipe_library.recipe_for_hotkey(hotkey)
-        if name is None:
-            return False
-        if self._camera_file_of(self._raf_path) is not None:
-            self.preview_view.set_status(
-                "Recipes develop the RAW. Switch to it with j."
-            )
-            return True
-        self._on_apply_recipe(None, name)
-        return True
-
-    @staticmethod
-    def _recipe_hotkey(keyval: int, state: Any) -> int | None:
-        """The recipe number a bare 1-9 press stands for."""
-        modifiers = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK
-        if state & modifiers:
-            return None
-        if Gdk.KEY_1 <= keyval <= Gdk.KEY_9:
-            return keyval - Gdk.KEY_1 + 1
-        if Gdk.KEY_KP_1 <= keyval <= Gdk.KEY_KP_9:
-            return keyval - Gdk.KEY_KP_1 + 1
-        return None
 
     def _focus_is_editable(self) -> bool:
         """Whether a text widget owns the focus."""
@@ -1632,18 +1064,6 @@ class MainWindow(Adw.ApplicationWindow):
         sidecar.save_crop(self._raf_path, self.preview_view.crop_rotate)
         self._filmstrip.refresh_badges(str(self._raf_path))
 
-    def _populate_exif_rows(self, rows: list[tuple[str, str]]) -> None:
-        """Show already-parsed EXIF (label, value) pairs in the Image group."""
-        for row in self._exif_rows:
-            self.exif_group.remove(row)
-        self._exif_rows = []
-        if not any(label == "Developed by" for label, _value in rows):
-            self._exif_pairs = list(rows)
-        for label, value in rows:
-            row = Adw.ActionRow(title=label, subtitle=value)
-            self.exif_group.add(row)
-            self._exif_rows.append(row)
-
     def _set_busy(self, *, busy: bool, status: str) -> None:
         """Toggle the spinner and recipe controls, and set the status."""
         self.preview_view.set_spinner(active=busy)
@@ -1662,86 +1082,6 @@ class MainWindow(Adw.ApplicationWindow):
         jpeg = self._camera_file_of(self._raf_path) is not None
         self.export_button.set_sensitive(self._session.is_open or jpeg)
 
-    def _on_error(self, exc: Exception) -> None:
-        """Surface a camera error in a dialog and reset the busy state."""
-        logging.getLogger("grawji").warning("camera operation failed: %s", exc)
-        self._set_busy(busy=False, status="Error.")
-        # A camera failure aborts any batch mid-flight, unstick its dialog.
-        self._batch.abort()
-        if isinstance(exc, ForeignRafError):
-            self._set_busy(busy=False, status=self._foreign_status())
-            self._warn_foreign_once()
-            return
-        # A wedged camera fails every queued render in turn; show one dialog.
-        if self._error_showing:
-            return
-        if camera_info.is_camera_stuck(exc):
-            message = "Camera not responding"
-            detail = (
-                "The camera stopped responding during conversion and "
-                "appears to be stuck. Turn it off and on again - if it "
-                "will not turn off, briefly remove the battery - then "
-                "reconnect and try the image again."
-            )
-        elif camera_info.is_camera_disconnected(exc):
-            message = "Camera disconnected"
-            detail = (
-                "grawji must be restarted to use a camera that was "
-                "unplugged and reconnected: the Flatpak sandbox does not "
-                "pick up the reconnected camera on its own."
-                if camera_info.IN_FLATPAK
-                else "The camera was disconnected. Reconnect it, then "
-                "select an image again to continue."
-            )
-        else:
-            message = "Camera error"
-            detail = str(exc)
-        self._error_showing = True
-        alert = Gtk.AlertDialog()
-        alert.set_message(message)
-        alert.set_detail(detail)
-        alert.set_buttons(["Close"])
-        alert.choose(self, None, self._on_error_dismissed)
-
-    def _foreign_model(self) -> str:
-        """The body named in the current RAF's header."""
-        named = raf.header_model(self._raf_path) if self._raf_path else None
-        return named or "another body"
-
-    def _foreign_status(self) -> str:
-        """Why a RAF of another body shows its in-camera JPEG only."""
-        return f"Shot on {self._foreign_model()}, showing the in-camera JPEG."
-
-    def _warn_foreign_once(self) -> None:
-        """Toast the first RAF of another body per session."""
-        named = self._foreign_model()
-        if named in self._foreign_warned:
-            return
-        self._foreign_warned.add(named)
-        model = self._session.model
-        size = raf.output_size(self._raf_path) if self._raf_path else None
-        fits = can_carry(model, named, size) if size else None
-        if (
-            model
-            and fits is not False
-            and not opener.carriers_for(self._settings, model)
-        ):
-            toast = Adw.Toast.new(
-                f"The {model} needs a carrier to develop {named} shots."
-            )
-            toast.set_button_label("Set up…")
-            toast.connect("button-clicked", lambda _t: self._library.manage())
-        else:
-            body = model or "The camera"
-            toast = Adw.Toast.new(f"{body} cannot develop {named} shots.")
-        self.toast_overlay.add_toast(toast)
-
-    def _on_error_dismissed(self, dialog: Any, result: Any) -> None:
-        """Clear the error-showing guard once the dialog is closed."""
-        with contextlib.suppress(GLib.Error):
-            dialog.choose_finish(result)
-        self._error_showing = False
-
     def _current_capabilities(self) -> Capabilities:
         """Capabilities of the connected body for recipe compatibility."""
         profile = self._session.profile
@@ -1752,43 +1092,19 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _carriers_for(self, model: str) -> dict[int, str]:
         """A body's carrier files by dynamic range, as the pane shows them."""
-        found = opener.carriers_for(self._settings, model)
-        return {dr: str(path) for dr, path in found.items()}
+        return opener.listed_carriers(self._settings, model)
 
     def _add_carrier(self, model: str, path: str) -> str | None:
         """Register a RAF as a body's carrier under its shot dynamic range."""
-        problem = opener.check_carrier(path, model)
-        if problem is not None:
-            return problem
-        self._store_carriers(
-            model,
-            self._carriers_for(model) | {opener.dynamic_range_of(path): path},
-        )
-        return None
+        problem = opener.add_carrier(self._settings, model, path)
+        if problem is None:
+            self._save_settings()
+        return problem
 
     def _forget_carrier(self, model: str, dynamic_range: int) -> None:
         """Forget a body's carrier of a dynamic range."""
-        registered = self._carriers_for(model)
-        registered.pop(dynamic_range, None)
-        self._store_carriers(model, registered)
-
-    def _store_carriers(self, model: str, registered: dict[int, str]) -> None:
-        """Persist a body's carrier set under one spelling of its model."""
-        key = opener.normalize_model(model)
-        for name in list(self._settings.carriers):
-            if opener.normalize_model(name) == key:
-                del self._settings.carriers[name]
-        if registered:
-            self._settings.carriers[model] = {
-                str(dr): registered[dr] for dr in sorted(registered)
-            }
+        opener.forget_carrier(self._settings, model, dynamic_range)
         self._save_settings()
-
-    def _developed_by_row(self) -> list[tuple[str, str]]:
-        """The info row naming the body that develops a foreign RAF."""
-        if self._session.foreign is None or not self._session.model:
-            return []
-        return [("Developed by", self._session.model)]
 
     def _rendering_model(self) -> str | None:
         """The body whose engine develops the open RAF."""
@@ -1815,11 +1131,6 @@ class MainWindow(Adw.ApplicationWindow):
         ):
             self._on_raf_selected(str(self._raf_path), quiet=True)
         return GLib.SOURCE_CONTINUE
-
-    def _on_quiet_error(self, exc: Exception) -> None:
-        """Reset the busy state without a dialog."""
-        logging.getLogger("grawji").info("auto reconnect failed: %s", exc)
-        self._set_busy(busy=False, status="")
 
     def _on_preferences(self) -> None:
         """Open the preferences dialog."""
@@ -1905,9 +1216,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_close_request(self, _window: Any) -> bool:
         """Persist window size, stop the worker, then allow closing."""
         if self.recipe_panel.needs_save and not self._close_confirmed:
-            self._confirm_recipe_discard(self._close_discarded)
+            self._recipes.confirm_discard(self._close_discarded)
             return True
-        self._flush_pending_exposure()
+        self._render.flush()
         self._settings.window_width = self.get_width()
         self._settings.window_height = self.get_height()
         self._settings.sidebar_width = self.main_paned.get_position()
