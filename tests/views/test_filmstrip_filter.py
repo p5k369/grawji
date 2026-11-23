@@ -272,6 +272,61 @@ def test_a_stale_glide_cannot_fight_the_next_scroll(
     assert abs(strip.get_hadjustment().get_value() - resting) <= 2
 
 
+def test_a_glide_is_as_fast_to_the_right_as_to_the_left(
+    gtk: Any, tmp_path: Path
+) -> None:
+    """The list drops fractions of a pixel, the strip has to keep them."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import GLib, Gtk
+
+    from grawji.views.filmstrip import FilmStrip
+    from tests.gui_support import pump
+
+    for index in range(300):
+        (tmp_path / f"{index:03}.RAF").write_bytes(b"not a real raf")
+    strip = FilmStrip(on_select=lambda _p: None)
+    holder = Gtk.Window()
+    holder.set_default_size(800, 200)
+    holder.set_child(strip)
+    holder.present()
+    strip.scan(str(tmp_path))
+    for _ in range(60):
+        pump()
+        if strip._card_path:
+            break
+    adjustment = strip.get_hadjustment()
+    context = GLib.MainContext.default()
+    frames: list[bool] = []
+
+    def count(*_args: object) -> bool:
+        """Note a frame and stay on the clock."""
+        frames.append(True)
+        return True
+
+    strip.add_tick_callback(count)
+
+    def glide(direction: int) -> float:
+        """Move sixty frames at a fraction of a pixel each."""
+        start = adjustment.get_value()
+        for _ in range(60):
+            seen = len(frames)
+            strip._scroll_by(2.5 * direction)
+            strip.queue_draw()
+            while len(frames) == seen:
+                context.iteration(True)
+            pump(5)
+        return float(adjustment.get_value() - start)
+
+    adjustment.set_value(4000)
+    pump()
+    right = glide(1)
+    left = glide(-1)
+    assert abs(right - 150) <= 1, f"sixty steps right moved {right}"
+    assert abs(left + 150) <= 1, f"sixty steps left moved {left}"
+
+
 def test_leaving_the_window_ends_a_glide(window: Any, tmp_path: Path) -> None:
     """Losing focus with a key down would otherwise glide on."""
     (tmp_path / "a.RAF").write_bytes(b"not a real raf")
