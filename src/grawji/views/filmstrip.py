@@ -33,7 +33,6 @@ from grawji.views.folder_model import EntryItem, FolderModel
 from grawji.views.tile_thumbs import TileThumbs
 
 # Default continuous-scroll speed while a nav arrow is held, in px/second.
-_GLIDE_AHEAD_BOOST = 1.18
 _GLIDE_PX_PER_S_DEFAULT = 600
 
 
@@ -140,6 +139,7 @@ class FilmStrip(Gtk.ScrolledWindow):
         self._pending_mods: tuple[str, bool, bool] | None = None
         self._glide_tick: int | None = None
         self._glide_last: int | None = None
+        self._scroll_rest = 0.0
         self._glide_dir = 0
         self._glide_speed = float(_GLIDE_PX_PER_S_DEFAULT)
         self._reveal_wanted: tuple[str, bool] | None = None
@@ -1051,8 +1051,11 @@ class FilmStrip(Gtk.ScrolledWindow):
     def _scroll_by(self, delta: float) -> None:
         """Move the horizontal scroll position by delta, clamped."""
         adj = self.get_hadjustment()
-        top = adj.get_upper() - adj.get_page_size()
-        adj.set_value(max(adj.get_lower(), min(top, adj.get_value() + delta)))
+        wanted = adj.get_value() + delta + self._scroll_rest
+        whole = float(math.floor(wanted))
+        value = self._clamped(whole)
+        self._scroll_rest = wanted - whole if value == whole else 0.0
+        adj.set_value(value)
 
     def _on_scroll(self, _controller: Any, dx: float, dy: float) -> bool:
         """Pan the strip sideways from a plain wheel or trackpad swipe."""
