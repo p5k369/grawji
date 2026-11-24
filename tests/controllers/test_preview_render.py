@@ -320,4 +320,17 @@ def test_a_recipe_thumbnail_for_an_older_selection_is_dropped(
 
     rig.worker.tasks[0][1](jpeg)
 
-    assert results == []
+    assert results == [None]
+
+
+def test_an_undecodable_recipe_thumbnail_is_reported() -> None:
+    """A thumbnail that is no image ends in no picture, not in an error."""
+    rig = make()
+    rig.session.thumb = b"not a jpeg"
+    results: list[bytes | None] = []
+
+    rig.controller.render_thumb("/shots/a.RAF", Recipe(), results.append)
+    task, done = rig.worker.tasks[0]
+    done(task())
+
+    assert results == [None]

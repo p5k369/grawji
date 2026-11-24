@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from grawji import safefile
 from grawji.recipe import Recipe
 from grawji.settings import config_dir
 
@@ -413,10 +414,15 @@ class RecipeLibrary:
     def _load(self) -> None:
         """Read the library, migrating the flat format when needed."""
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            text = self._path.read_text(encoding="utf-8")
+        except OSError:
             return
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
         if not isinstance(data, dict):
+            safefile.set_aside(self._path)
             return
         if isinstance(data.get("recipes"), dict):
             self._load_v2(data)
@@ -491,4 +497,4 @@ class RecipeLibrary:
             "recipes": encoded,
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        safefile.write_text(self._path, json.dumps(data, indent=2))

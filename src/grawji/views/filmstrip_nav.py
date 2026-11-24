@@ -125,6 +125,7 @@ class FilmStripNav:
             return False
         if self._key_dir == direction:
             return True
+        self.cancel_hold()
         self._key_dir = direction
 
         def begin_glide() -> int:

@@ -15,7 +15,7 @@ from gi.repository import GdkPixbuf
 
 import grawji.controllers.exports as module
 import grawji.imaging.export as module_export
-from grawji.camera.core import ForeignRafError
+from grawji.camera.core import ForeignRafError, SessionStateError
 from grawji.controllers.exports import (
     BatchController,
     SingleExportController,
@@ -242,6 +242,10 @@ class FakeSession:
         self.file_types.append(file_type)
         self.recipes.append(recipe)
         return self._jpeg
+
+    def close(self):
+        """Count the session being closed after a batch."""
+        self.closed = getattr(self, "closed", 0) + 1
 
 
 def batch_controller(session, settings):
@@ -592,3 +596,104 @@ def test_a_single_export_of_a_camera_jpeg_needs_no_render(tmp_path):
     assert "went out as JPEG" in note
     controller._on_written((path, fmt, note))
     assert state["busy"][-1]["status"].startswith("Exported.")
+
+
+class BreakingSession(CountingSession):
+    """Dies on one RAF the way a lost camera would."""
+
+    def render(self, recipe, *, full_resolution, file_type="jpeg"):
+        """Render every RAF except b.RAF."""
+        if self.opened[-1].endswith("b.RAF"):
+            raise RuntimeError("camera gone")
+        return super().render(
+            recipe, full_resolution=full_resolution, file_type=file_type
+        )
+
+
+class RaisingWorker:
+    """Runs a task at once and reports what it raised."""
+
+    def submit(self, task, on_done, on_error):
+        """Run task, handing a failure to on_error."""
+        try:
+            result = task()
+        except Exception as exc:
+            on_error(exc)
+        else:
+            on_done(result)
+
+
+def _batch(session, tmp_path, current, errors):
+    """A batch over a.RAF and b.RAF with current open in the window."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    controller = BatchController(
+        parent=None,
+        worker=RaisingWorker(),
+        session=session,
+        settings=Settings(),
+        get_recipe=Recipe,
+        get_provenance=lambda: "",
+        get_current_raf=lambda: current,
+        set_busy=lambda **kw: None,
+        on_status=lambda text: None,
+        on_error=errors.append,
+    )
+    controller._pending = [str(tmp_path / "a.RAF"), str(tmp_path / "b.RAF")]
+    controller._start(str(out_dir), overwrite=True, skip_foreign=True)
+
+
+def test_a_batch_that_dies_puts_the_open_image_back(tmp_path):
+    """The preview must not end up rendering the batch's last image."""
+    session = BreakingSession(small_jpeg())
+    current = str(tmp_path / "open.RAF")
+    errors: list[Exception] = []
+
+    _batch(session, tmp_path, current, errors)
+
+    assert [str(exc) for exc in errors] == ["camera gone"]
+    assert session.opened[-1] == current
+
+
+def test_a_batch_without_an_open_image_closes_the_session(tmp_path):
+    """Nothing may stay open on the camera that the window does not show."""
+    session = CountingSession(small_jpeg())
+    errors: list[Exception] = []
+
+    _batch(session, tmp_path, None, errors)
+
+    assert errors == []
+    assert session.closed == 1
+
+
+class JpegOnlySession(CountingSession):
+    """Develops c.RAF through a carrier, which cannot write other formats."""
+
+    def render(self, recipe, *, full_resolution, file_type="jpeg"):
+        """Refuse c.RAF like a foreign RAF asked for a TIFF."""
+        if self.opened[-1].endswith("c.RAF"):
+            raise SessionStateError("a foreign RAF is developed as JPEG only")
+        return super().render(
+            recipe, full_resolution=full_resolution, file_type=file_type
+        )
+
+
+def test_one_image_the_camera_cannot_develop_does_not_end_the_batch(
+    tmp_path,
+):
+    """It counts as failed and the batch goes on."""
+    session = JpegOnlySession(small_jpeg())
+    controller = batch_controller(session, Settings())
+    counts = tally()
+    for name in ("c.RAF", "a.RAF"):
+        controller._export_one(
+            str(tmp_path / name),
+            tmp_path / name.replace(".RAF", ".jpg"),
+            Recipe(),
+            "",
+            True,
+            counts,
+        )
+
+    assert counts["failed"] == 1
+    assert counts["exported"] == 1

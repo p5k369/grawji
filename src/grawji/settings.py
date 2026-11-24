@@ -7,6 +7,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from grawji import safefile
+
 FROM_IMAGE = "__from_image__"
 FROM_IMAGE_LABEL = "From image"
 
@@ -177,4 +179,4 @@ def load_settings(path: Path) -> Settings:
 def save_settings(settings: Settings, path: Path) -> None:
     """Write settings to path as JSON, creating parent dirs."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings.to_dict(), indent=2), encoding="utf-8")
+    safefile.write_text(path, json.dumps(settings.to_dict(), indent=2))
