@@ -6,6 +6,7 @@ RAW+JPEG shot, so the three always keep one shared name.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 from collections.abc import Callable
@@ -89,8 +90,16 @@ def move_raf(src: Path | str, dest_dir: Path | str) -> Path:
     companions = _companions(source)
     target = _unique_destination(directory, source.name, companions)
     shutil.move(str(source), str(target))
-    for path, rule in companions:
-        shutil.move(str(path), str(rule(target)))
+    moved = [(source, target)]
+    try:
+        for path, rule in companions:
+            shutil.move(str(path), str(rule(target)))
+            moved.append((path, rule(target)))
+    except OSError:
+        for origin, landed in reversed(moved):
+            with contextlib.suppress(OSError):
+                shutil.move(str(landed), str(origin))
+        raise
     return target
 
 

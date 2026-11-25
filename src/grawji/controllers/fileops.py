@@ -142,14 +142,19 @@ class FileOpsController:
 
     def _trash_now(self, paths: list[str]) -> None:
         """Trash paths, moving the view off the open image if it goes."""
-        strip = self._filmstrip()
-        current = self._current_raf()
-        follower = fileops.following(
-            strip.paths, paths, None if current is None else str(current)
-        )
+        follower = self._follower(paths)
         self._run("trash", paths, None)
         if follower is not None:
-            strip.select_path(follower)
+            self._filmstrip().select_path(follower)
+
+    def _follower(self, leaving: list[str]) -> str | None:
+        """The image to show when the open one is among those leaving."""
+        current = self._current_raf()
+        return fileops.following(
+            self._filmstrip().paths,
+            leaving,
+            None if current is None else str(current),
+        )
 
     def trash_current(self) -> None:
         """Trash the open image and advance to its neighbor."""
@@ -184,6 +189,11 @@ class FileOpsController:
 
     def _run(self, kind: str, paths: list[str], dest: str | None) -> None:
         """Run a file operation off the main thread and toast the result."""
+        if kind == "move":
+            leaving = [p for p in paths if str(Path(p).parent) != dest]
+            follower = self._follower(leaving)
+            if follower is not None:
+                self._filmstrip().select_path(follower)
 
         def work() -> None:
             moves: list[tuple[str, str]] = []
@@ -236,18 +246,24 @@ class FileOpsController:
         moves, self._undo_moves = self._undo_moves, []
 
         def work() -> None:
+            failed = 0
             for source, target in moves:
                 try:
                     fileops.move_raf(target, str(Path(source).parent))
                 except (OSError, GLib.Error) as exc:
                     _log.warning("undo move failed for %s: %s", target, exc)
-            mainloop.call(self._on_undo_done)
+                    failed += 1
+            mainloop.call(self._on_undo_done, failed)
 
         threading.Thread(
             target=work, name="grawji-fileops", daemon=True
         ).start()
 
-    def _on_undo_done(self) -> bool:
+    def _on_undo_done(self, failed: int) -> bool:
         """Report the undone move."""
-        self._add_toast(Adw.Toast.new("Move undone."))
+        text = "Move undone."
+        if failed:
+            noun = "image" if failed == 1 else "images"
+            text = f"{failed} {noun} could not be moved back."
+        self._add_toast(Adw.Toast.new(text))
         return GLib.SOURCE_REMOVE

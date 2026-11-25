@@ -510,6 +510,7 @@ class RecipeLibraryController:
         while pending and self._library.get(pending[0]) is None:
             pending.pop(0)
         if not pending or render is None or self._manager is None:
+            self._library.save()
             self._refresh()
             self._toast(f"Made {made} recipe pictures.")
             return
@@ -519,10 +520,11 @@ class RecipeLibraryController:
 
         def done(jpeg: bytes | None) -> None:
             if jpeg is None:
+                self._library.save()
                 self._refresh()
                 self._toast(f"Stopped after {made} recipe pictures.")
                 return
-            stored = self._library.set_thumb(name, jpeg)
+            stored = self._library.set_thumb(name, jpeg, save=False)
             self._render_next_thumb(pending, made + int(stored), total)
 
         if recipe is not None:

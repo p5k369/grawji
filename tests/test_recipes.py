@@ -429,3 +429,17 @@ def test_an_unreadable_library_is_kept_aside(tmp_path):
     kept = tmp_path / "recipes.json.damaged"
     assert kept.read_text(encoding="utf-8").endswith("Cut off")
     assert "New" in json.loads(path.read_text(encoding="utf-8"))["recipes"]
+
+
+def test_a_run_of_pictures_is_written_once(tmp_path):
+    """Pictures stored without saving reach the disk with one save."""
+    library = _library(tmp_path)
+    library.set_thumb("Punchy", b"one", save=False)
+    library.set_thumb("Mono", b"two", save=False)
+    assert RecipeLibrary(tmp_path / "recipes.json").thumb_jpeg("Mono") is None
+
+    library.save()
+
+    reloaded = RecipeLibrary(tmp_path / "recipes.json")
+    assert reloaded.thumb_jpeg("Punchy") == b"one"
+    assert reloaded.thumb_jpeg("Mono") == b"two"

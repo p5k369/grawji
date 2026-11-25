@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,29 @@ def test_trash_takes_the_camera_jpeg(tmp_path: Path) -> None:
     assert not raf.exists()
     assert not jpeg.exists()
     assert not sidecar_path(raf).exists()
+
+
+def test_a_move_that_loses_its_sidecar_is_taken_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A RAF does not stay in the new folder without its sidecar."""
+    src_dir = tmp_path / "a"
+    dest_dir = tmp_path / "b"
+    src_dir.mkdir()
+    dest_dir.mkdir()
+    raf = _raf_with_sidecar(src_dir, "DSCF0003.RAF")
+    real_move = shutil.move
+
+    def move(source: str, target: str) -> str:
+        if source.endswith(".json") and Path(target).parent == dest_dir:
+            raise OSError("disk full")
+        return str(real_move(source, target))
+
+    monkeypatch.setattr(shutil, "move", move)
+
+    with pytest.raises(OSError, match="disk full"):
+        move_raf(raf, dest_dir)
+
+    assert raf.exists()
+    assert sidecar_path(raf).exists()
+    assert list(dest_dir.iterdir()) == []
