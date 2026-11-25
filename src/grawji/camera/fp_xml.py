@@ -324,7 +324,7 @@ def serialize_fp(
         ("Sharpness", str(recipe.sharpness)),
         ("NoisReduction", str(recipe.noise_reduction)),  # sic, see parse_fp.
         ("Clarity", str(recipe.clarity)),
-        ("LensModulationOpt", "OFF"),
+        ("LensModulationOpt", "ON"),
         ("ColorSpace", _COLOR_SPACE.get(recipe.color_space, "sRGB")),
         ("HDR", None),
     ]
