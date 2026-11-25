@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 if TYPE_CHECKING:
     from grawji.views.filmstrip import FilmStrip
@@ -122,6 +123,11 @@ class FilmStripNav:
             return False
         focus = self._window.get_focus()
         if isinstance(focus, Gtk.Editable | Gtk.Text):
+            return False
+        if focus is not None and (
+            focus.get_ancestor(Adw.Dialog) is not None
+            or focus.get_ancestor(Gtk.Popover) is not None
+        ):
             return False
         if self._key_dir == direction:
             return True

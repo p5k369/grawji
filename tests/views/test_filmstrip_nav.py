@@ -78,3 +78,44 @@ def test_the_other_arrow_takes_over_from_a_held_one(gtk: Any) -> None:
 
     assert strip.gliding == 0
     assert strip.steps == []
+
+
+class FocusedWindow:
+    """A window whose focus sits on a given widget."""
+
+    def __init__(self, focus: Gtk.Widget) -> None:
+        """Remember the focused widget."""
+        self._focus = focus
+
+    def get_focus(self) -> Gtk.Widget:
+        """The focused widget."""
+        return self._focus
+
+
+def test_arrows_stay_with_a_slider_in_a_popover(gtk: Any) -> None:
+    """A slider in a popover keeps Left and Right for itself."""
+    slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 10, 1)
+    popover = Gtk.Popover()
+    popover.set_child(slider)
+    strip = Strip()
+    nav = FilmStripNav(strip)
+    nav._window = FocusedWindow(slider)
+
+    taken = nav._on_key_pressed(None, Gdk.KEY_Right, 0, Gdk.ModifierType(0))
+    wait(0.4)
+
+    assert not taken
+    assert strip.gliding == 0
+
+
+def test_arrows_move_the_strip_from_a_slider_in_the_window(gtk: Any) -> None:
+    """Outside dialogs and popovers the arrows belong to the strip."""
+    slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 10, 1)
+    strip = Strip()
+    nav = FilmStripNav(strip)
+    nav._window = FocusedWindow(slider)
+
+    assert nav._on_key_pressed(None, Gdk.KEY_Right, 0, Gdk.ModifierType(0))
+    nav._on_key_released(None, Gdk.KEY_Right, 0, None)
+
+    assert strip.steps == [1]

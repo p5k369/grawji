@@ -261,3 +261,46 @@ def test_move_offers_undo_and_undo_moves_back(immediate, monkeypatch):
         ("/dest/a.RAF", "/src"),
     ]
     assert state["toasts"][-1].get_title() == "Move undone."
+
+
+def test_moving_the_open_image_away_moves_the_view_on(immediate, monkeypatch):
+    """The window does not stay on a path that has just left."""
+    monkeypatch.setattr(
+        module.fileops, "move_raf", lambda p, d: Path(d) / Path(p).name
+    )
+    strip = FakeStrip(paths=["/src/a.RAF", "/src/b.RAF", "/src/c.RAF"])
+    controller, _strip, _state = make_controller(
+        strip=strip, current=Path("/src/b.RAF")
+    )
+    controller._run("move", ["/src/b.RAF"], "/dest")
+    assert strip.selected_after_trash == ["/src/c.RAF"]
+
+
+def test_a_move_into_the_same_folder_keeps_the_view(immediate, monkeypatch):
+    """Dropping the open image onto its own folder changes nothing."""
+    monkeypatch.setattr(module.fileops, "move_raf", lambda p, _d: Path(p))
+    strip = FakeStrip(paths=["/src/a.RAF", "/src/b.RAF"])
+    controller, _strip, _state = make_controller(
+        strip=strip, current=Path("/src/b.RAF")
+    )
+    controller._run("move", ["/src/b.RAF"], "/src")
+    assert strip.selected_after_trash == []
+
+
+def test_a_failed_undo_is_not_reported_as_undone(immediate, monkeypatch):
+    """An image that cannot go back is named in the toast."""
+    calls = []
+
+    def fake_move(path, dest):
+        calls.append(path)
+        if len(calls) > 1:
+            raise OSError("read-only")
+        return Path(dest) / Path(path).name
+
+    monkeypatch.setattr(module.fileops, "move_raf", fake_move)
+    controller, _strip, state = make_controller()
+    controller._run("move", ["/src/a.RAF"], "/dest")
+    controller._on_undo_moves(state["toasts"][0])
+    assert (
+        state["toasts"][-1].get_title() == "1 image could not be moved back."
+    )

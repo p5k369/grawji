@@ -134,8 +134,16 @@ class RecipeLibrary:
         except (binascii.Error, ValueError):
             return None
 
-    def set_thumb(self, name: str, jpeg: bytes | None) -> bool:
-        """Store or clear a recipe's thumbnail JPEG."""
+    def set_thumb(
+        self, name: str, jpeg: bytes | None, *, save: bool = True
+    ) -> bool:
+        """Store or clear a recipe's thumbnail JPEG.
+
+        Args:
+            name: The recipe the picture belongs to.
+            jpeg: The picture.
+            save: Write the library now.
+        """
         if name not in self._recipes:
             return False
         if not jpeg:
@@ -143,8 +151,13 @@ class RecipeLibrary:
                 return False
         else:
             self._thumb_of[name] = base64.b64encode(jpeg).decode("ascii")
-        self._save()
+        if save:
+            self._save()
         return True
+
+    def save(self) -> None:
+        """Write the library to disk."""
+        self._save()
 
     def comment(self, name: str) -> str:
         """The recipe's hover comment."""
