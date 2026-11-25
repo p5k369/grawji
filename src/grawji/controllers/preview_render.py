@@ -149,25 +149,24 @@ class PreviewRenderController:
             on_done: Takes the thumbnail as a JPEG.
         """
         generation = self._host.generation()
-        orientation = imagemeta.exif_orientation(raf_path)
 
-        def task() -> bytes:
+        def task() -> bytes | None:
             if not self._session.is_open:
                 self._session.open(raf_path)
-            return self._session.render_thumb(recipe)
-
-        def finished(jpeg: bytes) -> None:
-            if generation != self._host.generation():
-                return
+            jpeg = self._session.render_thumb(recipe)
             try:
-                upright = oriented_jpeg(jpeg, orientation)
-                on_done(
-                    thumb_jpeg(
-                        trim_letterbox(upright), max_edge=_RECIPE_THUMB_EDGE
-                    )
+                upright = oriented_jpeg(
+                    jpeg, imagemeta.exif_orientation(raf_path)
+                )
+                return thumb_jpeg(
+                    trim_letterbox(upright), max_edge=_RECIPE_THUMB_EDGE
                 )
             except GLib.Error:
-                on_done(None)
+                return None
+
+        def finished(thumb: bytes | None) -> None:
+            current = generation == self._host.generation()
+            on_done(thumb if current else None)
 
         def failed(exc: Exception) -> None:
             self._host.on_error(exc)

@@ -1,6 +1,9 @@
 """Tests for recipe storage."""
 
 import json
+from pathlib import Path
+
+import pytest
 
 from grawji.recipe import Recipe
 from grawji.recipes import (
@@ -397,3 +400,32 @@ def test_library_remembers_folded_folders(tmp_path):
     again.delete_folder("Bold")
     assert not again.is_collapsed("Bold")
     assert not RecipeLibrary(tmp_path / "recipes.json").is_collapsed("Bold")
+
+
+def test_a_failed_save_leaves_the_library_on_disk(tmp_path, monkeypatch):
+    """A save that dies halfway must not cost the recipes saved before."""
+    library = _library(tmp_path)
+    before = (tmp_path / "recipes.json").read_text(encoding="utf-8")
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", fail)
+    with pytest.raises(OSError, match="disk full"):
+        library.add("Late", Recipe(film_simulation="Velvia"))
+
+    assert (tmp_path / "recipes.json").read_text(encoding="utf-8") == before
+    assert list(tmp_path.iterdir()) == [tmp_path / "recipes.json"]
+
+
+def test_an_unreadable_library_is_kept_aside(tmp_path):
+    """The next save must not overwrite a file that failed to load."""
+    path = tmp_path / "recipes.json"
+    path.write_text('{"version": 2, "recipes": {"Cut off', encoding="utf-8")
+
+    library = RecipeLibrary(path)
+    library.add("New", Recipe())
+
+    kept = tmp_path / "recipes.json.damaged"
+    assert kept.read_text(encoding="utf-8").endswith("Cut off")
+    assert "New" in json.loads(path.read_text(encoding="utf-8"))["recipes"]

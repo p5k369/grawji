@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -21,6 +22,7 @@ from grawji import mainloop, sidecar
 from grawji.camera.core import (
     CameraSession,
     ForeignRafError,
+    SessionStateError,
     recipe_from_profile,
 )
 from grawji.camera.preview import CameraWorker
@@ -424,44 +426,63 @@ class BatchController:
                 "converted": 0,
             }
             delivered: list[str] = []
-            for done, raf_file in enumerate(paths, start=1):
-                if cancel.is_set():
-                    tally["cancelled"] = 1
-                    break
-                camera_file = camera_files.get(raf_file)
-                fmt = (
-                    wanted
-                    if camera_file is None
-                    else camera_file_format(wanted)
-                )
-                out_path = Path(out_dir, export_basename(raf_file, fmt=fmt))
-                before = tally["exported"]
-                if not overwrite and out_path.exists():
-                    tally["existing"] += 1
-                    delivered.append(raf_file)
-                elif camera_file is not None:
-                    self._export_camera_file(
-                        raf_file, camera_file, out_path, tally
+            try:
+                for done, raf_file in enumerate(paths, start=1):
+                    if cancel.is_set():
+                        tally["cancelled"] = 1
+                        break
+                    camera_file = camera_files.get(raf_file)
+                    fmt = (
+                        wanted
+                        if camera_file is None
+                        else camera_file_format(wanted)
                     )
-                else:
-                    self._export_one(
-                        raf_file,
-                        out_path,
-                        recipe,
-                        comment,
-                        skip_foreign,
-                        tally,
+                    out_path = Path(
+                        out_dir, export_basename(raf_file, fmt=fmt)
                     )
-                if tally["exported"] > before:
-                    delivered.append(raf_file)
-                mainloop.call(self._progress, done, total, Path(raf_file).name)
-            if current is not None and reopen:
-                self._session.open(current)
+                    before = tally["exported"]
+                    if not overwrite and out_path.exists():
+                        tally["existing"] += 1
+                        delivered.append(raf_file)
+                    elif camera_file is not None:
+                        self._export_camera_file(
+                            raf_file, camera_file, out_path, tally
+                        )
+                    else:
+                        self._export_one(
+                            raf_file,
+                            out_path,
+                            recipe,
+                            comment,
+                            skip_foreign,
+                            tally,
+                        )
+                    if tally["exported"] > before:
+                        delivered.append(raf_file)
+                    mainloop.call(
+                        self._progress, done, total, Path(raf_file).name
+                    )
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    self._restore_session(current if reopen else None)
+                raise
+            self._restore_session(current if reopen else None)
             return tally, delivered
 
         self._worker.submit(
             task, on_done=self._on_done, on_error=self._on_error
         )
+
+    def _restore_session(self, current: str | None) -> None:
+        """Leave the camera on the window's image.
+
+        Args:
+            current: The image to open again.
+        """
+        if current is None:
+            self._session.close()
+        else:
+            self._session.open(current)
 
     def _export_one(
         self,
@@ -485,6 +506,12 @@ class BatchController:
             if not skip_foreign:
                 raise
             tally["foreign"] += 1
+            return
+        except SessionStateError as exc:
+            logging.getLogger("grawji").warning(
+                "batch export could not develop %s: %s", raf_file, exc
+            )
+            tally["failed"] += 1
             return
         decode = sidecar_decode(raf_file)
         needs_pixels = framing_active(self._settings) or resize_active(
