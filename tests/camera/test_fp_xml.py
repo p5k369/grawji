@@ -248,3 +248,10 @@ def _with(field_xml: str) -> Recipe:
         f"{field_xml}"
         "</PropertyGroup></ConversionProfile>"
     )
+
+
+def test_an_export_leaves_the_lens_optimizer_on() -> None:
+    """The camera default is on, and so is every shot it is applied to."""
+    text = serialize_fp(Recipe())
+
+    assert "<LensModulationOpt>ON</LensModulationOpt>" in text
