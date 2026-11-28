@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.1](https://github.com/p5k369/grawji/compare/v0.9.0...v0.9.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **export:** put the open image back on the camera after a batch ([5bb170c](https://github.com/p5k369/grawji/commit/5bb170c1e44a5fde43a440dbac728f4e6b4276c6))
+* **export:** report a finished batch when the open image does not come back ([9755252](https://github.com/p5k369/grawji/commit/9755252166c5c489d2a68c4aafe3bb9f22508690))
+* **files:** keep the view and the sidecar right when a move goes wrong ([#222](https://github.com/p5k369/grawji/issues/222)) ([1a11b76](https://github.com/p5k369/grawji/commit/1a11b76033753b241e95ba5c6d06ee166c144d63))
+* **filmstrip:** glide as fast to the right as to the left ([#219](https://github.com/p5k369/grawji/issues/219)) ([0e20f77](https://github.com/p5k369/grawji/commit/0e20f7769c33eed7a504ad37d020174b6f348471))
+* **filmstrip:** leave the arrow keys to sliders in dialogs and popovers ([1a11b76](https://github.com/p5k369/grawji/commit/1a11b76033753b241e95ba5c6d06ee166c144d63))
+* **filmstrip:** stop a glide when the other arrow key takes over ([5bb170c](https://github.com/p5k369/grawji/commit/5bb170c1e44a5fde43a440dbac728f4e6b4276c6))
+* **recipes:** export FP profiles with the lens optimizer on ([#223](https://github.com/p5k369/grawji/issues/223)) ([b2fcd75](https://github.com/p5k369/grawji/commit/b2fcd756abe95a4a3e11a8ceb3611531f51bcd89))
+* **recipes:** keep a recipe picture when the image changes meanwhile ([9755252](https://github.com/p5k369/grawji/commit/9755252166c5c489d2a68c4aafe3bb9f22508690))
+* **recipes:** keep the library when a save fails or the file is damaged ([#221](https://github.com/p5k369/grawji/issues/221)) ([5bb170c](https://github.com/p5k369/grawji/commit/5bb170c1e44a5fde43a440dbac728f4e6b4276c6))
+* **recipes:** start with a damaged library and keep every copy of it ([#225](https://github.com/p5k369/grawji/issues/225)) ([9755252](https://github.com/p5k369/grawji/commit/9755252166c5c489d2a68c4aafe3bb9f22508690))
+
+
+### Performance
+
+* **recipes:** write the library once after a run of pictures ([1a11b76](https://github.com/p5k369/grawji/commit/1a11b76033753b241e95ba5c6d06ee166c144d63))
+
 ## [0.9.0](https://github.com/p5k369/grawji/compare/v0.8.2...v0.9.0) (2026-11-22)
 
 
