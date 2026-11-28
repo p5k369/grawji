@@ -30,11 +30,13 @@ class FakeSession:
         self.is_open = True
         self.rendered: list[Recipe] = []
         self.opened: list[str] = []
+        self.raf_path: Path | None = None
         self.thumb = b""
 
     def open(self, raf_path: str) -> None:
         """Open an image the way the manager's thumbnail job does."""
         self.opened.append(raf_path)
+        self.raf_path = Path(raf_path)
         self.is_open = True
 
     def render_thumb(self, recipe: Recipe) -> bytes:
@@ -309,10 +311,8 @@ def test_a_recipe_thumbnail_reopens_a_closed_image(jpeg: bytes) -> None:
     assert results[0][:2] == b"\xff\xd8"
 
 
-def test_a_recipe_thumbnail_for_an_older_selection_is_dropped(
-    jpeg: bytes,
-) -> None:
-    """A thumbnail that returns after the user moved on is not stored."""
+def test_a_recipe_thumbnail_outlives_a_change_of_image(jpeg: bytes) -> None:
+    """Moving on must not read as a failed render to whoever waits."""
     rig = make()
     results: list[bytes | None] = []
     rig.controller.render_thumb("/shots/a.RAF", Recipe(), results.append)
@@ -320,7 +320,7 @@ def test_a_recipe_thumbnail_for_an_older_selection_is_dropped(
 
     rig.worker.tasks[0][1](jpeg)
 
-    assert results == [None]
+    assert results == [jpeg]
 
 
 def test_an_undecodable_recipe_thumbnail_is_reported() -> None:

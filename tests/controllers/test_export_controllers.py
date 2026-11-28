@@ -599,12 +599,17 @@ def test_a_single_export_of_a_camera_jpeg_needs_no_render(tmp_path):
 
 
 class BreakingSession(CountingSession):
-    """Dies on one RAF the way a lost camera would."""
+    """Dies on one RAF."""
+
+    def __init__(self, jpeg, error=None):
+        """Serve jpeg and raise error on b.RAF."""
+        super().__init__(jpeg)
+        self._error = error or RuntimeError("camera gone")
 
     def render(self, recipe, *, full_resolution, file_type="jpeg"):
         """Render every RAF except b.RAF."""
         if self.opened[-1].endswith("b.RAF"):
-            raise RuntimeError("camera gone")
+            raise self._error
         return super().render(
             recipe, full_resolution=full_resolution, file_type=file_type
         )
@@ -653,6 +658,42 @@ def test_a_batch_that_dies_puts_the_open_image_back(tmp_path):
 
     assert [str(exc) for exc in errors] == ["camera gone"]
     assert session.opened[-1] == current
+
+
+def test_a_stuck_camera_is_not_asked_to_open_the_image_again(tmp_path):
+    """A wedged body needs a power cycle, not another connect."""
+    session = BreakingSession(small_jpeg(), TimeoutError("no answer"))
+    current = str(tmp_path / "open.RAF")
+    errors: list[Exception] = []
+
+    _batch(session, tmp_path, current, errors)
+
+    assert [str(exc) for exc in errors] == ["no answer"]
+    assert current not in session.opened
+
+
+class NoWayBackSession(CountingSession):
+    """Develops the batch but cannot open the window's image again."""
+
+    def open(self, raf_file):
+        """Refuse open.RAF like a RAF from another body."""
+        super().open(raf_file)
+        if raf_file.endswith("open.RAF"):
+            raise ForeignRafError("shot on another body")
+
+
+def test_a_finished_batch_survives_a_failed_way_back(tmp_path):
+    """The images are written, so the batch reports its result."""
+    session = NoWayBackSession(small_jpeg())
+    errors: list[Exception] = []
+
+    _batch(session, tmp_path, str(tmp_path / "open.RAF"), errors)
+
+    assert errors == []
+    assert sorted(p.name for p in (tmp_path / "out").iterdir()) == [
+        "a.jpg",
+        "b.jpg",
+    ]
 
 
 def test_a_batch_without_an_open_image_closes_the_session(tmp_path):

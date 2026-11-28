@@ -431,6 +431,54 @@ def test_an_unreadable_library_is_kept_aside(tmp_path):
     assert "New" in json.loads(path.read_text(encoding="utf-8"))["recipes"]
 
 
+def test_a_library_that_is_not_text_is_kept_aside(tmp_path):
+    """Bytes that are no UTF-8 are damage too, not a reason to crash."""
+    path = tmp_path / "recipes.json"
+    path.write_bytes(b'{"version": 2, "recipes": {"Caf\xe9')
+
+    library = RecipeLibrary(path)
+
+    assert library.names == []
+    assert library.kept_aside == tmp_path / "recipes.json.damaged"
+    assert library.kept_aside.exists()
+
+
+def test_a_second_damaged_library_keeps_the_first_copy(tmp_path):
+    """The copy that may hold the recipes is never written over."""
+    path = tmp_path / "recipes.json"
+    path.write_text("first", encoding="utf-8")
+    RecipeLibrary(path)
+    path.write_text("second", encoding="utf-8")
+
+    library = RecipeLibrary(path)
+
+    first = tmp_path / "recipes.json.damaged"
+    assert first.read_text(encoding="utf-8") == "first"
+    assert library.kept_aside == tmp_path / "recipes.json.damaged.2"
+    assert library.kept_aside.read_text(encoding="utf-8") == "second"
+
+
+def test_a_readable_library_keeps_nothing_aside(tmp_path):
+    """No notice without damage, a missing file included."""
+    assert RecipeLibrary(tmp_path / "recipes.json").kept_aside is None
+
+
+def test_a_linked_library_is_written_through_the_link(tmp_path):
+    """A library kept elsewhere and linked in stays where it is."""
+    real = tmp_path / "dotfiles" / "recipes.json"
+    real.parent.mkdir()
+    real.write_text("{}", encoding="utf-8")
+    real.chmod(0o600)
+    link = tmp_path / "recipes.json"
+    link.symlink_to(real)
+
+    RecipeLibrary(link).add("New", Recipe())
+
+    assert link.is_symlink()
+    assert "New" in json.loads(real.read_text(encoding="utf-8"))["recipes"]
+    assert real.stat().st_mode & 0o777 == 0o600
+
+
 def test_a_run_of_pictures_is_written_once(tmp_path):
     """Pictures stored without saving reach the disk with one save."""
     library = _library(tmp_path)

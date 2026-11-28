@@ -174,6 +174,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self._init_preview_wiring()
         self._recipe_library = RecipeLibrary(recipes_path())
+        self._report_damaged_library()
         self._init_render()
         self._connect_recipe_panel()
         self.export_button.connect("clicked", self._on_export_clicked)
@@ -741,6 +742,17 @@ class MainWindow(Adw.ApplicationWindow):
         self._info.show_exif(decoded.rows)
         if self._camera_file_of(self._raf_path) is not None:
             self._set_busy(busy=False, status=self._source.status())
+
+    def _report_damaged_library(self) -> None:
+        """Say so when the recipe library could not be read."""
+        kept = self._recipe_library.kept_aside
+        if kept is None:
+            return
+        toast = Adw.Toast.new(
+            f"The recipe library could not be read. It is kept as {kept.name}."
+        )
+        toast.set_timeout(0)
+        self.toast_overlay.add_toast(toast)
 
     def _init_info(self) -> None:
         """Wire the Info tab's original thumbnail and EXIF rows."""

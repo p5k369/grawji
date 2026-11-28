@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -19,6 +18,7 @@ gi.require_version("Adw", "1")
 from gi.repository import GLib, Gtk
 
 from grawji import mainloop, sidecar
+from grawji.camera.camera_info import is_camera_disconnected, is_camera_stuck
 from grawji.camera.core import (
     CameraSession,
     ForeignRafError,
@@ -462,8 +462,8 @@ class BatchController:
                     mainloop.call(
                         self._progress, done, total, Path(raf_file).name
                     )
-            except BaseException:
-                with contextlib.suppress(Exception):
+            except Exception as exc:
+                if not (is_camera_stuck(exc) or is_camera_disconnected(exc)):
                     self._restore_session(current if reopen else None)
                 raise
             self._restore_session(current if reopen else None)
@@ -479,10 +479,13 @@ class BatchController:
         Args:
             current: The image to open again.
         """
-        if current is None:
-            self._session.close()
-        else:
-            self._session.open(current)
+        try:
+            if current is None:
+                self._session.close()
+            else:
+                self._session.open(current)
+        except Exception as exc:
+            _LOG.warning("could not go back to the open image: %s", exc)
 
     def _export_one(
         self,
