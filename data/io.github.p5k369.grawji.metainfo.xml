@@ -49,6 +49,22 @@
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.9.1" date="2026-11-28">
+      <description>
+        <p>Version 0.9.1 brings smoother filmstrip navigation and safer handling of your recipe library.</p>
+        <ul>
+          <li>After a batch export, the photo you had open is put back on the camera, and the batch is still reported as finished if it cannot be restored.</li>
+          <li>Your view and sidecar files stay correct when moving a file goes wrong.</li>
+          <li>The filmstrip now glides to the right just as fast as to the left, and stops gliding as soon as you press the opposite arrow key.</li>
+          <li>Arrow keys now adjust sliders in dialogs and popovers instead of moving the filmstrip.</li>
+          <li>Film simulation profiles are exported with the lens optimizer turned on.</li>
+          <li>A recipe keeps its picture even if you switch to another image in the meantime.</li>
+          <li>Your recipe library is preserved when a save fails or the file is damaged.</li>
+          <li>grawji now starts even with a damaged recipe library and keeps every copy of it.</li>
+          <li>The recipe library is written only once after a run of pictures.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-11-22">
       <description>
         <p>This release brings a reworked recipe manager and broader camera support.</p>
