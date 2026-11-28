@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ class Strip:
     def __init__(self) -> None:
         """Start at rest."""
         self.gliding = 0
+        self.glides: list[int] = []
         self.steps: list[int] = []
         self._adjustment = Gtk.Adjustment(
             value=50, lower=0, upper=100, page_size=10
@@ -33,6 +35,7 @@ class Strip:
     def start_glide(self, direction: int) -> None:
         """Glide one way."""
         self.gliding = direction
+        self.glides.append(direction)
 
     def stop_glide(self) -> None:
         """Come to rest."""
@@ -59,6 +62,14 @@ def wait(seconds: float) -> None:
         time.sleep(0.005)
 
 
+def wait_until(done: Callable[[], bool], seconds: float = 3.0) -> None:
+    """Let the hold timers run until done, or give up."""
+    end = time.monotonic() + seconds
+    while not done() and time.monotonic() < end:
+        pump(5)
+        time.sleep(0.005)
+
+
 def test_the_other_arrow_takes_over_from_a_held_one(gtk: Any) -> None:
     """Two arrows pressed in a row used to leave a glide nobody holds."""
     strip = Strip()
@@ -66,15 +77,14 @@ def test_the_other_arrow_takes_over_from_a_held_one(gtk: Any) -> None:
     nav._window = Window()
 
     nav._on_key_pressed(None, Gdk.KEY_Left, 0, Gdk.ModifierType(0))
-    wait(0.1)
+    wait(0.02)
     nav._on_key_pressed(None, Gdk.KEY_Right, 0, Gdk.ModifierType(0))
     nav._on_key_released(None, Gdk.KEY_Left, 0, None)
-    wait(0.3)
-    assert strip.gliding == 0, "the first arrow's hold must not fire"
+    wait_until(lambda: bool(strip.glides))
     wait(0.1)
-    assert strip.gliding == 1
+    assert strip.glides == [1], "only the arrow still held may glide"
     nav._on_key_released(None, Gdk.KEY_Right, 0, None)
-    wait(0.4)
+    wait_until(lambda: strip.gliding == 0)
 
     assert strip.gliding == 0
     assert strip.steps == []

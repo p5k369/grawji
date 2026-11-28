@@ -144,19 +144,19 @@ class PreviewRenderController:
         """Render a recipe against a RAF into a small upright thumbnail.
 
         Args:
-            raf_path: The image the recipe is rendered on.
+            raf_path: The image to open when the camera has none open.
             recipe: The recipe to render.
             on_done: Takes the thumbnail as a JPEG.
         """
-        generation = self._host.generation()
 
         def task() -> bytes | None:
             if not self._session.is_open:
                 self._session.open(raf_path)
             jpeg = self._session.render_thumb(recipe)
+            rendered = self._session.raf_path or raf_path
             try:
                 upright = oriented_jpeg(
-                    jpeg, imagemeta.exif_orientation(raf_path)
+                    jpeg, imagemeta.exif_orientation(str(rendered))
                 )
                 return thumb_jpeg(
                     trim_letterbox(upright), max_edge=_RECIPE_THUMB_EDGE
@@ -164,15 +164,11 @@ class PreviewRenderController:
             except GLib.Error:
                 return None
 
-        def finished(thumb: bytes | None) -> None:
-            current = generation == self._host.generation()
-            on_done(thumb if current else None)
-
         def failed(exc: Exception) -> None:
             self._host.on_error(exc)
             on_done(None)
 
-        self._worker.submit(task, on_done=finished, on_error=failed)
+        self._worker.submit(task, on_done=on_done, on_error=failed)
 
     def _render_now(self) -> bool:
         """Fire the debounced render."""

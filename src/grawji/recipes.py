@@ -81,7 +81,13 @@ class RecipeLibrary:
         self._folders: list[str] = []
         self._collapsed: set[str] = set()
         self._baseline: str | None = None
+        self._kept_aside: Path | None = None
         self._load()
+
+    @property
+    def kept_aside(self) -> Path | None:
+        """Where a library that could not be read was kept."""
+        return self._kept_aside
 
     @property
     def names(self) -> list[str]:
@@ -427,15 +433,13 @@ class RecipeLibrary:
     def _load(self) -> None:
         """Read the library, migrating the flat format when needed."""
         try:
-            text = self._path.read_text(encoding="utf-8")
+            data = json.loads(self._path.read_text(encoding="utf-8"))
         except OSError:
             return
-        try:
-            data = json.loads(text)
         except ValueError:
             data = None
         if not isinstance(data, dict):
-            safefile.set_aside(self._path)
+            self._kept_aside = safefile.set_aside(self._path)
             return
         if isinstance(data.get("recipes"), dict):
             self._load_v2(data)

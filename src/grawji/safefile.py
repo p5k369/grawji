@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import shutil
 from pathlib import Path
 
 _log = logging.getLogger("grawji")
@@ -15,10 +18,16 @@ def write_text(path: Path, text: str) -> None:
         path: The file to replace.
         text: Its new content.
     """
-    pending = path.with_name(path.name + ".tmp")
+    target = path.resolve() if path.is_symlink() else path
+    pending = target.with_name(target.name + ".tmp")
     try:
-        pending.write_text(text, encoding="utf-8")
-        pending.replace(path)
+        with pending.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        with contextlib.suppress(OSError):
+            shutil.copymode(target, pending)
+        pending.replace(target)
     except OSError:
         pending.unlink(missing_ok=True)
         raise
@@ -31,6 +40,10 @@ def set_aside(path: Path) -> Path | None:
         path: The file that could not be read.
     """
     kept = path.with_name(path.name + ".damaged")
+    count = 1
+    while kept.exists():
+        count += 1
+        kept = path.with_name(f"{path.name}.damaged.{count}")
     try:
         path.replace(kept)
     except OSError as exc:
